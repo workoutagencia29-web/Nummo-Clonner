@@ -1,0 +1,34 @@
+{
+  "descricao": "20 botões de compra (positivos) e 6 negativos. 'como' diz onde está a URL; 'plataforma' é só uma dica.",
+  "positivos": [
+    { "id": "c01", "url": "https://pay.kiwify.com.br/Xk3pQ9z", "plataforma": "Kiwify", "como": "a-href", "source": "HREF" },
+    { "id": "c02", "url": "https://pay.hotmart.com/H81234567X?off=q1w2e3r4&checkoutMode=10&sck=HOTMART_PRODUCT_PAGE&src=planos", "plataforma": "Hotmart", "como": "a-href com &amp;", "source": "HREF" },
+    { "id": "c03", "url": "https://sun.eduzz.com/2345678", "plataforma": "Eduzz", "como": "a-href", "source": "HREF" },
+    { "id": "c04", "url": "https://app.monetizze.com.br/checkout/KAB123456", "plataforma": "Monetizze", "como": "a-href", "source": "HREF" },
+    { "id": "c05", "url": "https://ev.braip.com/checkout/pla1x2y3/che4z5w6", "plataforma": "Braip", "como": "a-href", "source": "HREF" },
+    { "id": "c06", "url": "https://payment.ticto.app/O1A2B3C4D", "plataforma": "Ticto", "como": "a-href", "source": "HREF" },
+    { "id": "c07", "url": "https://go.perfectpay.com.br/PPU38CABCDE", "plataforma": "PerfectPay", "como": "a-href", "source": "HREF" },
+    { "id": "c08", "url": "https://seguro.minhaloja.com.br/r/xyz123?quantity=1", "plataforma": "Yampi", "como": "a-href (domínio próprio, caminho /r/)", "source": "HREF" },
+    { "id": "c09", "url": "https://www.lojaexterna.com.br/cart/44123456789:1?discount=INGLES10", "plataforma": "Shopify", "como": "a-href (link de carrinho /cart/ID:QTD)", "source": "HREF" },
+    { "id": "c10", "url": "https://buy.stripe.com/test_00g5kF2abc3dE", "plataforma": "Stripe", "como": "a-href", "source": "HREF" },
+    { "id": "c11", "url": "https://pay.hotmart.com/X99", "plataforma": "Hotmart", "como": "onclick window.location.href", "source": "ONCLICK" },
+    { "id": "c12", "url": "https://pay.kiwify.com.br/Open123", "plataforma": "Kiwify", "como": "onclick window.open", "source": "ONCLICK" },
+    { "id": "c13", "url": "https://payfast.greenn.com.br/47123", "plataforma": "Greenn", "como": "div data-href", "source": "HREF" },
+    { "id": "c14", "url": "https://pay.hotmart.com/F55512345K", "plataforma": "Hotmart", "como": "form action (GET com off=zz9trim)", "source": "FORM" },
+    { "id": "c15", "url": "https://pay.kiwify.com.br/ElemJson1", "plataforma": "Kiwify", "como": "JSON do data-settings do Elementor (barras escapadas \\/)", "source": "HREF" },
+    { "id": "c16", "url": "https://pay.hotmart.com/S77712345Q?off=js1", "plataforma": "Hotmart", "como": "string em script inline", "source": "SCRIPT" },
+    { "id": "c17", "url": "https://pay.cakto.com.br/8xk2m4p_123456", "plataforma": "Cakto", "como": "a-href", "source": "HREF" },
+    { "id": "c18", "url": "https://pay.kirvano.com/5f0e8d7c-1a2b-4c3d-9e6f-7a8b9c0d1e2f", "plataforma": "Kirvano", "como": "a-href", "source": "HREF" },
+    { "id": "c19", "url": "https://pay.kiwify.com.br/Proto1", "plataforma": "Kiwify", "como": "a-href sem protocolo (//)", "source": "HREF" },
+    { "id": "c20", "url": "https://checkout.meusite.com.br/pagamento?plano=anual-plus", "plataforma": "Desconhecida", "como": "a-href (checkout próprio, confiança baixa)", "source": "HREF" }
+  ],
+  "negativos": [
+    { "id": "n01", "url": "https://wa.me/5511988887777?text=Quero%20comprar%20o%20curso", "motivo": "WhatsApp, mesmo com texto 'Comprar'" },
+    { "id": "n02", "url": "/upsell", "motivo": "link do mesmo site (sugestão de funil)" },
+    { "id": "n03", "url": null, "motivo": "onclick que só rola a página" },
+    { "id": "n04", "url": "mailto:suporte@inglesfluente.com.br", "motivo": "e-mail" },
+    { "id": "n05", "url": "https://www.instagram.com/inglesfluente", "motivo": "rede social" },
+    { "id": "n06", "url": "#topo", "motivo": "âncora" },
+    { "id": "topo", "url": "#oferta", "motivo": "âncora com texto 'Comprar' no topo" }
+  ]
+}

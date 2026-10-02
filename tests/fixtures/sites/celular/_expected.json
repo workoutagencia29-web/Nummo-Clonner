@@ -1,0 +1,5 @@
+{
+  "responsive": false,
+  "desktop": { "texto": "Versão desktop", "css": "/css/desktop.css", "imagem": "/img/hero-desktop.jpg" },
+  "mobile": { "texto": "Versão celular", "css": "/css/mobile.css", "imagem": "/img/hero-celular.jpg", "uaContem": ["iPhone", "Android", "Mobile"] }
+}

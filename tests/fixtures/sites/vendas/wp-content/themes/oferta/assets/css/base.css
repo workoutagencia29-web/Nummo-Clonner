@@ -1,0 +1,71 @@
+@import "tipografia.css";
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Inter Oferta", system-ui, sans-serif;
+  color: #212529;
+  background: #fff url('../img/pattern.png') repeat;
+}
+
+img {
+  max-width: 100%;
+  height: auto;
+}
+
+.barra-topo {
+  background: #c92a2a;
+  color: #fff;
+  text-align: center;
+  padding: 10px;
+}
+
+.contador {
+  font-size: 2rem;
+  font-weight: 800;
+  font-variant-numeric: tabular-nums;
+}
+
+.faq details {
+  border-bottom: 1px solid #dee2e6;
+  padding: 14px 0;
+}
+
+.faq summary {
+  cursor: pointer;
+  font-weight: 700;
+}
+
+.depoimento {
+  display: grid;
+  grid-template-columns: 96px 1fr;
+  gap: 16px;
+  margin: 24px 0;
+}
+
+.depoimento img {
+  border-radius: 50%;
+}
+
+.selo {
+  width: 160px;
+  height: 160px;
+  margin: 24px auto;
+}
+
+.faixa-bonus {
+  min-height: 180px;
+  background-size: cover;
+  background-position: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #fff;
+  font-size: 1.5rem;
+  font-weight: 800;
+}

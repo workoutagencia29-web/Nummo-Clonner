@@ -1,0 +1,28 @@
+{
+  "remover": [
+    { "vendor": "Google Tag Manager", "id": "GTM-ABC1234", "onde": ["head script inline", "body noscript iframe"] },
+    { "vendor": "Meta Pixel", "id": "1234567890123456", "onde": ["head script inline", "head noscript img"] },
+    { "vendor": "TikTok Pixel", "id": "CP1ABCDEFGH2IJKLMNO3", "onde": ["head script inline"] },
+    { "vendor": "Kwai Pixel", "id": "520123456789012345", "onde": ["head script inline"] },
+    { "vendor": "Google Analytics 4", "id": "G-ABCDEF1234", "onde": ["head script src gtag/js", "head script inline"] },
+    { "vendor": "Google Ads", "id": "AW-987654321", "onde": ["head script src gtag/js", "head script inline"] },
+    { "vendor": "UTMify", "id": "66f1a2b3c4d5e6f7a8b9c0d1", "onde": ["head script inline (pixel)", "head script src utms/latest.js com data-utmify-prevent-subids"] },
+    { "vendor": "Hotjar", "id": "3456789", "onde": ["head script inline"] },
+    { "vendor": "Microsoft Clarity", "id": "k2abc3def4", "onde": ["head script inline"] },
+    { "vendor": "Pinterest Tag", "id": "2613456789012", "onde": ["head script inline", "head noscript img"] },
+    { "vendor": "Taboola", "id": "1654321", "onde": ["head script inline", "head noscript img"] },
+    { "vendor": "JivoChat", "id": "Ab1Cd2Ef3G", "onde": ["body script src //code.jivosite.com"] },
+    { "vendor": "Tawk.to", "id": "65a1b2c3d4e5f6a7b8c9d0e1", "onde": ["body script inline"] },
+    { "vendor": "Meta (verificação de domínio)", "onde": ["head meta facebook-domain-verification"] },
+    { "vendor": "Meta Pixel (preconnect)", "onde": ["head link preconnect connect.facebook.net", "head link dns-prefetch googletagmanager"] }
+  ],
+  "manter": [
+    "script src=/assets/js/main.js",
+    "script type=application/ld+json",
+    "vturb-smartplayer#vid-66f00aa11bb22cc33dd44ee5 + script inline que carrega scripts.converteai.net",
+    "link preconnect scripts.converteai.net",
+    "script inline que preenche #ano",
+    "noscript com o aviso 'Ative o JavaScript para assistir ao vídeo.'"
+  ],
+  "checkouts": [{ "url": "https://pay.hotmart.com/T12345678M?off=turma7", "plataforma": "Hotmart", "ocorrencias": 1 }]
+}

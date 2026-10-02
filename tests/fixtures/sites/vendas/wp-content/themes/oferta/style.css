@@ -1,0 +1,67 @@
+/*
+Theme Name: Oferta
+Theme URI: https://exemplo.com.br/
+Description: Tema leve para páginas de vendas com Elementor.
+Version: 1.0.3
+Text Domain: oferta
+*/
+@import url("assets/css/base.css");
+
+:root {
+  --cor-primaria: #e8590c;
+  --cor-destaque: #2b8a3e;
+  --cor-texto: #212529;
+  --fundo-claro: #fff8f0;
+}
+
+.hero {
+  background-color: #3b1f0e;
+  background-image: linear-gradient(rgba(59, 31, 14, 0.75), rgba(59, 31, 14, 0.9)), url(assets/img/hero-bg.jpg);
+  background-size: cover;
+  background-position: center;
+  color: #fff;
+  text-align: center;
+}
+
+.hero h1 {
+  font-size: clamp(1.75rem, 4vw, 2.75rem);
+  line-height: 1.2;
+  margin: 1rem auto;
+  max-width: 820px;
+}
+
+.botao-comprar,
+.botao-secundario {
+  display: inline-block;
+  padding: 18px 36px;
+  border-radius: 8px;
+  font-weight: 800;
+  text-transform: uppercase;
+  text-decoration: none;
+}
+
+.botao-comprar {
+  background: var(--cor-destaque);
+  color: #fff;
+  box-shadow: 0 6px 0 #1e5e2a;
+}
+
+.botao-secundario {
+  background: #fff;
+  color: var(--cor-destaque);
+  border: 2px solid var(--cor-destaque);
+}
+
+.whatsapp-flutuante {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  width: 60px;
+  height: 60px;
+  border-radius: 50%;
+  background: #25d366;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 999;
+}

@@ -1,0 +1,12 @@
+{
+  "charset": "iso-8859-1",
+  "titulo": "Promoção Relâmpago | Loja São João - Açaí e Cia",
+  "base": "/sub/",
+  "textosComAcento": ["Promoção de Verão: Açaí na Tigela com 40% de desconto!", "São João del-Rei", "paçoca"],
+  "cssContent": ["Promoção válida até domingo - não perca!", " (à vista, no depósito)"],
+  "jsTexto": "Frete grátis para São João del-Rei e região!",
+  "integrity": { "href": "/sub/css/reset.css", "obs": "hash sha384 correto para o arquivo original; o clone deve remover integrity/crossorigin ao reescrever" },
+  "mediaPrintOnload": "/sub/css/fontes.css",
+  "arquivos": ["/sub/css/reset.css", "/sub/css/estilo.css", "/sub/css/fontes.css", "/sub/js/antigo.js", "/sub/img/banner.jpg", "/sub/img/produto.jpg", "/sub/img/selo.gif", "/sub/img/fundo.png", "/sub/img/botao-fundo.png", "/sub/fontes/inter.woff2"],
+  "checkouts": [{ "url": "https://pay.hotmart.com/L4T1N0123?off=verao", "plataforma": "Hotmart", "label": "Comprar já com desconto" }]
+}

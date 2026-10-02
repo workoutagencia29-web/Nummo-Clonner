@@ -1,0 +1,38 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quiz: descubra o seu tipo de metabolismo</title>
+  <link rel="stylesheet" href="css/quiz.css">
+  <link rel="icon" href="img/logo.png">
+  <script>
+    // Configuração do quiz (o checkout do resultado só aparece aqui)
+    window.QUIZ_CONFIG = {
+      checkout: "https://pay.kiwify.com.br/QuizResult1?src=quiz",
+      etapas: 5
+    };
+  </script>
+</head>
+<body>
+  <header class="topo">
+    <img src="img/logo.png" alt="Metabolismo Ativo" width="160" height="40">
+  </header>
+
+  <main class="quiz" id="quiz" aria-live="polite">
+    <div class="progresso" role="progressbar" aria-valuemin="0" aria-valuemax="5" aria-valuenow="1">
+      <div class="progresso-barra" style="width: 20%"></div>
+    </div>
+    <p class="progresso-texto">Pergunta <span id="etapa-atual">1</span> de 5</p>
+    <!-- As etapas são montadas pelo quiz.js -->
+    <div id="etapas"></div>
+    <noscript><p>Ative o JavaScript para responder ao quiz.</p></noscript>
+  </main>
+
+  <footer class="rodape">
+    <p>Este quiz não substitui a avaliação de um nutricionista.</p>
+  </footer>
+
+  <script src="js/quiz.js"></script>
+</body>
+</html>

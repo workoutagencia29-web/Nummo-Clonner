@@ -1,0 +1,8 @@
+{
+  "textoNoShadow": "Oferta exclusiva no Shadow DOM",
+  "cartoes": 2,
+  "checkouts": ["https://pay.kiwify.com.br/CafeMensal", "https://pay.kiwify.com.br/CafeTri"],
+  "imagensNoShadow": ["/img/cafe-mensal.jpg", "/img/cafe-trimestral.jpg", "/img/selo-frete.png"],
+  "cssInJs": { "seletor": "style[data-styled]", "regras": 7, "obs": "o <style> fica vazio; sem serializar o CSSOM, .sc-raiz continua display:none e a página fica em branco" },
+  "imagemNoCssInJs": "/img/grao-fundo.png"
+}

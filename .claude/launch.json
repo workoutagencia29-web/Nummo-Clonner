@@ -1,0 +1,62 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "offer-studio",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "OS_OPEN_BROWSER=0",
+        "npm",
+        "start"
+      ],
+      "port": 3000
+    },
+    {
+      "name": "offer-studio-dev",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "OS_OPEN_BROWSER=0",
+        "npm",
+        "run",
+        "dev"
+      ],
+      "port": 3000
+    },
+    {
+      "name": "offer-studio-teste",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "OS_OPEN_BROWSER=0",
+        "OS_DB_NAME=offerstudio_e2e_manual",
+        "PORT=3100",
+        "npm",
+        "start"
+      ],
+      "port": 3100
+    },
+    {
+      "name": "offer-studio-teste-dev",
+      "runtimeExecutable": "env",
+      "runtimeArgs": [
+        "OS_CLONE_HOST_MAP=*.fixture.test=127.0.0.1",
+        "OS_OPEN_BROWSER=0",
+        "OS_DB_NAME=offerstudio_e2e_manual",
+        "PORT=3100",
+        "npm",
+        "run",
+        "dev"
+      ],
+      "port": 3100
+    },
+    {
+      "name": "fixtures",
+      "runtimeExecutable": "npx",
+      "runtimeArgs": [
+        "tsx",
+        "tests/fixtures/server.ts",
+        "4555"
+      ],
+      "port": 4555
+    }
+  ]
+}

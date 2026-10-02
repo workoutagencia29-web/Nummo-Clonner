@@ -1,0 +1,8 @@
+{
+  "etapas": 5,
+  "resultadoCheckout": "https://pay.kiwify.com.br/QuizResult1?src=quiz",
+  "checkoutSource": "SCRIPT",
+  "snapshot": "no DOM renderizado só existe a etapa 1 (data-etapa=1); as outras estão só no quiz.js",
+  "imagensSoNoJs": ["/img/etapa-2.png", "/img/etapa-3.png", "/img/etapa-4.png", "/img/etapa-5.png", "/img/resultado.jpg"],
+  "sugestaoModo": "PRESERVE_JS"
+}

@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Planos e Ofertas – Academia do Inglês Fluente</title>
+  <link rel="stylesheet" href="/css/planos.css">
+</head>
+<body>
+  <header class="topo" id="topo">
+    <img src="/img/logo.png" alt="Inglês Fluente" width="180" height="48">
+    <!-- Negativo: rolagem para a oferta, não é checkout -->
+    <a class="botao-topo" href="#oferta">Comprar</a>
+  </header>
+
+  <main>
+    <h1>Escolha o seu plano e comece hoje</h1>
+    <img class="banner" src="/img/banner-planos.jpg" alt="Alunos estudando inglês" width="960" height="320">
+
+    <section class="grade" id="oferta">
+      <!-- 1. Kiwify simples -->
+      <div class="plano"><h2>Plano Mensal</h2><a class="botao" id="c01" href="https://pay.kiwify.com.br/Xk3pQ9z">Assinar plano mensal</a></div>
+
+      <!-- 2. Hotmart com parâmetros -->
+      <div class="plano"><h2>Plano Anual</h2><a class="botao" id="c02" href="https://pay.hotmart.com/H81234567X?off=q1w2e3r4&amp;checkoutMode=10&amp;sck=HOTMART_PRODUCT_PAGE&amp;src=planos">Quero o plano anual</a></div>
+
+      <!-- 3. Eduzz -->
+      <div class="plano"><h2>Curso Gramática</h2><a class="botao" id="c03" href="https://sun.eduzz.com/2345678">Comprar curso de gramática</a></div>
+
+      <!-- 4. Monetizze -->
+      <div class="plano"><h2>Curso Conversação</h2><a class="botao" id="c04" href="https://app.monetizze.com.br/checkout/KAB123456">Garantir minha vaga</a></div>
+
+      <!-- 5. Braip -->
+      <div class="plano"><h2>E-book Phrasal Verbs</h2><a class="botao" id="c05" href="https://ev.braip.com/checkout/pla1x2y3/che4z5w6">Baixar e-book agora</a></div>
+
+      <!-- 6. Ticto -->
+      <div class="plano"><h2>Workshop Pronúncia</h2><a class="botao" id="c06" href="https://payment.ticto.app/O1A2B3C4D">Inscrever no workshop</a></div>
+
+      <!-- 7. PerfectPay -->
+      <div class="plano"><h2>Pacote Viagem</h2><a class="botao" id="c07" href="https://go.perfectpay.com.br/PPU38CABCDE">Quero o pacote viagem</a></div>
+
+      <!-- 8. Yampi (domínio próprio da loja, caminho /r/) -->
+      <div class="plano"><h2>Kit Livros Físicos</h2><a class="botao" id="c08" href="https://seguro.minhaloja.com.br/r/xyz123?quantity=1">Comprar kit de livros</a></div>
+
+      <!-- 9. Shopify (link permanente de carrinho em loja externa) -->
+      <div class="plano"><h2>Caneca Oficial</h2><a class="botao" id="c09" href="https://www.lojaexterna.com.br/cart/44123456789:1?discount=INGLES10">Comprar caneca</a></div>
+
+      <!-- 10. Stripe -->
+      <div class="plano"><h2>Aulas Particulares</h2><a class="botao" id="c10" href="https://buy.stripe.com/test_00g5kF2abc3dE">Pagar aula particular</a></div>
+
+      <!-- 11. onclick com window.location.href -->
+      <div class="plano"><h2>Plano Vitalício</h2><button class="botao" id="c11" type="button" onclick="window.location.href='https://pay.hotmart.com/X99'">Quero acesso vitalício</button></div>
+
+      <!-- 12. onclick com window.open -->
+      <div class="plano"><h2>Plano Família</h2><button class="botao" id="c12" type="button" onclick="window.open('https://pay.kiwify.com.br/Open123', '_blank')">Assinar plano família</button></div>
+
+      <!-- 13. div com data-href -->
+      <div class="plano"><h2>Plano Empresas</h2><div class="botao botao-div" id="c13" role="button" tabindex="0" data-href="https://payfast.greenn.com.br/47123">Contratar para empresa</div></div>
+
+      <!-- 14. formulário que envia ao checkout -->
+      <div class="plano"><h2>Plano Trimestral</h2>
+        <form id="c14" action="https://pay.hotmart.com/F55512345K" method="get">
+          <input type="hidden" name="off" value="zz9trim">
+          <input type="hidden" name="checkoutMode" value="10">
+          <button class="botao" type="submit">Assinar trimestral</button>
+        </form>
+      </div>
+
+      <!-- 15. botão do Elementor com link dentro do JSON de data-settings -->
+      <div class="plano"><h2>Intensivo 30 dias</h2>
+        <div class="elementor-element elementor-element-9c8b7a e-con e-parent botao" id="c15" data-id="9c8b7a" data-element_type="container" data-settings="{&quot;link&quot;:{&quot;url&quot;:&quot;https:\/\/pay.kiwify.com.br\/ElemJson1&quot;,&quot;is_external&quot;:&quot;on&quot;,&quot;nofollow&quot;:&quot;&quot;},&quot;background_background&quot;:&quot;classic&quot;}">
+          <span class="elementor-button-text">Começar o intensivo</span>
+        </div>
+      </div>
+
+      <!-- 16. destino montado em script inline -->
+      <div class="plano"><h2>Plano Premium</h2><button class="botao" id="c16" type="button">Quero o premium</button></div>
+
+      <!-- 17. Cakto -->
+      <div class="plano"><h2>Curso Inglês para Negócios</h2><a class="botao" id="c17" href="https://pay.cakto.com.br/8xk2m4p_123456">Comprar inglês para negócios</a></div>
+
+      <!-- 18. Kirvano -->
+      <div class="plano"><h2>Clube de Leitura</h2><a class="botao" id="c18" href="https://pay.kirvano.com/5f0e8d7c-1a2b-4c3d-9e6f-7a8b9c0d1e2f">Entrar no clube</a></div>
+
+      <!-- 19. URL sem protocolo (//) -->
+      <div class="plano"><h2>Mini curso</h2><a class="botao" id="c19" href="//pay.kiwify.com.br/Proto1">Comprar mini curso</a></div>
+
+      <!-- 20. checkout próprio (plataforma desconhecida) -->
+      <div class="plano"><h2>Plano Anual Plus</h2><a class="botao" id="c20" href="https://checkout.meusite.com.br/pagamento?plano=anual-plus">Finalizar compra</a></div>
+    </section>
+
+    <section class="negativos">
+      <h2>Dúvidas?</h2>
+      <!-- Negativo: WhatsApp (mesmo com o texto "Comprar") -->
+      <a class="botao whatsapp" id="n01" href="https://wa.me/5511988887777?text=Quero%20comprar%20o%20curso">Comprar pelo WhatsApp</a>
+      <!-- Negativo: link interno do mesmo site -->
+      <a class="link" id="n02" href="/upsell">Ver oferta especial para alunos</a>
+      <!-- Negativo: rolagem com onclick -->
+      <button class="link" id="n03" type="button" onclick="document.getElementById('oferta').scrollIntoView({behavior: 'smooth'})">Comprar agora</button>
+      <!-- Negativos diversos -->
+      <a class="link" id="n04" href="mailto:suporte@inglesfluente.com.br">suporte@inglesfluente.com.br</a>
+      <a class="link" id="n05" href="https://www.instagram.com/inglesfluente">Instagram</a>
+      <a class="link" id="n06" href="#topo">Voltar ao topo</a>
+    </section>
+  </main>
+
+  <footer class="rodape">
+    <p><a href="/politica-de-privacidade.html">Política de Privacidade</a></p>
+  </footer>
+
+  <script>
+    // Destino do botão premium montado por script (checkout só aparece em string JS)
+    var CHECKOUT_PREMIUM = "https://pay.hotmart.com/S77712345Q?off=js1";
+    document.getElementById("c16").addEventListener("click", function () {
+      window.location.href = CHECKOUT_PREMIUM + (window.location.search ? "&" + window.location.search.slice(1) : "");
+    });
+    // Comportamento do div com data-href
+    document.getElementById("c13").addEventListener("click", function () {
+      window.location.href = this.getAttribute("data-href");
+    });
+    // Comportamento do container do Elementor
+    document.getElementById("c15").addEventListener("click", function () {
+      var cfg = JSON.parse(this.getAttribute("data-settings"));
+      window.open(cfg.link.url, "_blank");
+    });
+  </script>
+</body>
+</html>

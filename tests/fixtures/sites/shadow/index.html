@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Clube do Café Especial – Assinatura mensal</title>
+  <!-- Anti-FOUC: tudo escondido até o CSS-in-JS rodar (só aparece se o CSSOM for serializado) -->
+  <style>
+    body { margin: 0; font-family: Georgia, serif; background: #f8f1e9; }
+    .sc-raiz { display: none; }
+  </style>
+  <!-- Folha do CSS-in-JS: fica VAZIA no HTML; as regras entram via insertRule -->
+  <style data-styled="active" data-styled-version="6.1.8"></style>
+  <script src="js/estilos.js"></script>
+  <script src="js/componentes.js" defer></script>
+</head>
+<body>
+  <div id="app" class="sc-raiz sc-a1b2c3">
+    <header class="sc-topo sc-d4e5f6">
+      <img src="img/logo-cafe.png" alt="Clube do Café" width="160" height="48">
+    </header>
+    <main class="sc-conteudo sc-g7h8i9">
+      <h1 class="sc-titulo sc-j1k2l3">Café especial fresquinho na sua casa todo mês</h1>
+      <oferta-card plano="mensal" preco="R$ 79,90" checkout="https://pay.kiwify.com.br/CafeMensal">
+        <span slot="bonus">Brinde: caneca de cerâmica na primeira caixa</span>
+      </oferta-card>
+      <oferta-card plano="trimestral" preco="R$ 69,90" checkout="https://pay.kiwify.com.br/CafeTri"></oferta-card>
+    </main>
+  </div>
+</body>
+</html>

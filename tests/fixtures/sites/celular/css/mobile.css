@@ -1,0 +1,46 @@
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: #fff4e6 url("../img/textura-celular.png");
+  padding-bottom: 64px;
+}
+
+.faixa {
+  background: #e8590c;
+  color: #fff;
+  text-align: center;
+  padding: 6px;
+  font-weight: 700;
+}
+
+.produto {
+  padding: 16px;
+  text-align: center;
+}
+
+.hero {
+  width: 100%;
+  height: auto;
+}
+
+.botao,
+.botao-fixo {
+  display: block;
+  background: #e8590c;
+  color: #fff;
+  padding: 14px;
+  border-radius: 8px;
+  text-decoration: none;
+}
+
+.barra-fixa {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  display: grid;
+  grid-template-columns: 1fr 2fr;
+  gap: 8px;
+  padding: 8px;
+  background: #fff;
+}

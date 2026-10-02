@@ -1,0 +1,11 @@
+{
+  "videos": [
+    { "provider": "VTURB", "videoId": "abc123", "src": "https://scripts.converteai.net/acc/players/abc123/player.js", "thirdParty": true },
+    { "provider": "YOUTUBE", "videoId": "M7lc1UVf-VE", "thirdParty": true },
+    { "provider": "NATIVE", "src": "/midia/depoimento.mp4", "thirdParty": false }
+  ],
+  "delay": { "seconds": 332, "elements": 2, "seletor": ".esconder" },
+  "checkouts": [{ "url": "https://pay.kiwify.com.br/Pr0t0c0l0?afid=vsl01", "plataforma": "Kiwify", "ocorrencias": 1, "obs": "dentro de .esconder (display:none)" }],
+  "externosAusentesOffline": ["https://scripts.converteai.net/acc/players/abc123/player.js", "https://www.youtube.com/embed/M7lc1UVf-VE?rel=0&modestbranding=1"],
+  "sugestaoModo": "PRESERVE_JS"
+}

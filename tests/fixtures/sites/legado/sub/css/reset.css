@@ -1,0 +1,9 @@
+/* reset.css - Loja Sao Joao (2009) */
+html, body, div, span, h1, h2, h3, p, a, img, ul, li, table, tr, td {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  vertical-align: baseline;
+}
+ul { list-style: square inside; }
+table { border-collapse: collapse; border-spacing: 0; }

@@ -1,0 +1,78 @@
+body {
+  margin: 0;
+  font-family: "Trebuchet MS", system-ui, sans-serif;
+  background: #f8f9fa;
+  color: #212529;
+}
+
+.topo {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 12px 24px;
+  background: #1c7ed6;
+}
+
+.botao-topo {
+  color: #fff;
+  font-weight: 700;
+}
+
+main {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 24px 16px;
+}
+
+.banner {
+  width: 100%;
+  height: auto;
+  border-radius: 12px;
+}
+
+.grade {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 16px;
+  margin: 32px 0;
+}
+
+.plano {
+  background: #fff url("../img/selo-plano.png") right 8px top 8px / 32px no-repeat;
+  border-radius: 12px;
+  padding: 16px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+}
+
+.botao {
+  display: inline-block;
+  background: #2f9e44;
+  color: #fff;
+  border: 0;
+  padding: 12px 20px;
+  border-radius: 8px;
+  font: inherit;
+  font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.whatsapp {
+  background: #25d366;
+}
+
+.link {
+  display: inline-block;
+  margin: 8px;
+  color: #1c7ed6;
+  background: none;
+  border: 0;
+  font: inherit;
+  cursor: pointer;
+}
+
+.rodape {
+  text-align: center;
+  padding: 24px;
+  font-size: 13px;
+}

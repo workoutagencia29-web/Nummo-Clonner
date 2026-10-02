@@ -1,0 +1,1304 @@
+/*
+ * Visual dos painéis nativos do GrapesJS (blocos, camadas, classes, estilo,
+ * configurações, imagens, barra de texto e seletor de cores) no tema do Offer
+ * Studio — claro e escuro, pelos mesmos tokens do painel (globals.css).
+ *
+ * Regras: só classes do GrapesJS (gjs-*, sp-*), quase sempre dentro de
+ * .os-panel / .os-editor, para não vazar para o resto do app.
+ */
+:root {
+  --gjs-main-color: var(--card);
+  --gjs-primary-color: var(--card);
+  --gjs-secondary-color: var(--foreground);
+  --gjs-tertiary-color: var(--primary);
+  --gjs-quaternary-color: var(--primary);
+  --gjs-font-color: var(--foreground);
+  --gjs-font-color-active: var(--foreground);
+  --gjs-main-dark-color: color-mix(in oklch, var(--foreground) 6%, transparent);
+  --gjs-secondary-dark-color: color-mix(in oklch, var(--foreground) 10%, transparent);
+  --gjs-main-light-color: color-mix(in oklch, var(--foreground) 4%, transparent);
+  --gjs-secondary-light-color: var(--muted-foreground);
+  --gjs-soft-light-color: color-mix(in oklch, var(--foreground) 6%, transparent);
+  --gjs-color-blue: var(--primary);
+  --gjs-color-red: var(--destructive);
+  --gjs-color-yellow: var(--warning);
+  --gjs-color-green: var(--success);
+  --gjs-light-border: var(--border);
+  --gjs-color-highlight: var(--primary);
+  --gjs-color-warn: var(--warning);
+  --gjs-arrow-color: var(--muted-foreground);
+  --gjs-dark-text-shadow: var(--border);
+  --gjs-handle-margin: -5px;
+  --gjs-main-font: var(--font-sans);
+  --gjs-font-size: 0.8125rem;
+  --gjs-input-padding: 6px;
+  --gjs-color-input-padding: 30px;
+  --gjs-placeholder-background-color: var(--primary);
+  --gjs-canvas-top: 0;
+  --gjs-flex-item-gap: 6px;
+
+  /* Tokens locais dos painéis. */
+  --os-field-h: 30px;
+  --os-field-radius: calc(var(--radius) - 4px);
+  --os-hover: color-mix(in oklch, var(--foreground) 5%, transparent);
+  --os-selected: color-mix(in oklch, var(--primary) 13%, transparent);
+  --os-soft: color-mix(in oklch, var(--muted) 65%, transparent);
+}
+
+/* ─── Base ─────────────────────────────────────────────────────────────────── */
+
+.os-editor .gjs-one-bg {
+  background-color: var(--card);
+}
+.os-editor .gjs-two-color {
+  color: var(--foreground);
+}
+.os-editor .gjs-three-bg {
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+}
+.os-editor .gjs-four-color,
+.os-editor .gjs-four-color-h:hover {
+  color: var(--primary);
+}
+.os-editor .gjs-cv-canvas {
+  width: 100%;
+  height: 100%;
+  top: 0;
+  background: color-mix(in oklch, var(--muted) 70%, transparent);
+}
+
+/* Barras de rolagem finas nos painéis. */
+.os-panel,
+.os-panel * {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--foreground) 22%, transparent) transparent;
+}
+.os-panel ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.os-panel ::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--foreground) 20%, transparent);
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background-clip: padding-box;
+}
+.os-panel ::-webkit-scrollbar-thumb:hover {
+  background-color: color-mix(in oklch, var(--foreground) 32%, transparent);
+}
+.os-panel ::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* Mensagem "Selecione um elemento…" dos painéis vazios. */
+.os-panel .gjs-sm-header,
+.os-panel .gjs-trt-header {
+  padding: 28px 20px;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.45;
+  text-align: center;
+  color: var(--muted-foreground);
+}
+
+/* ─── Blocos: grade de cartões ─────────────────────────────────────────────── */
+
+.os-panel .gjs-blocks-cs {
+  background: transparent;
+}
+.os-panel .gjs-block-categories {
+  background: transparent;
+}
+.os-panel .gjs-block-category {
+  border-bottom: 1px solid var(--border);
+}
+.os-panel .gjs-block-category .gjs-title {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: transparent;
+  border: 0;
+  padding: 10px 12px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+}
+.os-panel .gjs-block-category .gjs-title:hover {
+  color: var(--foreground);
+}
+.os-panel .gjs-block-category .gjs-caret-icon {
+  display: inline-block;
+  width: 0;
+  height: 0;
+  margin: 0 4px 0 0;
+  border-left: 4px solid transparent;
+  border-right: 4px solid transparent;
+  border-top: 5px solid currentColor;
+  transition: transform 0.15s;
+}
+.os-panel .gjs-block-category:not(.gjs-open) .gjs-caret-icon {
+  transform: rotate(-90deg);
+}
+.os-panel .gjs-blocks-c {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 4px 12px 12px;
+}
+.os-panel .gjs-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  width: auto;
+  min-height: 78px;
+  margin: 0;
+  padding: 10px 6px;
+  border-radius: calc(var(--radius) - 2px);
+  border: 1px solid var(--border);
+  background: var(--background);
+  color: var(--foreground);
+  box-shadow: none;
+  cursor: grab;
+  transition:
+    border-color 0.15s,
+    background 0.15s,
+    color 0.15s;
+}
+.os-panel .gjs-block:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+  background: color-mix(in oklch, var(--primary) 6%, var(--background));
+}
+/* Ícones dos blocos são de contorno (stroke): sem preenchimento, senão viram
+   borrões. Partes com fill próprio (atributo) continuam preenchidas. */
+.os-panel .gjs-block svg {
+  fill: none;
+}
+.os-panel .gjs-block-label {
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.3;
+  text-align: center;
+}
+
+/* ─── Camadas ──────────────────────────────────────────────────────────────── */
+
+.os-panel .gjs-layer {
+  background: transparent;
+  font-size: 12.5px;
+  font-weight: 400;
+}
+.os-panel .gjs-layer-title {
+  letter-spacing: normal;
+  font-weight: 400;
+}
+.os-panel .gjs-layer-item {
+  min-height: 30px;
+  padding: 0 8px 0 6px;
+  border-bottom: 0;
+  background: transparent;
+  color: var(--foreground);
+}
+.os-panel .gjs-layer-item:hover,
+.os-panel .gjs-layer.gjs-hovered > .gjs-layer-item {
+  background: var(--os-hover);
+}
+.os-panel .gjs-layer.gjs-selected > .gjs-layer-item {
+  background: var(--os-selected);
+  box-shadow: inset 2px 0 0 var(--primary);
+}
+.os-panel .gjs-layer.gjs-selected > .gjs-layer-item .gjs-layer-name {
+  font-weight: 600;
+  color: var(--primary);
+}
+.os-panel .gjs-layer-name {
+  max-width: 150px;
+  text-overflow: ellipsis;
+}
+.os-panel .gjs-layer-caret,
+.os-panel .gjs-layer-vis,
+.os-panel .gjs-layer-move,
+.os-panel .gjs-layer__icon {
+  color: var(--muted-foreground);
+}
+.os-panel .gjs-layer-caret:hover,
+.os-panel .gjs-layer-vis:hover,
+.os-panel .gjs-layer-move:hover {
+  color: var(--foreground);
+}
+.os-panel .gjs-layer-vis {
+  opacity: 0.55;
+}
+.os-panel .gjs-layer-item:hover .gjs-layer-vis,
+.os-panel .gjs-layer-vis.gjs-layer-off {
+  opacity: 1;
+}
+.os-panel .gjs-layer-move {
+  opacity: 0;
+  cursor: grab;
+}
+.os-panel .gjs-layer-item:hover .gjs-layer-move {
+  opacity: 1;
+}
+.os-panel .gjs-layer-count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 999px;
+  background: var(--os-soft);
+  color: var(--muted-foreground);
+  font-size: 10.5px;
+  line-height: 16px;
+  text-align: center;
+}
+.os-panel .gjs-layer-count:empty {
+  display: none;
+}
+.os-panel .gjs-layer-hidden {
+  opacity: 0.5;
+}
+.os-panel .gjs-layers #gjs-placeholder #gjs-plh-int.gjs-insert {
+  background-color: var(--primary);
+}
+
+/* ─── Classes e estado (:hover…) ───────────────────────────────────────────── */
+
+.os-panel .gjs-clm-tags {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 12.5px;
+}
+.os-panel .gjs-clm-header {
+  gap: 8px;
+  margin: 0 0 8px;
+}
+.os-panel .gjs-clm-header-label {
+  font-weight: 600;
+  font-size: 13px;
+}
+.os-panel .gjs-clm-header-status {
+  min-width: 150px;
+}
+.os-panel .gjs-clm-tags #gjs-clm-tags-field {
+  gap: 4px;
+  align-items: center;
+  padding: 4px;
+  margin: 0;
+  min-height: var(--os-field-h);
+}
+.os-panel .gjs-clm-tags #gjs-clm-tags-c {
+  gap: 4px;
+}
+.os-panel .gjs-clm-tag {
+  gap: 4px;
+  margin: 0;
+  padding: 3px 6px;
+  border-radius: 6px;
+  background: color-mix(in oklch, var(--primary) 14%, transparent);
+  color: var(--foreground);
+  font-size: 12px;
+}
+.os-panel .gjs-clm-tag-status,
+.os-panel .gjs-clm-tag-close,
+.os-panel .gjs-clm-tags #gjs-clm-close,
+.os-panel .gjs-clm-tags #gjs-clm-checkbox {
+  color: var(--muted-foreground);
+  cursor: pointer;
+}
+.os-panel .gjs-clm-tag-close:hover,
+.os-panel .gjs-clm-tag-status:hover {
+  color: var(--foreground);
+}
+.os-panel #gjs-clm-add-tag,
+.os-panel .gjs-clm-tags-btn {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  margin: 0;
+  padding: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  color: var(--muted-foreground);
+}
+.os-panel #gjs-clm-add-tag:hover,
+.os-panel .gjs-clm-tags-btn:hover {
+  color: var(--primary);
+  border-color: var(--primary);
+}
+.os-panel .gjs-clm-tags #gjs-clm-new {
+  color: var(--foreground);
+  padding: 3px 6px;
+  font-size: 12px;
+}
+.os-panel .gjs-clm-sels-info {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  margin: 8px 0 0;
+  color: var(--muted-foreground);
+  font-size: 12px;
+}
+.os-panel .gjs-clm-label-sel {
+  float: none;
+  padding: 0;
+}
+.os-panel .gjs-clm-sel-cmp {
+  color: var(--foreground);
+  font-weight: 500;
+}
+.os-panel .gjs-clm-sel-id {
+  opacity: 0.7;
+}
+
+/* ─── Estilo: seções ───────────────────────────────────────────────────────── */
+
+.os-panel .gjs-sm-sector {
+  border-bottom: 1px solid var(--border);
+  font-weight: 400;
+}
+.os-panel .gjs-sm-sector.gjs-sm-open {
+  border-bottom: 1px solid var(--border);
+}
+.os-panel .gjs-sm-sector-title {
+  gap: 4px;
+  background: transparent;
+  border: 0;
+  padding: 11px 12px;
+  font-weight: 600;
+  letter-spacing: normal;
+  font-size: 13px;
+  color: var(--foreground);
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.os-panel .gjs-sm-sector-title:hover {
+  background: var(--os-hover);
+}
+.os-panel .gjs-sm-sector-caret {
+  width: 16px;
+  height: 16px;
+  min-width: 16px;
+  color: var(--muted-foreground);
+  transition: transform 0.15s;
+}
+.os-panel .gjs-sm-sector-label {
+  margin-left: 2px;
+}
+.os-panel .gjs-sm-properties {
+  gap: 10px 8px;
+  align-items: flex-start;
+  padding: 2px 12px 14px;
+  font-size: 12.5px;
+}
+.os-panel .gjs-sm-property {
+  float: none;
+  width: calc(50% - 4px);
+  margin: 0;
+  padding: 0;
+}
+.os-panel .gjs-sm-property--full,
+.os-panel .gjs-sm-property.gjs-sm-composite,
+.os-panel .gjs-sm-property.gjs-sm-file,
+.os-panel .gjs-sm-property.gjs-sm-list,
+.os-panel .gjs-sm-property.gjs-sm-stack,
+.os-panel .gjs-sm-property.gjs-sm-slider,
+.os-panel .gjs-sm-property.gjs-sm-color {
+  width: 100%;
+}
+
+/* Rótulos: cinza; em cor quando a propriedade tem valor neste elemento. */
+.os-panel .gjs-sm-label {
+  gap: 4px;
+  margin: 0 0 4px;
+  min-height: 18px;
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  line-height: 1.3;
+}
+.os-panel .gjs-sm-label.gjs-four-color {
+  color: var(--primary);
+  font-weight: 500;
+}
+.os-panel .gjs-sm-label .gjs-sm-icon[title]:not([title=""]) {
+  cursor: help;
+  text-decoration: underline dotted color-mix(in oklch, currentColor 45%, transparent);
+  text-underline-offset: 3px;
+}
+.os-panel .gjs-sm-clear {
+  display: grid;
+  place-items: center;
+  width: 16px;
+  min-width: 16px;
+  height: 16px;
+  margin-left: 2px;
+  border-radius: 4px;
+  color: var(--muted-foreground);
+}
+.os-panel .gjs-sm-clear:hover {
+  color: var(--destructive);
+  background: color-mix(in oklch, var(--destructive) 12%, transparent);
+}
+.os-panel .gjs-sm-clear svg {
+  width: 14px;
+  height: 14px;
+  fill: currentColor;
+}
+
+/* ─── Campos ───────────────────────────────────────────────────────────────── */
+
+.os-panel .gjs-field,
+.os-editor .gjs-mdl-dialog .gjs-field {
+  min-height: var(--os-field-h);
+  background-color: var(--background);
+  border: 1px solid var(--input);
+  border-radius: var(--os-field-radius);
+  color: var(--foreground);
+  font-size: 12.5px;
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s;
+}
+.os-panel .gjs-field:hover {
+  border-color: color-mix(in oklch, var(--foreground) 22%, var(--input));
+}
+.os-panel .gjs-field:focus-within {
+  border-color: var(--ring);
+  box-shadow: 0 0 0 3px color-mix(in oklch, var(--ring) 22%, transparent);
+}
+.os-panel .gjs-field input,
+.os-panel .gjs-field select,
+.os-panel .gjs-field textarea {
+  height: calc(var(--os-field-h) - 2px);
+  padding: 0 8px;
+  color: var(--foreground);
+  font: inherit;
+  line-height: normal;
+}
+.os-panel .gjs-field textarea {
+  height: auto;
+  min-height: 64px;
+  padding: 6px 8px;
+}
+.os-panel .gjs-field input::placeholder {
+  color: color-mix(in oklch, var(--muted-foreground) 75%, transparent);
+}
+.os-panel .gjs-field select {
+  padding-right: 22px;
+  cursor: pointer;
+}
+.os-panel .gjs-field .gjs-sel-arrow {
+  width: 22px;
+  pointer-events: none;
+}
+.os-panel .gjs-field .gjs-d-s-arrow {
+  right: 9px;
+  border-top-color: var(--muted-foreground);
+}
+.os-panel option,
+.os-panel .gjs-select option,
+.os-panel .gjs-field-select option,
+.os-panel .gjs-sm-unit option {
+  background-color: var(--popover);
+  color: var(--popover-foreground);
+}
+
+/* Número + unidade (px, %, …) e setinhas. */
+.os-panel .gjs-field-integer input {
+  padding-right: 44px;
+}
+.os-panel .gjs-field-units {
+  right: 16px;
+  display: flex;
+  align-items: center;
+}
+.os-panel .gjs-field .gjs-input-unit {
+  width: auto;
+  height: 22px;
+  padding: 0 2px;
+  border-radius: 4px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  text-align: right;
+  text-align-last: right;
+}
+.os-panel .gjs-field .gjs-input-unit:hover {
+  color: var(--foreground);
+  background: var(--os-hover);
+}
+.os-panel .gjs-field-arrows {
+  right: 5px;
+  width: 8px;
+  height: 18px;
+  opacity: 0.6;
+}
+.os-panel .gjs-field:hover .gjs-field-arrows {
+  opacity: 1;
+}
+.os-panel .gjs-field-arrow-u {
+  border-bottom-color: var(--muted-foreground);
+  top: 2px;
+}
+.os-panel .gjs-field-arrow-d {
+  border-top-color: var(--muted-foreground);
+  bottom: 2px;
+}
+
+/* Escolha em botões (alinhamento): controle segmentado. */
+.os-panel .gjs-field-radio {
+  padding: 2px;
+  background: var(--os-soft);
+  border-color: transparent;
+}
+.os-panel .gjs-radio-items {
+  gap: 2px;
+}
+.os-panel .gjs-radio-item {
+  flex: 1 1 0;
+  min-width: 0;
+  border: 0;
+}
+.os-panel .gjs-radio-item:hover {
+  background: transparent;
+}
+.os-panel .gjs-radio-item-label {
+  overflow: hidden;
+  padding: 0 4px;
+  border-radius: calc(var(--os-field-radius) - 2px);
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  line-height: calc(var(--os-field-h) - 6px);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transition:
+    background 0.15s,
+    color 0.15s;
+}
+.os-panel .gjs-radio-item-label:hover {
+  color: var(--foreground);
+}
+.os-panel .gjs-radio-item input:checked + .gjs-radio-item-label {
+  background-color: var(--background);
+  color: var(--foreground);
+  font-weight: 500;
+  box-shadow:
+    0 1px 2px color-mix(in oklch, var(--foreground) 12%, transparent),
+    0 0 0 1px var(--border);
+}
+
+/* Cor: amostra à direita do campo. Sem cor = xadrez. */
+.os-panel .gjs-field-color input {
+  padding-right: var(--gjs-color-input-padding);
+}
+.os-panel .gjs-field-colorp {
+  top: 3px;
+  right: 3px;
+  width: 24px;
+  height: calc(100% - 6px);
+  padding: 0;
+  border: 0;
+}
+.os-panel .gjs-field-colorp .gjs-checker-bg,
+.os-panel .gjs-field-colorp .gjs-field-colorp-c,
+.os-panel .gjs-field-color-picker {
+  border-radius: 4px;
+}
+.os-panel .gjs-field-color-picker {
+  background-color: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--foreground) 18%, transparent);
+}
+
+/* Barra deslizante (opacidade). */
+.os-panel .gjs-sm-slider .gjs-fields {
+  align-items: center;
+  gap: 8px;
+}
+.os-panel .gjs-field-range {
+  min-height: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.os-panel .gjs-field-range:focus-within {
+  box-shadow: none;
+}
+.os-panel .gjs-field-range input {
+  height: 20px;
+  padding: 0;
+  accent-color: var(--primary);
+}
+.os-panel .gjs-field-range input::-webkit-slider-runnable-track {
+  height: 4px;
+  margin-top: 0;
+  border-radius: 999px;
+  background: var(--os-soft);
+}
+.os-panel .gjs-field-range input::-webkit-slider-thumb {
+  width: 14px;
+  height: 14px;
+  margin-top: -5px;
+  border: 2px solid var(--background);
+  background: var(--primary);
+  box-shadow: 0 0 0 1px var(--primary);
+}
+.os-panel .gjs-sm-slider .gjs-field-integer {
+  flex: 0 0 76px;
+}
+
+/* Caixa com várias medidas (margem, preenchimento, cantos, borda). */
+.os-panel .gjs-sm-field.gjs-sm-composite {
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 3px);
+  background: var(--os-soft);
+}
+.os-panel .gjs-sm-composite .gjs-sm-properties {
+  padding: 8px;
+  gap: 8px;
+}
+.os-panel .gjs-sm-composite .gjs-sm-property .gjs-sm-label {
+  margin-bottom: 3px;
+  font-size: 11px;
+}
+
+/* Listas de camadas (sombras, imagens de fundo). */
+.os-panel .gjs-sm-stack #gjs-sm-add {
+  top: -24px;
+  right: 0;
+  display: grid;
+  place-items: center;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  color: var(--muted-foreground);
+  opacity: 1;
+}
+.os-panel .gjs-sm-stack #gjs-sm-add:hover {
+  color: var(--primary);
+  background: color-mix(in oklch, var(--primary) 10%, transparent);
+}
+.os-panel .gjs-sm-stack #gjs-sm-add svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+}
+.os-panel .gjs-sm-layers {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 34px;
+  margin: 0;
+  padding: 4px;
+  background: var(--os-soft);
+  border-color: transparent;
+}
+.os-panel .gjs-sm-layers:empty::before {
+  content: "Nenhuma. Clique em + para adicionar.";
+  padding: 6px 4px;
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+}
+.os-panel .gjs-sm-layer {
+  margin: 0;
+  padding: 6px 6px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 4px);
+  background: var(--background);
+}
+.os-panel .gjs-sm-layer.gjs-sm-active {
+  border-color: var(--primary);
+  background: var(--background);
+  box-shadow: 0 0 0 2px color-mix(in oklch, var(--primary) 18%, transparent);
+}
+.os-panel .gjs-sm-layer .gjs-sm-label-wrp {
+  gap: 6px;
+  cursor: pointer;
+}
+.os-panel .gjs-sm-layer #gjs-sm-label {
+  margin: 0;
+  font-size: 12px;
+}
+.os-panel .gjs-sm-layer #gjs-sm-move,
+.os-panel .gjs-sm-layer #gjs-sm-close-layer {
+  color: var(--muted-foreground);
+  opacity: 1;
+}
+.os-panel .gjs-sm-layer #gjs-sm-move svg,
+.os-panel .gjs-sm-layer #gjs-sm-close-layer svg {
+  fill: currentColor;
+}
+.os-panel .gjs-sm-layer #gjs-sm-close-layer:hover {
+  color: var(--destructive);
+}
+.os-panel .gjs-sm-layer-preview {
+  width: 18px;
+  height: 18px;
+  min-width: 18px;
+  margin: 0;
+  border-radius: 4px;
+  box-shadow: inset 0 0 0 1px var(--border);
+}
+.os-panel .gjs-sm-layer-preview-cnt {
+  border-radius: 4px;
+}
+.os-panel .gjs-sm-stack .gjs-sm-properties {
+  padding: 8px 0 2px;
+}
+
+/* Imagem de fundo: botão "Escolher imagem" + miniatura. */
+.os-panel .gjs-sm-file .gjs-field,
+.os-panel .gjs-field.gjs-file {
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+.os-panel .gjs-btn-c,
+.os-panel .gjs-sm-btn-c {
+  float: none;
+  width: 100%;
+}
+.os-panel .gjs-btn-c .gjs-btn,
+.os-panel .gjs-sm-btn {
+  width: 100%;
+  height: var(--os-field-h);
+  border: 1px dashed color-mix(in oklch, var(--foreground) 25%, transparent);
+  border-radius: var(--os-field-radius);
+  background: var(--background);
+  box-shadow: none;
+  color: var(--foreground);
+  font: 500 12px var(--font-sans);
+  cursor: pointer;
+}
+.os-panel .gjs-btn-c .gjs-btn:hover,
+.os-panel .gjs-sm-btn:hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.os-panel .gjs-sm-preview-file {
+  margin-top: 6px;
+  padding: 4px 22px;
+  border: 1px solid var(--border);
+  border-radius: var(--os-field-radius);
+  background: var(--os-soft);
+}
+.os-panel .gjs-sm-preview-file-close {
+  top: 2px;
+  right: 4px;
+  color: var(--muted-foreground);
+}
+
+/* ─── Configurações do elemento (traits) ───────────────────────────────────── */
+
+.os-panel .gjs-traits-cs {
+  background: transparent;
+}
+.os-panel .gjs-traits-c,
+.os-panel .gjs-trait-category .gjs-traits-c {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+  font-size: 12.5px;
+}
+.os-panel .gjs-traits-c:empty {
+  display: none;
+}
+.os-panel .gjs-trait-category {
+  border-bottom: 1px solid var(--border);
+}
+.os-panel .gjs-trait-category .gjs-title {
+  background: transparent;
+  border: 0;
+  padding: 11px 12px;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: normal;
+}
+.os-panel .gjs-trt-trait {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  padding: 0;
+  font-weight: 400;
+}
+.os-panel .gjs-trt-trait .gjs-label-wrp {
+  width: 100%;
+}
+.os-panel .gjs-trt-trait .gjs-label {
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  white-space: normal;
+}
+.os-panel .gjs-trt-trait--checkbox {
+  flex-direction: row-reverse;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+.os-panel .gjs-trt-trait--checkbox .gjs-label-wrp {
+  width: auto;
+  flex: 1;
+}
+.os-panel .gjs-trt-trait--checkbox .gjs-label {
+  color: var(--foreground);
+  font-size: 12.5px;
+}
+.os-panel .gjs-trt-trait--checkbox .gjs-field-wrp {
+  flex: 0 0 auto;
+}
+.os-panel .gjs-field-checkbox {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  min-height: 0;
+  padding: 0;
+  border-radius: 5px;
+}
+.os-panel .gjs-field-checkbox:has(input:checked) {
+  background: var(--primary);
+  border-color: var(--primary);
+}
+.os-panel .gjs-field-checkbox .gjs-chk-icon {
+  display: block;
+  width: 5px;
+  height: 9px;
+  margin: -2px 0 0;
+  border: 0;
+  transform: rotate(45deg);
+}
+.os-panel .gjs-field-checkbox input:checked + .gjs-chk-icon {
+  border-color: var(--primary-foreground);
+  border-style: solid;
+  border-width: 0 2px 2px 0;
+}
+.os-panel .gjs-trt-trait--button button,
+.os-panel .gjs-trt-trait .gjs-btn-prim {
+  height: var(--os-field-h);
+  padding: 0 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--os-field-radius);
+  background: var(--background);
+  color: var(--foreground);
+  font: 500 12.5px var(--font-sans);
+  cursor: pointer;
+}
+.os-panel .gjs-trt-trait--button .gjs-btn--full {
+  width: 100%;
+}
+
+/* "Vai para": destino de um link da oferta ou página do funil (só leitura). */
+.os-panel .gjs-trt-trait--os-info .gjs-field {
+  height: auto;
+  border: 0;
+  background: transparent;
+}
+.os-panel .os-trait-info {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 7px 9px;
+  border: 1px dashed var(--border);
+  border-radius: var(--os-field-radius);
+  background: var(--muted);
+}
+.os-panel .os-trait-info__text {
+  color: var(--foreground);
+  font-size: 12.5px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.os-panel .os-trait-info__hint {
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+
+/* ─── Imagens (janela do GrapesJS) ─────────────────────────────────────────── */
+
+.os-editor .gjs-mdl-container {
+  background-color: color-mix(in oklch, black 50%, transparent);
+}
+.os-editor .gjs-mdl-dialog {
+  background: var(--card);
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: 0 16px 48px color-mix(in oklch, black 25%, transparent);
+  font-family: var(--font-sans);
+  font-weight: 400;
+  text-shadow: none;
+}
+.os-editor .gjs-mdl-header {
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid var(--border);
+}
+.os-editor .gjs-mdl-title {
+  font-size: 1rem;
+  font-weight: 600;
+}
+/* "×" no padrão dos diálogos do painel (modal-a11y.ts troca o glifo pelo ícone). */
+.os-editor .gjs-mdl-btn-close {
+  top: 12px;
+  right: 14px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border-radius: calc(var(--radius) - 4px);
+  color: var(--muted-foreground);
+  font-size: 0;
+  opacity: 1;
+  cursor: pointer;
+}
+.os-editor .gjs-mdl-btn-close:hover {
+  background: var(--os-hover);
+  color: var(--foreground);
+}
+.os-editor .gjs-mdl-btn-close:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+.os-editor .gjs-mdl-content {
+  padding: 16px 20px 12px;
+}
+.os-editor .os-mdl-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 20px 16px;
+}
+.os-editor .gjs-am-file-uploader > form {
+  border: 2px dashed var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+  color: var(--muted-foreground);
+  transition:
+    border-color 0.15s,
+    color 0.15s;
+}
+.os-editor .gjs-am-file-uploader > form:hover,
+.os-editor .gjs-am-file-uploader > form.gjs-am-hover {
+  border-color: var(--primary);
+  color: var(--primary);
+}
+.os-editor .gjs-am-file-uploader #gjs-am-title {
+  font-size: 13px;
+  line-height: 1.4;
+}
+.os-editor .gjs-am-assets-cont {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+}
+.os-editor .gjs-am-add-asset {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+.os-editor .gjs-am-add-asset .gjs-am-add-field {
+  flex: 1;
+  float: none;
+  width: auto;
+}
+.os-editor .gjs-am-add-asset .gjs-field input {
+  height: 30px;
+  padding: 0 8px;
+  color: var(--foreground);
+  font: 12.5px var(--font-sans);
+}
+.os-editor .gjs-am-add-asset button,
+.os-editor .gjs-mdl-dialog .gjs-btn-prim {
+  float: none;
+  width: auto;
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: var(--os-field-radius);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font: 500 12.5px var(--font-sans);
+  cursor: pointer;
+}
+.os-editor .gjs-am-add-asset button:hover,
+.os-editor .gjs-mdl-dialog .gjs-btn-prim:hover {
+  background: color-mix(in oklch, var(--primary) 88%, black);
+}
+.os-editor .gjs-am-asset {
+  border-bottom: 1px solid var(--border);
+  border-radius: 6px;
+}
+.os-editor .gjs-am-asset:hover,
+.os-editor .gjs-am-highlight {
+  background: var(--os-hover);
+}
+.os-editor .gjs-am-preview-cont {
+  border-radius: 6px;
+  background-color: var(--muted);
+}
+.os-editor .gjs-am-meta {
+  color: var(--foreground);
+}
+.os-editor .gjs-am-close {
+  color: var(--muted-foreground);
+}
+
+/* ─── Barra de texto (negrito, itálico, link…) ─────────────────────────────── */
+
+.os-editor .gjs-rte-toolbar {
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) - 2px);
+  background: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 6px 20px color-mix(in oklch, black 18%, transparent);
+}
+.os-editor .gjs-rte-toolbar-ui {
+  border: 0;
+}
+.os-editor .gjs-rte-action {
+  width: 30px;
+  height: 30px;
+  padding: 0;
+  border-right: 1px solid var(--border);
+  color: var(--popover-foreground);
+  font-size: 14px;
+}
+.os-editor .gjs-rte-action:hover {
+  background-color: var(--os-hover);
+}
+.os-editor .gjs-rte-active {
+  background-color: var(--os-selected);
+  color: var(--primary);
+}
+.os-editor .gjs-rte-disabled {
+  color: var(--muted-foreground);
+  opacity: 0.5;
+}
+.os-editor .gjs-rte-action svg {
+  width: 17px;
+  height: 17px;
+}
+
+/* ─── Canvas: etiqueta e barra do elemento selecionado ─────────────────────── */
+
+.os-editor .gjs-badge {
+  border-radius: 4px 4px 0 0;
+  padding: 2px 6px;
+  font: 500 11px var(--font-sans);
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+}
+.os-editor .gjs-toolbar {
+  overflow: hidden;
+  border-radius: 6px;
+  background-color: var(--primary);
+  color: var(--primary-foreground);
+  box-shadow: 0 2px 8px color-mix(in oklch, black 20%, transparent);
+}
+.os-editor .gjs-toolbar-item {
+  width: 26px;
+  padding: 4px;
+}
+.os-editor .gjs-toolbar-item:hover {
+  background: color-mix(in oklch, white 18%, transparent);
+}
+.os-editor .gjs-resizer-h {
+  border-color: var(--primary);
+  border-radius: 2px;
+}
+
+/* ─── Seletor de cores (flutua fora dos painéis) ───────────────────────────── */
+
+.sp-container.gjs-editor-sp {
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background-color: var(--popover);
+  color: var(--popover-foreground);
+  box-shadow: 0 12px 32px color-mix(in oklch, black 22%, transparent);
+  font-family: var(--font-sans);
+}
+.gjs-editor-sp .sp-picker-container {
+  width: 190px;
+  padding: 0 0 0 10px;
+  margin-bottom: 0;
+  padding-bottom: 0;
+  border-left: 1px solid var(--border);
+}
+.gjs-editor-sp .sp-palette-container {
+  float: left;
+  padding: 0 10px 0 0;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+.gjs-editor-sp .sp-palette {
+  max-width: 154px;
+}
+.gjs-editor-sp .sp-palette .sp-thumb-el,
+.gjs-editor-sp .sp-palette .sp-thumb-el:hover {
+  width: 18px;
+  height: 18px;
+  margin: 2px;
+  border: 0;
+  border-radius: 5px;
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--foreground) 16%, transparent);
+  overflow: hidden;
+}
+.gjs-editor-sp .sp-palette .sp-thumb-inner {
+  border-radius: 5px;
+}
+.gjs-editor-sp .sp-palette .sp-thumb-el:hover,
+.gjs-editor-sp .sp-palette .sp-thumb-el.sp-thumb-active {
+  box-shadow:
+    0 0 0 2px var(--popover),
+    0 0 0 4px var(--primary);
+}
+.gjs-editor-sp .sp-palette-row-selection {
+  margin-top: 6px;
+  padding-top: 6px;
+  border-top: 1px solid var(--border);
+}
+.gjs-editor-sp .sp-color,
+.gjs-editor-sp .sp-hue,
+.gjs-editor-sp .sp-clear {
+  border: 0;
+  border-radius: 6px;
+}
+.gjs-editor-sp .sp-hue {
+  width: 12px;
+  left: auto;
+  right: 0;
+}
+.gjs-editor-sp .sp-color {
+  right: 22px;
+}
+.gjs-editor-sp .sp-dragger {
+  width: 10px;
+  height: 10px;
+  border: 2px solid white;
+  border-radius: 999px;
+  background: transparent;
+  box-shadow: 0 0 0 1px color-mix(in oklch, black 45%, transparent);
+}
+.gjs-editor-sp .sp-slider {
+  left: -2px;
+  width: 16px;
+  height: 4px;
+  border: 1px solid color-mix(in oklch, black 40%, transparent);
+  border-radius: 999px;
+  background: white;
+  opacity: 1;
+}
+.gjs-editor-sp .sp-alpha {
+  bottom: -16px;
+  height: 10px;
+  border-radius: 999px;
+  overflow: hidden;
+}
+.gjs-editor-sp .sp-alpha-inner {
+  border: 0;
+}
+.gjs-editor-sp .sp-alpha-handle {
+  width: 4px;
+  top: -2px;
+  bottom: -2px;
+  border: 1px solid color-mix(in oklch, black 40%, transparent);
+  border-radius: 2px;
+  background: white;
+  opacity: 1;
+}
+.gjs-editor-sp .sp-input-container {
+  width: 100%;
+  margin: 22px 0 0;
+}
+.gjs-editor-sp .sp-input {
+  height: 28px;
+  padding: 0 8px;
+  border: 1px solid var(--input);
+  border-radius: var(--os-field-radius);
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+}
+.gjs-editor-sp .sp-input:focus {
+  border-color: var(--ring);
+  outline: none;
+}
+.gjs-editor-sp .sp-button-container {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 6px;
+  margin-top: 26px;
+}
+/* O GrapesJS pinta o "Cancelar" de vermelho com !important; só !important vence. */
+.gjs-editor-sp .sp-cancel,
+.gjs-editor-sp .sp-cancel:hover {
+  position: static;
+  display: inline-flex;
+  align-items: center;
+  height: 28px;
+  margin: 0;
+  padding: 0 10px;
+  border-radius: var(--os-field-radius);
+  /* biome-ignore lint/complexity/noImportantStyles: sobrescreve o !important do GrapesJS */
+  color: var(--muted-foreground) !important;
+  font: 500 12px var(--font-sans);
+  text-decoration: none;
+}
+.gjs-editor-sp .sp-cancel:hover {
+  background: var(--os-hover);
+  /* biome-ignore lint/complexity/noImportantStyles: sobrescreve o !important do GrapesJS */
+  color: var(--foreground) !important;
+}
+.gjs-editor-sp .sp-button-container .sp-choose,
+.gjs-editor-sp .sp-button-container .sp-choose:hover,
+.gjs-editor-sp .sp-button-container .sp-choose:active {
+  height: 28px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: var(--os-field-radius);
+  background: var(--primary);
+  box-shadow: none;
+  color: var(--primary-foreground);
+  font: 500 12px var(--font-sans);
+  text-shadow: none;
+  cursor: pointer;
+}
+.gjs-editor-sp .sp-button-container .sp-choose:hover {
+  background: color-mix(in oklch, var(--primary) 88%, black);
+}
+.gjs-editor-sp .sp-clear-display {
+  border-radius: 6px;
+}
+
+/* ─── Configurações: "Âncora" (id) por último, como "Avançado" ─────────────── */
+
+.os-panel .gjs-trt-trait__wrp-id {
+  order: 99;
+  padding-top: 12px;
+  border-top: 1px dashed var(--border);
+}
+.os-panel .gjs-trt-trait__wrp-id::before {
+  content: "Avançado";
+  display: block;
+  margin-bottom: 8px;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+/* "Aplicando em": o nome do elemento basta (o #id gerado não diz nada a quem não programa). */
+.os-panel .gjs-clm-sel-id {
+  display: none;
+}

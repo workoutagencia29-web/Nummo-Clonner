@@ -1,0 +1,73 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ASSISTA: O protocolo de 7 minutos que desinflama as articulações</title>
+  <meta name="robots" content="noindex">
+  <link rel="preconnect" href="https://scripts.converteai.net">
+  <link rel="preconnect" href="https://cdn.converteai.net">
+  <link rel="dns-prefetch" href="https://images.converteai.net">
+  <link rel="stylesheet" href="css/vsl.css">
+  <link rel="icon" type="image/png" href="img/logo.png">
+</head>
+<body>
+  <header class="topo">
+    <img src="img/logo.png" alt="Protocolo Articular" width="180" height="48">
+  </header>
+
+  <main class="vsl">
+    <p class="alerta">⚠️ Atenção: este vídeo pode sair do ar a qualquer momento</p>
+    <h1>Médico revela o protocolo caseiro de 7 minutos que desinflama joelhos e costas</h1>
+    <p class="som">🔊 Verifique se o som do seu aparelho está ligado</p>
+
+    <div id="player-vsl" class="player">
+      <vturb-smartplayer id="vid-abc123" style="display: block; margin: 0 auto; width: 100%; max-width: 400px;"></vturb-smartplayer>
+      <script type="text/javascript" src="https://scripts.converteai.net/acc/players/abc123/player.js" async></script>
+    </div>
+
+    <!-- Aparece após 332 segundos de vídeo -->
+    <section class="esconder cta-oferta" id="oferta">
+      <h2>Garanta o Protocolo Articular com 60% de desconto</h2>
+      <img src="img/kit-3-potes.jpg" alt="Kit com 3 potes" width="480" height="320">
+      <p class="preco">12x de <strong>R$ 19,90</strong> ou R$ 197,00 à vista</p>
+      <a class="botao" href="https://pay.kiwify.com.br/Pr0t0c0l0?afid=vsl01">Quero o protocolo com desconto</a>
+      <img src="img/selos.png" alt="Compra segura, garantia de 30 dias" width="360" height="60">
+    </section>
+
+    <section class="esconder garantia">
+      <h2>Garantia incondicional de 30 dias</h2>
+      <p>Se você não sentir diferença, devolvemos 100% do seu dinheiro. Sem perguntas.</p>
+    </section>
+
+    <section class="depoimentos-video">
+      <h2>Veja o depoimento de quem já usou</h2>
+      <div class="video-youtube">
+        <iframe width="560" height="315" src="https://www.youtube.com/embed/M7lc1UVf-VE?rel=0&amp;modestbranding=1" title="Depoimento da dona Marta" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen></iframe>
+      </div>
+      <video class="video-nativo" autoplay muted playsinline loop poster="img/poster.jpg" width="480" height="270">
+        <source src="midia/depoimento.mp4" type="video/mp4">
+        Seu navegador não suporta vídeo.
+      </video>
+    </section>
+  </main>
+
+  <footer class="rodape">
+    <p>Este produto não substitui o parecer médico profissional. Sempre consulte um médico para tratar de assuntos relativos à saúde.</p>
+    <p>Copyright © 2024 Protocolo Articular – Todos os direitos reservados.</p>
+  </footer>
+
+  <script type="text/javascript">
+    var SECONDS_TO_DISPLAY = 332;
+    var CLASS_TO_DISPLAY = ".esconder";
+
+    /* DAQUI PARA BAIXO NÃO PRECISA ALTERAR */
+    var player = document.querySelector("vturb-smartplayer");
+    if (player) {
+      player.addEventListener("player:ready", function () {
+        player.displayHiddenElements(SECONDS_TO_DISPLAY, [CLASS_TO_DISPLAY], { persist: true });
+      });
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,36 @@
+body {
+  margin: 0;
+  font-family: system-ui, sans-serif;
+  background: #e7f5ff;
+}
+
+.faixa {
+  background: #1971c2;
+  color: #fff;
+  text-align: center;
+  padding: 8px;
+  font-weight: 700;
+}
+
+.produto {
+  display: grid;
+  grid-template-columns: 3fr 2fr;
+  gap: 32px;
+  max-width: 1200px;
+  margin: 32px auto;
+}
+
+.hero {
+  width: 100%;
+  height: auto;
+  border-radius: 16px;
+}
+
+.botao {
+  display: inline-block;
+  background: #1971c2;
+  color: #fff;
+  padding: 16px 32px;
+  border-radius: 8px;
+  text-decoration: none;
+}

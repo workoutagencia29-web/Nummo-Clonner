@@ -1,0 +1,58 @@
+{
+  "checkouts": [
+    {
+      "url": "https://pay.hotmart.com/A12345678B?off=abc123&checkoutMode=10",
+      "plataforma": "Hotmart",
+      "ocorrencias": 3,
+      "obs": "2 com &amp; e 1 com & cru no HTML"
+    },
+    {
+      "url": "https://pay.hotmart.com/A12345678B?off=def456&checkoutMode=10",
+      "plataforma": "Hotmart",
+      "ocorrencias": 1
+    }
+  ],
+  "naoCheckout": [
+    "https://wa.me/5511987654321?text=Ol%C3%A1%2C%20tenho%20uma%20d%C3%BAvida%20sobre%20o%20curso"
+  ],
+  "funil": [
+    {
+      "caminho": "/upsell",
+      "tipo": "UPSELL",
+      "paginaExiste": "upsell/index.html"
+    },
+    {
+      "caminho": "/obrigado",
+      "tipo": "THANK_YOU",
+      "paginaExiste": "obrigado/index.html"
+    }
+  ],
+  "cadeiaImport": [
+    "/wp-content/themes/oferta/style.css",
+    "/wp-content/themes/oferta/assets/css/base.css",
+    "/wp-content/themes/oferta/assets/css/tipografia.css"
+  ],
+  "fonte": "/wp-content/themes/oferta/fonts/inter-latin-wght-normal.woff2",
+  "imagensPreguicosas": {
+    "data-src": [
+      "/wp-content/uploads/2024/05/bonus-1-480.jpg",
+      "/wp-content/uploads/2024/05/bonus-2-480.jpg"
+    ],
+    "data-srcset": [
+      "/wp-content/uploads/2024/05/bonus-1-960.jpg",
+      "/wp-content/uploads/2024/05/bonus-2-960.jpg"
+    ],
+    "data-bg": [
+      "/wp-content/uploads/2024/05/faixa-bonus.jpg"
+    ],
+    "fundoElementor": [
+      "/wp-content/uploads/2024/05/fundo-oferta.jpg",
+      "/wp-content/uploads/2024/05/fundo-oferta-mobile.jpg"
+    ]
+  },
+  "ogImage": "__ORIGIN__/wp-content/uploads/2024/05/og-oferta.jpg",
+  "rastreadores": 0,
+  "naoFunil": [
+    "/politica-de-privacidade/"
+  ]
+}

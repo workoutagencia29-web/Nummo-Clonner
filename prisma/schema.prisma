@@ -1,0 +1,732 @@
+// Offer Studio — modelo de dados.
+//
+// Convenções:
+// - IDs são cuid (string), exceto tabelas de log que crescem rápido (Int autoincrement).
+// - Nomes que precisam ser únicos "sem diferenciar maiúsculas" guardam uma coluna
+//   `nameKey` normalizada (minúsculas, sem acento) com índice único.
+// - Configurações flexíveis (SEO, LGPD, rastreamento) ficam em colunas Json validadas
+//   por schemas zod em src/lib/validation — o banco não conhece a forma interna.
+// - Índices parciais (ex.: "uma página inicial por oferta") ficam em SQL puro nas
+//   migrations, porque o Prisma não os expressa no schema.
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Autenticação (Better Auth). Usuário único: um hook impede criar uma segunda conta.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model User {
+  id            String    @id
+  name          String
+  email         String    @unique
+  emailVerified Boolean   @default(false)
+  image         String?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  sessions      Session[]
+  accounts      Account[]
+
+  @@map("user")
+}
+
+model Session {
+  id        String   @id
+  expiresAt DateTime
+  token     String   @unique
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  ipAddress String?
+  userAgent String?
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("session")
+}
+
+model Account {
+  id                    String    @id
+  accountId             String
+  providerId            String
+  userId                String
+  user                  User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  accessToken           String?
+  refreshToken          String?
+  idToken               String?
+  accessTokenExpiresAt  DateTime?
+  refreshTokenExpiresAt DateTime?
+  scope                 String?
+  password              String?
+  createdAt             DateTime  @default(now())
+  updatedAt             DateTime  @updatedAt
+
+  @@index([userId])
+  @@map("account")
+}
+
+model Verification {
+  id         String   @id
+  identifier String
+  value      String
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([identifier])
+  @@map("verification")
+}
+
+model RateLimit {
+  id          String @id
+  key         String @unique
+  count       Int
+  lastRequest BigInt
+
+  @@map("rateLimit")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Organização
+// ─────────────────────────────────────────────────────────────────────────────
+
+model Folder {
+  id        String   @id @default(cuid())
+  name      String
+  nameKey   String   @unique
+  position  Int      @default(0)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  offers    Offer[]
+}
+
+model Tag {
+  id        String     @id @default(cuid())
+  name      String
+  nameKey   String     @unique
+  /// Chave da paleta de cores do painel (ex.: "blue", "green").
+  color     String     @default("slate")
+  createdAt DateTime   @default(now())
+  offers    OfferTag[]
+}
+
+model OfferTag {
+  offerId String
+  tagId   String
+  offer   Offer  @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  tag     Tag    @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([offerId, tagId])
+  @@index([tagId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ofertas e páginas (funil)
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum OfferStatus {
+  DRAFT // Rascunho
+  LIVE // No ar (marcado por você depois de subir o ZIP na hospedagem)
+  ARCHIVED // Arquivada
+}
+
+model Offer {
+  id           String      @id @default(cuid())
+  name         String
+  notes        String?
+  status       OfferStatus @default(DRAFT)
+  /// Endereço onde você hospedou a oferta (informativo, aparece no card).
+  liveUrl      String?
+  /// URL original, quando a oferta veio de um clone.
+  sourceUrl    String?
+  folderId     String?
+  folder       Folder?     @relation(fields: [folderId], references: [id], onDelete: SetNull)
+  /// Chave no storage da miniatura do card.
+  thumbnailKey String?
+  /// SEO padrão, dados da empresa (páginas legais) e banner LGPD. Ver OfferSettingsSchema.
+  settings     Json        @default("{}")
+  /// Consentimento, estratégia de carregamento, repasse de parâmetros e código livre.
+  tracking     Json        @default("{}")
+  /// Preenchido quando a oferta está na lixeira.
+  deletedAt    DateTime?
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+
+  pages      Page[]
+  tags       OfferTag[]
+  pixels     PixelConfig[]
+  eventRules EventRule[]
+  cloneJobs  CloneJob[]
+  exports    Export[]
+  assets     Asset[]
+  pixelTests PixelTestSession[]
+  links      OfferLink[]
+
+  @@index([folderId])
+  @@index([deletedAt, updatedAt])
+  @@index([status])
+}
+
+enum OfferLinkKind {
+  CHECKOUT
+  UPSELL
+  DOWNSELL
+  WHATSAPP
+  OTHER
+}
+
+/// Links da oferta (checkout principal, upsell, WhatsApp…). Botões das páginas
+/// guardam só a chave (data-os-link="checkout"); trocar a URL aqui atualiza todos
+/// os botões de todas as páginas na prévia e no ZIP.
+model OfferLink {
+  id        String        @id @default(cuid())
+  offerId   String
+  offer     Offer         @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  /// Chave estável usada nos botões (minúsculas, números e hífen).
+  key       String
+  label     String
+  url       String
+  kind      OfferLinkKind @default(CHECKOUT)
+  position  Int           @default(0)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  @@unique([offerId, key])
+  @@index([offerId, position])
+}
+
+enum PageType {
+  SALES // Página de vendas
+  VSL
+  ADVERTORIAL
+  QUIZ
+  CAPTURE // Captura de leads
+  UPSELL
+  DOWNSELL
+  THANK_YOU
+  LEGAL
+  OTHER
+}
+
+enum CloneMode {
+  EDITABLE // Snapshot do DOM, 100% editável
+  PRESERVE_JS // Mantém os scripts originais (quizzes, animações)
+}
+
+model Page {
+  id         String    @id @default(cuid())
+  offerId    String
+  offer      Offer     @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  name       String
+  /// Pasta da página no ZIP exportado (minúsculas, números e hífen).
+  slug       String
+  type       PageType  @default(SALES)
+  position   Int       @default(0)
+  /// A página inicial vai para a raiz do ZIP (index.html). Uma por oferta (índice parcial).
+  isHome     Boolean   @default(false)
+  cloneMode  CloneMode @default(EDITABLE)
+  /// URL de origem, quando clonada.
+  sourceUrl  String?
+  /// Título, descrição, favicon, imagem de compartilhamento, noindex. Ver PageSeoSchema.
+  seo        Json      @default("{}")
+  /// Código livre no head / início e fim do body, com categoria de consentimento.
+  customCode Json      @default("{}")
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+
+  variants      PageVariant[]
+  removedItems  RemovedItem[]
+  checkoutLinks CheckoutLink[]
+  eventRules    EventRule[]
+
+  @@unique([offerId, slug])
+  @@index([offerId, position])
+}
+
+/// Versão de uma página para teste A/B. Toda página tem ao menos a variação de
+/// controle ("A"). No ZIP, cada variação sai numa pasta (oferta-a/, oferta-b/...).
+model PageVariant {
+  id        String         @id @default(cuid())
+  pageId    String
+  page      Page           @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  /// Letra/nome curto: "A", "B"...
+  name      String
+  label     String?
+  isControl Boolean        @default(false)
+  /// Percentual de tráfego no divisor opcional do ZIP (0–100).
+  weight    Int            @default(100)
+  position  Int            @default(0)
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+  documents PageDocument[]
+
+  @@unique([pageId, name])
+  @@index([pageId])
+}
+
+enum DeviceTarget {
+  ALL // Página responsiva: um documento para todos os dispositivos
+  DESKTOP // Site original serve HTML diferente para desktop...
+  MOBILE // ...e para celular
+}
+
+/// Conteúdo editável de uma variação. `html` é a fonte original normalizada (clone,
+/// importação ou modelo); `project` é o JSON do editor (gzip), criado na primeira
+/// abertura no editor e usado daí em diante.
+model PageDocument {
+  id        String        @id @default(cuid())
+  variantId String
+  variant   PageVariant   @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  device    DeviceTarget  @default(ALL)
+  html      String?
+  project   Bytes?
+  /// Modo "Preservar JS": caminho original → arquivo no storage, para que URLs
+  /// montadas pelos scripts da página continuem funcionando.
+  assetMap  Json?
+  /// Incrementa a cada gravação; o autosave envia a revisão que conhece para
+  /// detectar que a página foi alterada em outra aba.
+  revision  Int           @default(0)
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+  versions  PageVersion[]
+
+  @@unique([variantId, device])
+}
+
+enum VersionKind {
+  AUTO
+  MANUAL
+  CLONE
+  IMPORT
+  RESTORE
+  BULK_REPLACE
+  EXPORT
+}
+
+/// Histórico de versões. O conteúdo fica no storage (arquivo .json.gz) para o
+/// banco não crescer com centenas de snapshots.
+model PageVersion {
+  id         String       @id @default(cuid())
+  documentId String
+  document   PageDocument @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  kind       VersionKind
+  label      String?
+  storageKey String
+  bytes      Int
+  createdAt  DateTime     @default(now())
+
+  @@index([documentId, createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Arquivos (imagens, fontes, vídeos, CSS e JS clonados, uploads)
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum AssetKind {
+  IMAGE
+  FONT
+  VIDEO
+  STYLE
+  SCRIPT
+  ICON
+  DOCUMENT
+  OTHER
+}
+
+/// Arquivos são endereçados pelo hash do conteúdo: o mesmo arquivo nunca é
+/// guardado duas vezes no disco.
+model Asset {
+  id           String    @id @default(cuid())
+  offerId      String?
+  /// Excluir a oferta apaga estes registros (os arquivos, por hash, podem ser
+  /// usados por outras ofertas e ficam no disco).
+  offer        Offer?    @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  sha256       String
+  /// Caminho no storage, ex.: "a/3f/3f9c…e1.webp".
+  key          String
+  kind         AssetKind
+  mime         String
+  bytes        Int
+  width        Int?
+  height       Int?
+  originalName String?
+  sourceUrl    String?
+  createdAt    DateTime  @default(now())
+
+  @@unique([offerId, key])
+  @@index([offerId, kind])
+  @@index([sha256])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Clonagem
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum CloneSource {
+  URL
+  ZIP
+  HTML
+}
+
+enum CloneStatus {
+  QUEUED
+  RUNNING
+  REVIEW // Pronto para revisar e salvar
+  SAVED
+  FAILED
+  CANCELED
+}
+
+model CloneJob {
+  id           String      @id @default(cuid())
+  source       CloneSource
+  sourceUrl    String?
+  /// Arquivo enviado (ZIP ou HTML colado) no storage.
+  uploadKey    String?
+  /// Dispositivos, modo, limite de vídeo, páginas do funil escolhidas.
+  options      Json        @default("{}")
+  status       CloneStatus @default(QUEUED)
+  progress     Int         @default(0)
+  step         String?
+  errorCode    String?
+  errorMessage String?
+  /// Prints, resumo da detecção, sugestões de funil, dependências externas.
+  result       Json?
+  bossJobId    String?
+  /// Clones de páginas do funil apontam para o job da página principal.
+  parentJobId  String?
+  parent       CloneJob?   @relation("CloneFunnel", fields: [parentJobId], references: [id], onDelete: SetNull)
+  children     CloneJob[]  @relation("CloneFunnel")
+  offerId      String?
+  offer        Offer?      @relation(fields: [offerId], references: [id], onDelete: SetNull)
+  createdAt    DateTime    @default(now())
+  updatedAt    DateTime    @updatedAt
+  startedAt    DateTime?
+  finishedAt   DateTime?
+
+  logs          CloneLog[]
+  removedItems  RemovedItem[]
+  checkoutLinks CheckoutLink[]
+
+  @@index([status, createdAt])
+  @@index([parentJobId])
+  @@index([offerId])
+}
+
+enum LogLevel {
+  INFO
+  SUCCESS
+  WARN
+  ERROR
+}
+
+model CloneLog {
+  id      Int      @id @default(autoincrement())
+  jobId   String
+  job     CloneJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  at      DateTime @default(now())
+  level   LogLevel @default(INFO)
+  message String
+  url     String?
+  bytes   Int?
+
+  @@index([jobId, id])
+}
+
+enum RemovedCategory {
+  PIXEL
+  ANALYTICS
+  TAG_MANAGER
+  CHAT
+  ADS
+  OTHER
+}
+
+/// Rastreadores/chats removidos do clone. O trecho original fica guardado para
+/// poder restaurar.
+model RemovedItem {
+  id        String          @id @default(cuid())
+  jobId     String?
+  job       CloneJob?       @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  pageId    String?
+  page      Page?           @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  vendor    String
+  category  RemovedCategory
+  pixelId   String?
+  snippet   String
+  location  String
+  restored  Boolean         @default(false)
+  createdAt DateTime        @default(now())
+
+  @@index([jobId])
+  @@index([pageId])
+}
+
+enum CheckoutSource {
+  HREF
+  ONCLICK
+  FORM
+  SCRIPT
+  MANUAL
+}
+
+/// Links de checkout detectados na clonagem (a fonte de verdade depois é o
+/// documento do editor, onde eles ficam marcados com data-os-checkout).
+model CheckoutLink {
+  id         String         @id @default(cuid())
+  jobId      String?
+  job        CloneJob?      @relation(fields: [jobId], references: [id], onDelete: SetNull)
+  pageId     String?
+  page       Page?          @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  platform   String
+  url        String
+  label      String?
+  source     CheckoutSource
+  confidence Int            @default(100)
+  createdAt  DateTime       @default(now())
+
+  @@index([jobId])
+  @@index([pageId])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pixels e rastreamento
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PixelVendor {
+  META
+  TIKTOK
+  KWAI
+  GA4
+  GOOGLE_ADS
+  UTMIFY
+}
+
+model PixelConfig {
+  id             String      @id @default(cuid())
+  offerId        String
+  offer          Offer       @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  vendor         PixelVendor
+  enabled        Boolean     @default(true)
+  pixelId        String
+  label          String?
+  /// Token da API de Conversões/Events API, criptografado (AES-256-GCM). Só é
+  /// escrito no eventos.php do ZIP, nunca no HTML.
+  accessTokenEnc String?
+  testEventCode  String?
+  /// Opções do fornecedor (ex.: rótulos de conversão do Google Ads).
+  options        Json        @default("{}")
+  createdAt      DateTime    @default(now())
+  updatedAt      DateTime    @updatedAt
+
+  @@unique([offerId, vendor, pixelId])
+  @@index([offerId])
+}
+
+/// Eventos neutros (cada plataforma recebe o nome dela, ver src/lib/tracking/vendors.ts).
+enum TrackingEvent {
+  PAGE_VIEW
+  VIEW_CONTENT
+  INITIATE_CHECKOUT
+  LEAD
+  COMPLETE_REGISTRATION
+  CONTACT
+  ADD_TO_CART
+  PURCHASE
+}
+
+enum EventTrigger {
+  PAGE_LOAD
+  TIME_ON_PAGE // value = segundos
+  SCROLL_DEPTH // value = %
+  CHECKOUT_CLICK
+  ELEMENT_CLICK // selector
+  FORM_SUBMIT
+}
+
+/// "Qual evento dispara, quando e onde". pageId nulo = todas as páginas da oferta.
+model EventRule {
+  id        String        @id @default(cuid())
+  offerId   String
+  offer     Offer         @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  pageId    String?
+  page      Page?         @relation(fields: [pageId], references: [id], onDelete: Cascade)
+  event     TrackingEvent
+  trigger   EventTrigger
+  value     Int?
+  selector  String?
+  enabled   Boolean       @default(true)
+  createdAt DateTime      @default(now())
+
+  @@index([offerId, createdAt])
+  @@index([pageId])
+}
+
+/// Sessão da tela de teste de pixels: a prévia roda em modo teste e reporta o que
+/// carregou e o que disparou.
+model PixelTestSession {
+  id         String           @id @default(cuid())
+  offerId    String
+  offer      Offer            @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  pageId     String?
+  token      String           @unique
+  createdAt  DateTime         @default(now())
+  expiresAt  DateTime
+  /// Eventos recebidos (limite por sessão sem contar a tabela a cada evento).
+  eventCount Int              @default(0)
+  events     PixelTestEvent[]
+
+  @@index([offerId])
+  @@index([expiresAt])
+}
+
+enum PixelTestStatus {
+  LOADED
+  FIRED
+  BLOCKED
+  ERROR
+}
+
+model PixelTestEvent {
+  id        Int              @id @default(autoincrement())
+  sessionId String
+  session   PixelTestSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  at        DateTime         @default(now())
+  vendor    String
+  event     String
+  status    PixelTestStatus
+  detail    Json             @default("{}")
+
+  @@index([sessionId, id])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Exportação (download ZIP) e backup
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum JobStatus {
+  QUEUED
+  RUNNING
+  DONE
+  FAILED
+}
+
+/// Download ZIP de uma oferta (Fase 5). O worker pega da fila (QUEUED), monta o
+/// ZIP em <DATA_DIR>/storage/exports/<offerId>/<id>.zip e guarda os EXPORTS_KEPT_PER_OFFER
+/// mais recentes de cada oferta (src/lib/export/options.ts).
+model Export {
+  id           String    @id @default(cuid())
+  offerId      String
+  offer        Offer     @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  status       JobStatus @default(QUEUED)
+  progress     Int       @default(0)
+  /// Etapa atual em pt-BR ("Copiando imagens e arquivos…").
+  step         String?
+  /// Divisor A/B, eventos.php, HTML otimizado (ExportOptionsSchema).
+  options      Json      @default("{}")
+  fileKey      String?
+  /// Nome sugerido do arquivo ("minha-oferta-2026-09-29.zip").
+  fileName     String?
+  bytes        Int?
+  /// Avisos em pt-BR (arquivos que faltaram, "Preservar JS" só na raiz do domínio…).
+  warnings     Json      @default("[]")
+  errorMessage String?
+  createdAt    DateTime  @default(now())
+  startedAt    DateTime?
+  finishedAt   DateTime?
+
+  @@index([offerId, createdAt])
+  @@index([status, createdAt])
+}
+
+enum BackupKind {
+  AUTO
+  MANUAL
+  /// Feito sozinho logo antes de uma restauração (o estado de antes, para voltar atrás).
+  SAFETY
+}
+
+/// Backups (Fase 6): fila do worker (QUEUED → RUNNING → DONE/FAILED) e histórico
+/// deste Mac. O arquivo vai para a pasta escolhida em Configurações → Backup
+/// (src/server/services/backup). Esta tabela não entra no próprio backup e uma
+/// restauração não mexe nela: é o histórico deste computador.
+model Backup {
+  id           String     @id @default(cuid())
+  kind         BackupKind
+  status       JobStatus  @default(QUEUED)
+  progress     Int        @default(0)
+  /// Etapa atual em pt-BR ("Copiando imagens e arquivos…").
+  step         String?
+  /// Caminho absoluto do arquivo gerado (pasta de backup escolhida por você).
+  filePath     String?
+  bytes        BigInt?
+  offerCount   Int?
+  /// Avisos em pt-BR (arquivo que sumiu do disco durante o backup…).
+  warnings     Json       @default("[]")
+  errorMessage String?
+  createdAt    DateTime   @default(now())
+  startedAt    DateTime?
+  finishedAt   DateTime?
+
+  @@index([status, createdAt])
+  @@index([kind, status, finishedAt])
+}
+
+/// Pedido de restauração de um backup (executado pelo worker, com as outras
+/// tarefas em pausa). Como Backup, fica fora do backup e da restauração: a linha
+/// é marcada como concluída na mesma transação que troca os dados.
+model BackupRestore {
+  id             String    @id @default(cuid())
+  status         JobStatus @default(QUEUED)
+  progress       Int       @default(0)
+  step           String?
+  /// Arquivo de backup restaurado (caminho absoluto).
+  sourcePath     String
+  /// SHA-256 do manifest confirmado (o worker recusa se o arquivo mudou desde a confirmação).
+  manifestSha256 String?
+  /// E-mail da conta que vem no backup (é com ela que se entra depois).
+  accountEmail   String?
+  /// Backup de segurança do estado anterior (feito antes de trocar os dados).
+  safetyPath     String?
+  errorMessage   String?
+  createdAt      DateTime  @default(now())
+  startedAt      DateTime?
+  finishedAt     DateTime?
+
+  @@index([status, createdAt])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Sistema
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Link temporário de prévia (servidor de prévia em <id>.localhost:3001).
+/// `target` diz o que mostrar: um resultado de clonagem ou um documento de página.
+model PreviewToken {
+  id        String   @id
+  target    Json
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+
+  @@index([expiresAt])
+}
+
+/// Configurações gerais (pasta de backup, dados padrão da empresa etc.).
+model AppSetting {
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}
+
+/// Sinal de vida dos processos (worker) para o painel mostrar se estão rodando.
+model ServiceHeartbeat {
+  name       String   @id
+  lastSeenAt DateTime
+  info       Json     @default("{}")
+}

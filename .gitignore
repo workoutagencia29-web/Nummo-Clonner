@@ -39,3 +39,11 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# offer studio
+/data/
+/src/generated/
+/test-results/
+/playwright-report/
+/tests/.auth/
+!.env.example

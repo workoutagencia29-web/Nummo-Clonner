@@ -1,0 +1,6 @@
+/* Também chega com atraso (delayMs vale para todos os arquivos do site). */
+body {
+  font-family: system-ui, sans-serif;
+  background: #fff9db;
+  padding: 32px;
+}
