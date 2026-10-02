@@ -325,7 +325,7 @@ export async function createVariant(input: CreateVariantInput): Promise<CreatedV
       const docs = from
         ? await tx.pageDocument.findMany({
             where: { variantId: from.id },
-            select: { device: true, html: true, project: true, assetMap: true },
+            select: { device: true, html: true, project: true, assetMap: true, editableHtml: true },
           })
         : [];
       documents = docs.map((d) => ({
@@ -334,6 +334,7 @@ export async function createVariant(input: CreateVariantInput): Promise<CreatedV
         project: d.project,
         // "Preservar JS": arquivos nos caminhos originais (sem isso, 404 na cópia).
         assetMap: d.assetMap ?? Prisma.JsonNull,
+        editableHtml: d.editableHtml,
         revision: 0,
       }));
       if (!documents.length) documents = [{ device: "ALL", html: pageStart(null, info.name).html }];

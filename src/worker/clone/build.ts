@@ -31,7 +31,13 @@ import type { LogFn, VirtualSite } from "./capture";
 import { decodeText, fixMetaCharset } from "./charset";
 import { convertJsNavigation, detectCheckouts, markCheckouts } from "./checkouts";
 import { collectCssRefs, rewriteCss } from "./css";
-import { convertToggles, markVideoFacades, normalizeAnimations, sanitizeScriptUrls } from "./editable-compat";
+import {
+  convertScriptPlayers,
+  convertToggles,
+  markVideoFacades,
+  normalizeAnimations,
+  sanitizeScriptUrls,
+} from "./editable-compat";
 import { type createFetcher, formatLimit } from "./fetcher";
 import { suggestFunnel } from "./funnel";
 import { collectHtmlRefs, documentBase, type HtmlRef, removeBaseTag, rewriteHtmlRefs } from "./html-assets";
@@ -610,6 +616,7 @@ async function buildEditable(capture: Capture, store: AssetStore, ctx: BuildCont
   // O que os scripts faziam e que a página precisa sem eles (antes de removê-los).
   normalizeAnimations($);
   markVideoFacades($);
+  convertScriptPlayers($, documentBase($, baseUrl));
   convertToggles($);
   convertJsNavigation($, baseUrl, {
     localOrigin: ctx.localOrigin,

@@ -5,7 +5,7 @@
 import { randomUUID } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { gunzipSync, gzipSync } from "node:zlib";
-import type { VersionKind } from "@/generated/prisma/client";
+import { Prisma, type VersionKind } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { baseStylesheetText, finalizeFromEditor, linkBaseStylesheet, prepareForEditor } from "@/lib/editor-html";
 import { UserError } from "@/lib/errors";
@@ -109,6 +109,12 @@ export interface EditorPayload {
   html: string | null;
   device: "ALL" | "DESKTOP" | "MOBILE";
   cloneMode: "EDITABLE" | "PRESERVE_JS";
+  /**
+   * "Preservar JS" com a cópia editável da clonagem guardada: "Converter para
+   * editável" troca a página por ela (convertToEditable). Sem ela (páginas
+   * salvas antes), o editor abre o HTML original sem os scripts.
+   */
+  convertible?: boolean;
   page: { id: string; name: string; slug: string; type: string };
   variant: { id: string; name: string; label?: string | null; isControl?: boolean };
   /**
@@ -178,6 +184,7 @@ export async function getEditorPayload(documentId: string): Promise<EditorPayloa
     // "Preservar JS" vale para o documento com os arquivos originais (assetMap).
     // Uma versão A/B criada de um modelo ou em branco nessa página é comum.
     cloneMode: page.cloneMode === "PRESERVE_JS" && doc.assetMap === null ? "EDITABLE" : page.cloneMode,
+    convertible: page.cloneMode === "PRESERVE_JS" && doc.assetMap !== null && Boolean(doc.editableHtml),
     page: { id: page.id, name: page.name, slug: page.slug, type: page.type },
     variant: {
       id: doc.variant.id,
@@ -199,9 +206,35 @@ export async function getEditorPayload(documentId: string): Promise<EditorPayloa
 
 // ─── Versões ─────────────────────────────────────────────────────────────────
 
+/** Estado "Preservar JS" de um documento: arquivos nos caminhos originais e a cópia editável. */
+interface PreserveState {
+  assetMap: unknown;
+  editableHtml: string | null;
+}
+
 interface VersionSnapshot {
   project: unknown | null;
   html: string | null;
+  /**
+   * Modo da página quando a versão foi gravada: null = editável; objeto =
+   * "Preservar JS". Restaurar volta o modo junto. Ausente nas versões gravadas
+   * antes desta marca (restaurar não mexe no modo).
+   */
+  preserve?: PreserveState | null;
+}
+
+function preserveStateOf(doc: { assetMap: unknown; editableHtml: string | null }): PreserveState | null {
+  return doc.assetMap === null ? null : { assetMap: doc.assetMap, editableHtml: doc.editableHtml };
+}
+
+/**
+ * O modo da página acompanha os documentos: "Preservar JS" enquanto algum
+ * documento dela ainda tem os arquivos nos caminhos originais (assetMap).
+ */
+async function syncCloneMode(pageId: string) {
+  const docs = await prisma.pageDocument.findMany({ where: { variant: { pageId } }, select: { assetMap: true } });
+  const cloneMode = docs.some((d) => d.assetMap !== null) ? "PRESERVE_JS" : "EDITABLE";
+  await prisma.page.updateMany({ where: { id: pageId, NOT: { cloneMode } }, data: { cloneMode } });
 }
 
 /** Pasta dos arquivos de versão de um documento no storage. */
@@ -264,14 +297,18 @@ export async function createVersion(
   { openAsIs = false }: { openAsIs?: boolean } = {},
 ) {
   let data = snapshot;
-  if (!data) {
+  if (!data || !("preserve" in data)) {
     // Mesma regra de documentOrThrow: documentos de ofertas na lixeira não ganham versões.
     const doc = await prisma.pageDocument.findFirst({
       where: { id: documentId, variant: { page: { offer: { deletedAt: null } } } },
-      select: { project: true, html: true },
+      select: { project: true, html: true, assetMap: true, editableHtml: true },
     });
     if (!doc) throw new UserError("Página não encontrada. Ela pode ter sido excluída.");
-    data = { project: doc.project ? unpackProject(doc.project) : null, html: doc.html };
+    // A versão guarda também o modo atual da página (com ou sem os scripts originais).
+    data = {
+      ...(data ?? { project: doc.project ? unpackProject(doc.project) : null, html: doc.html }),
+      preserve: preserveStateOf(doc),
+    };
   }
   if (openAsIs && data.project) data = { ...data, project: withProjectFormat(data.project) };
   return insertVersion(documentId, kind, label, await writeSnapshot(documentId, data));
@@ -377,7 +414,9 @@ export async function saveEditorDocument(input: SaveInput) {
       where: { documentId: doc.id, kind: { in: ["CLONE", "IMPORT"] } },
       select: { id: true },
     });
-    if (!hasOriginal) original = await writeSnapshot(doc.id, { project: null, html: doc.html });
+    if (!hasOriginal) {
+      original = await writeSnapshot(doc.id, { project: null, html: doc.html, preserve: preserveStateOf(doc) });
+    }
   }
 
   const finalHtml = finalizeFromEditor(input.html, input.css, doc.html);
@@ -433,13 +472,25 @@ export async function restoreVersion(documentId: string, versionId: string) {
   const before = await createVersion(doc.id, "RESTORE", "Antes de restaurar uma versão", {
     project: doc.project ? unpackProject(doc.project) : null,
     html: doc.html,
+    preserve: preserveStateOf(doc),
   });
   const next = doc.revision + 1;
+  // Versões com o modo gravado voltam com ele (ex.: "Original com scripts" depois de converter).
+  const mode =
+    snapshot.preserve === undefined
+      ? {}
+      : snapshot.preserve === null
+        ? { assetMap: Prisma.DbNull, editableHtml: null }
+        : {
+            assetMap: (snapshot.preserve.assetMap ?? {}) as Prisma.InputJsonValue,
+            editableHtml: snapshot.preserve.editableHtml,
+          };
   const { count } = await prisma.pageDocument.updateMany({
     where: { id: doc.id, revision: doc.revision },
     data: {
       project: snapshot.project ? packProject(snapshot.project) : null,
       html: snapshot.html,
+      ...mode,
       revision: next,
     },
   });
@@ -448,8 +499,68 @@ export async function restoreVersion(documentId: string, versionId: string) {
     await discardVersion(before.id);
     throw new UserError(RESTORE_CONFLICT_MESSAGE);
   }
+  if (snapshot.preserve !== undefined) await syncCloneMode(doc.variant.page.id);
   const now = new Date();
   await prisma.page.update({ where: { id: doc.variant.page.id }, data: { updatedAt: now } });
   await prisma.offer.update({ where: { id: doc.variant.page.offer.id }, data: { updatedAt: now } });
   return { revision: next };
+}
+
+// ─── Converter "Preservar JS" para editável ──────────────────────────────────
+
+export const CONVERT_NOT_AVAILABLE =
+  "Esta página não tem a cópia editável da clonagem (ela foi salva numa versão antiga do Offer Studio). Clone a página de novo e escolha “Editável”.";
+export const CONVERT_CONFLICT_MESSAGE = "Esta página foi salva em outra aba agora. Tente converter de novo.";
+
+/**
+ * "Converter para editável": troca a página "Preservar JS" pela cópia editável
+ * da mesma clonagem — a página como aparece (animações no estado final, imagens
+ * carregadas, vídeos no player comum), sem os scripts do site original. O
+ * editor não roda scripts, então abrir o HTML original nele mostraria a página
+ * em branco onde os scripts montavam o conteúdo.
+ *
+ * Vale para a versão A/B inteira (computador e celular juntos). Cada documento
+ * ganha duas versões no Histórico: "Original com scripts" (restaurar volta o
+ * modo "Preservar JS") e "Versão original" (a cópia editável, antes de editar).
+ */
+export async function convertToEditable(documentId: string) {
+  const doc = await documentOrThrow(documentId);
+  if (doc.assetMap === null) return { revision: doc.revision };
+  if (!doc.editableHtml) throw new UserError(CONVERT_NOT_AVAILABLE);
+  const siblings = await prisma.pageDocument.findMany({
+    where: { variantId: doc.variantId, id: { not: doc.id }, editableHtml: { not: null } },
+    select: { id: true, revision: true, html: true, project: true, assetMap: true, editableHtml: true },
+  });
+  let revision = doc.revision;
+  for (const d of [doc, ...siblings]) {
+    if (d.assetMap === null || !d.editableHtml) continue;
+    const before = await createVersion(d.id, "CLONE", "Original com scripts (antes de converter)", {
+      project: d.project ? unpackProject(d.project) : null,
+      html: d.html,
+      preserve: preserveStateOf(d),
+    });
+    const next = d.revision + 1;
+    const { count } = await prisma.pageDocument.updateMany({
+      where: { id: d.id, revision: d.revision },
+      data: { html: d.editableHtml, project: null, assetMap: Prisma.DbNull, editableHtml: null, revision: next },
+    });
+    if (!count) {
+      await discardVersion(before.id);
+      // O documento aberto não mudou: nada foi convertido. Um irmão salvo no meio fica como estava.
+      if (d.id === doc.id) throw new UserError(CONVERT_CONFLICT_MESSAGE);
+      continue;
+    }
+    if (d.id === doc.id) revision = next;
+    // A primeira gravação no editor não cria outra "Versão original": já existe uma de clonagem.
+    await createVersion(d.id, "CLONE", "Versão original (editável)", {
+      project: null,
+      html: d.editableHtml,
+      preserve: null,
+    });
+  }
+  await syncCloneMode(doc.variant.page.id);
+  const now = new Date();
+  await prisma.page.update({ where: { id: doc.variant.page.id }, data: { updatedAt: now } });
+  await prisma.offer.update({ where: { id: doc.variant.page.offer.id }, data: { updatedAt: now } });
+  return { revision };
 }

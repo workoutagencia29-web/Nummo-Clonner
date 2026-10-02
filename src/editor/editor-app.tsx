@@ -77,7 +77,7 @@ import { useAction } from "@/hooks/use-action";
 import { installEditorSync } from "@/lib/find-replace";
 import { PAGE_TYPE_LABEL } from "@/lib/labels";
 import { cn } from "@/lib/utils";
-import { offerPreviewUrlAction } from "@/server/actions/editor";
+import { convertToEditableAction, offerPreviewUrlAction } from "@/server/actions/editor";
 import type { EditorPayload } from "@/server/services/documents";
 import { configureAssets } from "./grapes/assets";
 import {
@@ -654,7 +654,10 @@ export function EditorApp({ documentId }: { documentId: string }) {
   const [payload, setPayload] = useState<EditorPayload | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [notFound, setNotFound] = useState(false);
+  /** Muda para ler a página de novo (depois de "Converter para editável"). */
+  const [loads, setLoads] = useState(0);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `loads` lê a página de novo (depois de converter)
   useEffect(() => {
     let cancelled = false;
     setPayload(null);
@@ -672,7 +675,7 @@ export function EditorApp({ documentId }: { documentId: string }) {
     return () => {
       cancelled = true;
     };
-  }, [documentId]);
+  }, [documentId, loads]);
 
   // Página excluída (ou oferta na lixeira) depois que o endereço foi aberto: a mesma tela do 404.
   if (notFound) {
@@ -714,7 +717,7 @@ export function EditorApp({ documentId }: { documentId: string }) {
     );
   }
   // Uma instância por documento: trocar de página começa do zero (revisão, contadores…).
-  return <EditorGate key={payload.documentId} payload={payload} />;
+  return <EditorGate key={payload.documentId} payload={payload} onReload={() => setLoads((n) => n + 1)} />;
 }
 
 /**
@@ -722,10 +725,10 @@ export function EditorApp({ documentId }: { documentId: string }) {
  * pode quebrar os scripts originais. Primeiro mostra a página como ela é e só
  * abre o editor se a pessoa pedir.
  */
-function EditorGate({ payload }: { payload: EditorPayload }) {
+function EditorGate({ payload, onReload }: { payload: EditorPayload; onReload: () => void }) {
   const [convert, setConvert] = useState(false);
   if (payload.cloneMode === "PRESERVE_JS" && !payload.project && !convert) {
-    return <PreserveJsNotice payload={payload} onConvert={() => setConvert(true)} />;
+    return <PreserveJsNotice payload={payload} onConvert={() => setConvert(true)} onConverted={onReload} />;
   }
   return <EditorWorkspace payload={payload} />;
 }
@@ -734,9 +737,24 @@ function previewDeviceOf(payload: EditorPayload): "celular" | "desktop" {
   return payload.device === "MOBILE" ? "celular" : "desktop";
 }
 
-function PreserveJsNotice({ payload, onConvert }: { payload: EditorPayload; onConvert: () => void }) {
+/**
+ * `onConvert`: abre o HTML original no editor (páginas salvas antes da cópia
+ * editável). `onConverted`: a página já foi trocada pela cópia editável no
+ * servidor — lê de novo.
+ */
+function PreserveJsNotice({
+  payload,
+  onConvert,
+  onConverted,
+}: {
+  payload: EditorPayload;
+  onConvert: () => void;
+  onConverted: () => void;
+}) {
   const router = useRouter();
   const previewAction = useAction(offerPreviewUrlAction);
+  const convertAction = useAction(convertToEditableAction);
+  const convertible = Boolean(payload.convertible);
   const runPreview = previewAction.run;
   /** Link de prévia e quando foi pedido (ele vence em 12 h). */
   const [preview, setPreview] = useState<{ url: string; at: number } | null>(null);
@@ -788,14 +806,29 @@ function PreserveJsNotice({ payload, onConvert }: { payload: EditorPayload; onCo
             isso ela não abre direto no editor visual: o editor reescreve o HTML da página, e os scripts que dependem do
             HTML original podem parar de funcionar.
           </p>
-          <p className="text-muted-foreground">
-            Ao lado está a página como o visitante vê. Se precisar mudar textos ou imagens, converta para editável: a
-            página de agora fica guardada no Histórico (“Original da clonagem”) assim que você fizer a primeira
-            alteração, e dá para voltar a ela.
-          </p>
+          {convertible ? (
+            <p className="text-muted-foreground">
+              Ao lado está a página como o visitante vê. Para mudar textos, imagens ou vídeos, converta para editável: o
+              editor abre a cópia editável desta clonagem — igual à página, sem os scripts do site original (os vídeos
+              continuam). A versão com scripts fica no Histórico (“Original com scripts”) e dá para voltar a ela.
+            </p>
+          ) : (
+            <>
+              <p className="text-muted-foreground">
+                Ao lado está a página como o visitante vê. Se precisar mudar textos ou imagens, converta para editável:
+                a página de agora fica guardada no Histórico (“Original da clonagem”) assim que você fizer a primeira
+                alteração, e dá para voltar a ela.
+              </p>
+              <p className="text-muted-foreground">
+                Esta cópia foi salva numa versão antiga do Offer Studio, sem a cópia editável da clonagem: no editor, o
+                que os scripts montavam (animações, vídeos) pode aparecer em branco. Para editar com a página igual à
+                original, clone o link de novo e salve como “Editável”.
+              </p>
+            </>
+          )}
           <div className="mt-2 flex flex-wrap gap-2">
-            <Button onClick={() => setConfirming(true)}>
-              <PencilRulerIcon />
+            <Button onClick={() => setConfirming(true)} disabled={convertAction.pending}>
+              {convertAction.pending ? <Spinner /> : <PencilRulerIcon />}
               Converter para editável
             </Button>
             <Button
@@ -833,11 +866,20 @@ function PreserveJsNotice({ payload, onConvert }: { payload: EditorPayload; onCo
         open={confirming}
         onOpenChange={setConfirming}
         title="Converter para editável?"
-        description="O editor visual reescreve o HTML desta página na primeira alteração que você fizer. Quiz, formulários e outros recursos feitos com os scripts originais podem parar de funcionar. Nada é gravado só por abrir, e a página de agora fica guardada no Histórico (“Original da clonagem”) para você poder voltar."
+        description={
+          convertible
+            ? "A página passa a ser a cópia editável da clonagem: igual à de agora, mas sem os scripts do site original. Quiz, calculadoras e outros recursos feitos com esses scripts param de funcionar. A versão com scripts fica no Histórico (“Original com scripts”) para você voltar quando quiser."
+            : "O editor visual reescreve o HTML desta página na primeira alteração que você fizer. Quiz, formulários e outros recursos feitos com os scripts originais podem parar de funcionar. Nada é gravado só por abrir, e a página de agora fica guardada no Histórico (“Original da clonagem”) para você poder voltar."
+        }
         confirmLabel="Converter e abrir no editor"
-        onConfirm={() => {
+        onConfirm={async () => {
           setConfirming(false);
-          onConvert();
+          if (!convertible) {
+            onConvert();
+            return;
+          }
+          const res = await convertAction.run({ documentId: payload.documentId });
+          if (res.ok) onConverted();
         }}
       />
     </div>

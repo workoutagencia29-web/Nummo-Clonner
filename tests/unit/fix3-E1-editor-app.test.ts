@@ -599,6 +599,56 @@ describe("páginas 'Preservar JS'", () => {
     await waitFor(() => server.okPuts.some((p) => p.css.includes("rgb(0, 99, 0)")), 5000, "primeira gravação");
   });
 
+  it("com a cópia editável da clonagem: converter troca a página no servidor e abre o editor com ela", async () => {
+    const id = "docpreserva0000000000003";
+    const server = new FakeServer();
+    server.add(
+      makePayload({
+        documentId: id,
+        cloneMode: "PRESERVE_JS",
+        convertible: true,
+        html: `<!doctype html><html><head><title>VSL</title></head><body><h1 class="elementor-invisible">Original</h1><presto-player src="//www.youtube.com/embed/1cNGAYxDXUg"></presto-player></body></html>`,
+      }),
+    );
+    const s = await open(server, id, { waitReady: false });
+    await s.page.getByText("Esta página usa os scripts originais (“Preservar JS”)").waitFor();
+    await s.page.getByText(/o editor abre a cópia editável desta clonagem/).waitFor();
+    expect(await s.page.getByText(/versão antiga do Offer Studio/).count()).toBe(0);
+
+    // O servidor troca pela cópia editável; o editor lê a página de novo.
+    server.add(
+      makePayload({
+        documentId: id,
+        revision: 1,
+        cloneMode: "EDITABLE",
+        html: `<!doctype html><html><head><title>VSL</title></head><body><h1 id="t">Cópia editável</h1><iframe data-os-video="youtube" src="https://www.youtube.com/embed/1cNGAYxDXUg?rel=0"></iframe></body></html>`,
+      }),
+    );
+    await s.page.getByRole("button", { name: "Converter para editável" }).click();
+    const dialog = s.page.getByRole("alertdialog");
+    await dialog.getByText(/sem os scripts do site original/).waitFor();
+    await dialog.getByRole("button", { name: "Converter e abrir no editor" }).click();
+    await s.page.locator("iframe.gjs-frame").waitFor();
+    await expect.poll(() => s.page.frameLocator("iframe.gjs-frame").locator("h1").textContent()).toBe("Cópia editável");
+    expect(await actionCalls(s, "convertToEditableAction")).toEqual([
+      { name: "convertToEditableAction", input: { documentId: id } },
+    ]);
+    // Abriu como página editável: sem o aviso de "Preservar JS".
+    expect(await s.page.getByText(/scripts originais \(“Preservar JS”\)/).count()).toBe(0);
+  });
+
+  it("sem a cópia editável (salva numa versão antiga): avisa e converte como antes, sem chamar o servidor", async () => {
+    const id = "docpreserva0000000000004";
+    const server = new FakeServer();
+    server.add(makePayload({ documentId: id, cloneMode: "PRESERVE_JS", convertible: false }));
+    const s = await open(server, id, { waitReady: false });
+    await s.page.getByText(/versão antiga do Offer Studio/).waitFor();
+    await s.page.getByRole("button", { name: "Converter para editável" }).click();
+    await s.page.getByRole("alertdialog").getByRole("button", { name: "Converter e abrir no editor" }).click();
+    await s.page.locator("iframe.gjs-frame").waitFor();
+    expect(await actionCalls(s, "convertToEditableAction")).toEqual([]);
+  });
+
   it("'Ver página' pede um link de prévia novo quando o da tela está para vencer (12 h)", async () => {
     const id = "docpreserva0000000000002";
     const server = new FakeServer();

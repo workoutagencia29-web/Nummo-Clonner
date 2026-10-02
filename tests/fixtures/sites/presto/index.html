@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Método Pequenos Gênios – Atividades</title>
+  <style>
+    body{margin:0;font-family:Arial,sans-serif;background:#fff}
+    .elementor-invisible{visibility:hidden}
+    .topo{background:#05b5b8;padding:40px;text-align:center;color:#fff}
+    .presto-block-video{margin:24px auto;max-width:720px}
+    presto-player:not(.hydrated){display:block;visibility:hidden}
+  </style>
+  <script src="js/presto.js" defer></script>
+  <!-- Imita o frontend do Elementor: tira .elementor-invisible quando a animação de entrada roda -->
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      document.querySelectorAll(".elementor-invisible").forEach(function (el) {
+        el.classList.remove("elementor-invisible");
+        el.classList.add("animated", "fadeInUp");
+      });
+    });
+  </script>
+</head>
+<body>
+  <header class="topo">
+    <h1 class="elementor-element elementor-invisible" data-settings='{"_animation":"fadeInUp"}'>Atividades para o seu filho</h1>
+  </header>
+  <main>
+    <p class="chamada elementor-invisible">O futuro do seu filho começa agora.</p>
+    <figure class="wp-block-video presto-block-video presto-provider-youtube" style="--plyr-color-main: #00b3ff; --presto-player-border-radius: 18px; ">
+      <presto-player id="presto-player-1" src="//www.youtube.com/embed/1cNGAYxDXUg?iv_load_policy=3&amp;modestbranding=1&amp;rel=0&amp;enablejsapi=1" media-title="Aula de matemática" class="presto-video-id-1 skin-default" preload="" poster=""></presto-player>
+    </figure>
+    <figure class="wp-block-video presto-block-video presto-provider-self-hosted">
+      <presto-player id="presto-player-2" src="midia/aula.mp4" media-title="Depoimento" poster="img/capa.jpg" preload="metadata"></presto-player>
+    </figure>
+    <selo-garantia></selo-garantia>
+    <p><a class="botao" href="https://pay.cakto.com.br/abc123">COMPRAR</a></p>
+  </main>
+</body>
+</html>

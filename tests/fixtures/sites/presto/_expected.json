@@ -1,0 +1,10 @@
+{
+  "youtube": "1cNGAYxDXUg",
+  "videoArquivo": "/midia/aula.mp4",
+  "capa": "/img/capa.jpg",
+  "cantoArredondado": "18px",
+  "textoAnimado": "Atividades para o seu filho",
+  "checkout": "https://pay.cakto.com.br/abc123",
+  "textoNoShadow": "Garantia de 7 dias",
+  "cssNoShadow": ".selo { color: rgb(46, 125, 50); font-weight: 700; }"
+}

@@ -5,6 +5,7 @@ import { prisma } from "@/lib/db";
 import { UserError } from "@/lib/errors";
 import { createPreviewToken, previewUrl } from "@/lib/preview";
 import { protectedAction } from "@/server/action";
+import { convertToEditable } from "@/server/services/documents";
 
 /** Link de prévia das páginas salvas da oferta (abre na página pedida). */
 export const offerPreviewUrlAction = protectedAction(
@@ -19,4 +20,10 @@ export const offerPreviewUrlAction = protectedAction(
     const token = await createPreviewToken({ kind: "offer", offerId, pageId, variantId });
     return { url: previewUrl(token) };
   },
+);
+
+/** "Converter para editável" (página "Preservar JS"): troca pela cópia editável da clonagem. */
+export const convertToEditableAction = protectedAction(
+  z.object({ documentId: z.string().min(1) }),
+  async ({ documentId }) => convertToEditable(documentId),
 );

@@ -92,7 +92,7 @@ const stubs: Plugin = {
       };
     });
     const ACTIONS: Record<string, string[]> = {
-      editor: ["offerPreviewUrlAction"],
+      editor: ["offerPreviewUrlAction", "convertToEditableAction"],
       "bulk-replace": ["bulkReplaceAction", "bulkLinkAction", "classifyLinksAction"],
       "offer-links": ["createOfferLinkAction", "updateOfferLinkAction"],
       "page-code": ["getPageCodeAction", "savePageCodeAction"],

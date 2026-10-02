@@ -280,21 +280,24 @@ enum DeviceTarget {
 /// importação ou modelo); `project` é o JSON do editor (gzip), criado na primeira
 /// abertura no editor e usado daí em diante.
 model PageDocument {
-  id        String        @id @default(cuid())
-  variantId String
-  variant   PageVariant   @relation(fields: [variantId], references: [id], onDelete: Cascade)
-  device    DeviceTarget  @default(ALL)
-  html      String?
-  project   Bytes?
+  id           String        @id @default(cuid())
+  variantId    String
+  variant      PageVariant   @relation(fields: [variantId], references: [id], onDelete: Cascade)
+  device       DeviceTarget  @default(ALL)
+  html         String?
+  project      Bytes?
   /// Modo "Preservar JS": caminho original → arquivo no storage, para que URLs
   /// montadas pelos scripts da página continuem funcionando.
-  assetMap  Json?
+  assetMap     Json?
+  /// Modo "Preservar JS": a cópia editável da mesma clonagem (página como aparece,
+  /// sem os scripts do site). "Converter para editável" troca o HTML por ela.
+  editableHtml String?
   /// Incrementa a cada gravação; o autosave envia a revisão que conhece para
   /// detectar que a página foi alterada em outra aba.
-  revision  Int           @default(0)
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
-  versions  PageVersion[]
+  revision     Int           @default(0)
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
+  versions     PageVersion[]
 
   @@unique([variantId, device])
 }

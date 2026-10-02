@@ -203,6 +203,7 @@ export async function duplicatePage(pageId: string) {
                 project: d.project,
                 // "Preservar JS": arquivos nos caminhos originais (sem isso, 404 na cópia).
                 assetMap: d.assetMap ?? Prisma.JsonNull,
+                editableHtml: d.editableHtml,
                 revision: 0,
               })),
             },

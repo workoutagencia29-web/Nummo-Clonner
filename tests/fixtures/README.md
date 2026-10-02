@@ -36,6 +36,7 @@ await srv.close();
 | `grande` | 230 cartões (~3000 elementos), CSS com ~2000 regras, 10 imagens repetidas e um checkout 230×. |
 | `shadow` | `<oferta-card>` com shadow root aberto (texto, imagens e checkout só lá dentro) e CSS-in-JS via `insertRule` (o `<style>` fica vazio e a página só aparece se o CSSOM for serializado). |
 | `lento` | `delayMs: 400` em todas as respostas (página e CSS). |
+| `presto` | WordPress/Elementor com Presto Player: `<presto-player>` (web component com o CSS em `adoptedStyleSheets` do shadow root e ícones SVG sem tamanho) com vídeo do YouTube (`//www.youtube.com/embed/…`, canto de 18px em `--presto-player-border-radius`) e com mp4 relativo + capa; títulos `.elementor-invisible` que só aparecem com o script; `<selo-garantia>` com CSS só em `adoptedStyleSheets`; checkout Cakto. |
 
 ## ZIPs (`zips/`)
 

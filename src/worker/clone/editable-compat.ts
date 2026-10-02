@@ -6,6 +6,8 @@
  *   ScrollReveal) ficam no estado final, visível.
  * - markVideoFacades: capas "clique para carregar" do YouTube/Vimeo (WP Rocket,
  *   lite-youtube, capa do vídeo do Elementor) ganham data-os-embed.
+ * - convertScriptPlayers: players montados por script (Presto Player do
+ *   WordPress) viram o vídeo comum do editor (iframe ou <video>).
  * - convertToggles: FAQ/acordeões feitos à mão (onclick ou script que alterna
  *   uma classe/display) ganham data-os-toggle.
  * - sanitizeScriptUrls: tira os `javascript:` que sobram em atributos.
@@ -19,6 +21,7 @@
 import type { CheerioAPI } from "cheerio";
 import type { Element } from "domhandler";
 import { vimeoIdFromUrl, youtubeIdFromUrl } from "@/detection/videos";
+import { normalizeVideoUrl } from "@/editor/widgets/video-url";
 import { isElement } from "./html-assets";
 
 // ─── Animações de entrada ────────────────────────────────────────────────────
@@ -211,6 +214,79 @@ export function markVideoFacades($: CheerioAPI): number {
     mark(el, src, "overlay", ".elementor-video");
   }
   return marked;
+}
+
+// ─── Players montados por script ─────────────────────────────────────────────
+
+const VIDEO_FILE_RE = /\.(?:mp4|webm|m4v|mov|ogv)(?:[?#]|$)/i;
+
+/** Valor de uma variável CSS no style="" do elemento ou de um ancestral (ex.: --presto-player-border-radius: 18px). */
+function inheritedVar(el: Element, name: string): string | null {
+  const re = new RegExp(String.raw`(?:^|;)\s*${name}\s*:\s*([^;]+)`, "i");
+  for (let cur: Element | null = el; cur; cur = cur.parent && isElement(cur.parent) ? cur.parent : null) {
+    const value = re.exec(cur.attribs.style ?? "")?.[1]?.trim();
+    if (value) return value;
+  }
+  return null;
+}
+
+/**
+ * Players que só existem depois que o script monta (web components com shadow
+ * DOM). Sem o script, a captura guarda o shadow DOM sem o CSS dele: ícones
+ * gigantes e nenhum vídeo — e o editor não mostra nada. Viram o vídeo comum do
+ * editor (o mesmo dos blocos de vídeo, que dá para trocar pelo link):
+ * - Presto Player (WordPress): YouTube/Vimeo/Panda → <iframe data-os-video>;
+ *   arquivo de vídeo → <video data-os-file controls>. Mantém o canto
+ *   arredondado configurado no player. Outros endereços (HLS…) ficam como estão.
+ * `baseUrl`: endereço da página (ou do <base href>), para src relativo.
+ * Devolve quantos players foram trocados.
+ */
+export function convertScriptPlayers($: CheerioAPI, baseUrl: string): number {
+  const resolve = (raw: string) => {
+    if (!raw) return "";
+    try {
+      const url = new URL(raw, baseUrl);
+      return url.protocol === "http:" || url.protocol === "https:" ? url.href : "";
+    } catch {
+      return "";
+    }
+  };
+  let converted = 0;
+  for (const el of $("presto-player").toArray().filter(isElement)) {
+    const src = resolve((el.attribs.src ?? "").trim());
+    const radius = inheritedVar(el, "--presto-player-border-radius");
+    const corner = radius ? `border-radius:${radius};` : "";
+    const title = (el.attribs["media-title"] ?? "").trim() || "Vídeo";
+    const embed = src && !VIDEO_FILE_RE.test(src) ? normalizeVideoUrl(src) : null;
+    let replacement: ReturnType<CheerioAPI> | null = null;
+    if (embed && embed.provider !== "other") {
+      replacement = $("<iframe></iframe>").attr({
+        "data-os-video": embed.provider,
+        src: embed.src,
+        title,
+        allow: "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share",
+        allowfullscreen: "",
+        referrerpolicy: "strict-origin-when-cross-origin",
+        style: `display:block;width:100%;aspect-ratio:16 / 9;height:auto;border:0;${corner}background-color:#000000;`,
+      });
+    } else if (src && VIDEO_FILE_RE.test(src)) {
+      replacement = $("<video></video>").attr({
+        "data-os-file": "",
+        src,
+        controls: "",
+        playsinline: "",
+        preload: "metadata",
+        title,
+        style: `display:block;width:100%;height:auto;${corner}background-color:#000000;`,
+      });
+      const poster = resolve((el.attribs.poster ?? "").trim());
+      if (poster) replacement.attr("poster", poster);
+    }
+    if (!replacement) continue;
+    $(el).replaceWith(replacement);
+    converted++;
+  }
+  return converted;
 }
 
 // ─── FAQ / acordeões feitos à mão ────────────────────────────────────────────

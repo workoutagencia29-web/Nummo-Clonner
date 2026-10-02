@@ -221,6 +221,12 @@ async function vslImages(): Promise<void> {
   write(s, "midia/depoimento.mp4", tinyMp4());
 }
 
+async function prestoImages(): Promise<void> {
+  const s = "presto";
+  await image(s, "img/capa.jpg", { w: 960, h: 540, colors: ESCURO, label: "Poster do vídeo" });
+  write(s, "midia/aula.mp4", tinyMp4());
+}
+
 async function rastreadoresImages(): Promise<void> {
   const s = "rastreadores";
   await image(s, "assets/img/favicon.png", { w: 32, h: 32, colors: AZUL, shape: "circle" });
@@ -582,6 +588,7 @@ async function grande(): Promise<{ elements: number; rules: number }> {
 async function main(): Promise<void> {
   await vendasImages();
   await vslImages();
+  await prestoImages();
   await rastreadoresImages();
   await checkoutsImages();
   await legado();

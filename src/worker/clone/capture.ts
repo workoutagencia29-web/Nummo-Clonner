@@ -185,6 +185,27 @@ function serializeDomInPage(): string {
     }
   };
   visit(document);
+  // CSS dos web components (Stencil, Lit…) fica em adoptedStyleSheets do shadow
+  // root, que não entra no HTML: sem ele o shadow DOM sai sem estilo (ícones
+  // SVG gigantes). Vira um <style> dentro do próprio shadow root.
+  for (const root of roots) {
+    const sheets = (root as ShadowRoot & { adoptedStyleSheets?: CSSStyleSheet[] }).adoptedStyleSheets ?? [];
+    if (!sheets.length) continue;
+    const css = sheets
+      .flatMap((s) => {
+        try {
+          return Array.from(s.cssRules).map((r) => r.cssText);
+        } catch {
+          return [];
+        }
+      })
+      .join("\n");
+    if (!css) continue;
+    const style = document.createElement("style");
+    style.setAttribute("data-os-adopted", "");
+    style.textContent = css;
+    root.prepend(style);
+  }
 
   const html = document.documentElement as HTMLElement & {
     getHTML?: (opts: { serializableShadowRoots?: boolean; shadowRoots?: ShadowRoot[] }) => string;

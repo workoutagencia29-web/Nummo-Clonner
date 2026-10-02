@@ -264,6 +264,7 @@ export async function duplicateOffer(offerId: string) {
                     : null,
                   // "Preservar JS": arquivos nos caminhos originais (sem isso, 404 na cópia).
                   assetMap: doc.assetMap ?? Prisma.JsonNull,
+                  editableHtml: doc.editableHtml ? remapInternalLinks(doc.editableHtml, pageIdMap) : doc.editableHtml,
                   revision: 0,
                 })),
               },

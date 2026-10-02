@@ -73,6 +73,7 @@ const documentSelect = {
   revision: true,
   project: true,
   html: true,
+  editableHtml: true,
   device: true,
   variant: { select: { name: true, position: true, page: { select: { id: true, name: true, position: true } } } },
 } as const;
@@ -118,12 +119,15 @@ async function runBulk(offerId: string, label: string, transform: Transform, opt
         results.push(result);
         break;
       }
+      // "Preservar JS": a cópia editável guardada muda junto (senão "Converter para editável" desfaria a troca).
+      const editableHtml = current.editableHtml ? (await transform(null, current.editableHtml)).html : undefined;
       await createVersion(doc.id, "BULK_REPLACE", label, { project, html: current.html });
       const { count } = await prisma.pageDocument.updateMany({
         where: { id: doc.id, revision: current.revision },
         data: {
           project: project !== null && next.project !== null ? packProject(next.project) : undefined,
           html: next.html,
+          editableHtml,
           revision: current.revision + 1,
         },
       });

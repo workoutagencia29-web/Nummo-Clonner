@@ -469,14 +469,17 @@ export async function saveClone(input: SaveCloneInput) {
   }
 
   // Lê os HTMLs escolhidos antes da transação (arquivos no disco).
-  const htmlByJob = new Map<
-    string,
-    { device: "ALL" | "DESKTOP" | "MOBILE"; html: string; assetMap: Record<string, string> | null }[]
-  >();
+  // "Preservar JS" guarda também a cópia editável (para "Converter para editável").
+  type SavedHtml = {
+    device: "ALL" | "DESKTOP" | "MOBILE";
+    html: string;
+    assetMap: Record<string, string> | null;
+    editableHtml: string | null;
+  };
+  const htmlByJob = new Map<string, SavedHtml[]>();
   for (const job of jobs) {
     const r = results.get(job.id) as CloneResult;
-    const entries: { device: "ALL" | "DESKTOP" | "MOBILE"; html: string; assetMap: Record<string, string> | null }[] =
-      [];
+    const entries: SavedHtml[] = [];
     const devicesToSave: ["ALL" | "DESKTOP" | "MOBILE", "desktop" | "mobile"][] = r.responsive
       ? [["ALL", r.devices.desktop ? "desktop" : "mobile"]]
       : [
@@ -489,7 +492,10 @@ export async function saveClone(input: SaveCloneInput) {
       // Arquivos apagados pela limpeza automática (clonagem antiga).
       if (!objectExists(out.htmlKey)) throw new UserError(CLONE_FILES_GONE);
       const html = (await getObject(out.htmlKey)).toString("utf8");
-      entries.push({ device: docDevice, html, assetMap: "assetMap" in out ? out.assetMap : null });
+      const editable = input.mode === "PRESERVE_JS" ? r.devices?.[source]?.outputs.EDITABLE : undefined;
+      const editableHtml =
+        editable && objectExists(editable.htmlKey) ? (await getObject(editable.htmlKey)).toString("utf8") : null;
+      entries.push({ device: docDevice, html, assetMap: "assetMap" in out ? out.assetMap : null, editableHtml });
     }
     if (!entries.length) throw new UserError(CLONE_FILES_GONE);
     htmlByJob.set(job.id, entries);
@@ -617,16 +623,16 @@ export async function saveClone(input: SaveCloneInput) {
         const keptCode = keptPageCode(kept.filter((k) => keptNeedsConsent(k.item)).map(toSnippet));
         const keptHtml = kept.filter((k) => !keptNeedsConsent(k.item)).map(toSnippet);
         const ownTargets = new Map([...urlTargets].filter(([, id]) => id !== pageId));
+        const finish = (html: string, assetMap: Record<string, string> | null) =>
+          bindLinks(
+            linkFunnelPages(restoreSnippets(html, keptHtml), ownTargets, { pageUrl: r.finalUrl, assetMap }),
+            r.checkouts.map((c) => c.url),
+          );
         const docs = (htmlByJob.get(job.id) ?? []).map((d) => ({
           device: d.device,
-          html: bindLinks(
-            linkFunnelPages(restoreSnippets(d.html, keptHtml), ownTargets, {
-              pageUrl: r.finalUrl,
-              assetMap: d.assetMap,
-            }),
-            r.checkouts.map((c) => c.url),
-          ),
+          html: finish(d.html, d.assetMap),
           assetMap: (d.assetMap ?? undefined) as Prisma.InputJsonValue | undefined,
+          editableHtml: d.editableHtml === null ? null : finish(d.editableHtml, null),
         }));
         await tx.pageVariant.create({
           data: { pageId, name: "A", isControl: true, weight: 100, documents: { create: docs } },

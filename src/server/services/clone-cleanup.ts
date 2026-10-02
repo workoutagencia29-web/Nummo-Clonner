@@ -173,12 +173,13 @@ async function referencedShas(wanted: Set<string>, keepJobIds: string[]): Promis
       take: 20,
       ...(cursor ? { skip: 1, cursor: { id: cursor } } : {}),
       orderBy: { id: "asc" },
-      select: { id: true, html: true, assetMap: true, project: true },
+      select: { id: true, html: true, assetMap: true, editableHtml: true, project: true },
     });
     if (!docs.length) break;
     for (const d of docs) {
       collectShas(d.html, wanted, found);
       collectShas(d.assetMap ? JSON.stringify(d.assetMap) : null, wanted, found);
+      collectShas(d.editableHtml, wanted, found);
       if (d.project) {
         try {
           collectShas(gunzipSync(d.project).toString("utf8"), wanted, found);
