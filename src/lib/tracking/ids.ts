@@ -3,9 +3,10 @@
  *
  * Quem não é programador costuma colar o código inteiro do pixel: aqui o ID é
  * achado dentro do código (fbq('init', '…'), ttq.load('…'), G-…, AW-…,
- * window.pixelId = "…"). Funções puras: o painel pode validar enquanto a
+ * window.pixelId = "…", também no código codificado novo da UTMify). Funções puras: o painel pode validar enquanto a
  * pessoa digita e o servidor valida de novo ao salvar.
  */
+import { withDecodedLoaders } from "@/detection/encoded-loader";
 import { PIXEL_ID_RULES, PIXEL_VENDOR_LABEL, type PixelVendorId } from "./schema";
 
 /** Onde o ID aparece no código de instalação de cada plataforma. */
@@ -32,8 +33,10 @@ const UPPERCASE: ReadonlySet<PixelVendorId> = new Set(["TIKTOK", "GA4", "GOOGLE_
 export function normalizePixelId(vendor: PixelVendorId, raw: string): string {
   let text = raw.trim();
   if (/[\s<>()'"=;]/.test(text)) {
+    // Código codificado (atob…): o ID só aparece decodificado.
+    const code = withDecodedLoaders(text);
     for (const pattern of SNIPPET_PATTERNS[vendor]) {
-      const match = pattern.exec(text);
+      const match = pattern.exec(code);
       if (match) {
         text = match[1];
         break;

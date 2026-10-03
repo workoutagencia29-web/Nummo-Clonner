@@ -4,6 +4,8 @@
 
 App local (Mac, usuário único) para clonar, editar e exportar páginas de oferta. Plano e fases: docs/PLANO.md. Toda a interface e as mensagens de erro são em **português do Brasil**.
 
+**Regra do usuário: toda a comunicação com ele é em português do Brasil, sempre** — respostas, mensagens curtas entre comandos, avisos de andamento, perguntas, descrições de comandos e mensagens de commit. Nunca alternar com inglês.
+
 ## Comandos
 - `npm run dev` / `npm start` — sobem Postgres embutido + painel + worker (scripts/run.ts). `OS_DB_NAME` e `PORT` trocam banco/porta.
 - `npm test` (Vitest, banco `offerstudio_test`), `npm run e2e` (Playwright, banco `offerstudio_e2e_auto`, porta 3200), `npm run verify` (tudo).
@@ -23,6 +25,7 @@ App local (Mac, usuário único) para clonar, editar e exportar páginas de ofer
 - Clonador: src/worker/clone (job.ts orquestra; capture.ts = Playwright; build.ts = saídas EDITABLE/PRESERVE_JS). O que os scripts faziam e o modo Editável precisa sem eles vai em editable-compat.ts (ex.: players montados por script como o Presto Player viram o vídeo comum do editor: `convertScriptPlayers`). Salvar em "Preservar JS" guarda também a cópia editável em `PageDocument.editableHtml`; "Converter para editável" troca por ela (`convertToEditable`, src/server/services/documents.ts). Versões do Histórico gravam o modo (`preserve` no snapshot) e restaurar volta o modo; quem copia/reescreve documentos (duplicar, versão A/B, localizar e substituir) leva `editableHtml` junto. Testes de ponta a ponta: tests/unit/clone-job.test.ts com os sites offline de tests/fixtures (`OS_CLONE_HOST_MAP=*.fixture.test=127.0.0.1`).
 - Editor visual: src/editor (GrapesJS 0.23.6, UI própria em editor-app.tsx; config em grapes/setup.ts; blocos em blocks/, widgets em widgets/, modelos em templates/). HTML salvo ↔ editor por src/lib/editor-html.ts (scripts viram <os-script>, on* viram data-os-on-*, CSS original numa folha base em @layer os-original). Nada executa no canvas; comportamento das páginas fica em src/runtime (widgets via data-os-widget), injetado por src/lib/page-render.ts. Timers de módulos do editor: use editorTimeout (grapes/lifecycle.ts).
 - Botões ligados a links da oferta: data-os-link="<chave>" (src/lib/offer-links.ts).
+- Rastreadores escondidos: código codificado (atob + XOR, o código novo da UTMify) e scripts em `src="data:…"` (JS adiado por WP Rocket/LiteSpeed) são lidos por src/detection/encoded-loader.ts (`withDecodedLoaders`, `readableCode`, `dataUriScript`). Quem analisa scripts procurando rastreador ou ID (clonagem, campo de ID, código livre) passa o texto por eles.
 - Prévia: src/preview/server.ts em <token>.localhost:<PORT+1>, tokens em src/lib/preview.ts.
 - Componentes base em src/components/ui seguem o shadcn/ui (o registro do shadcn é inacessível nesta rede: escreva à mão).
 - Nada de botão sem ação: o que é de fase futura fica oculto até existir.

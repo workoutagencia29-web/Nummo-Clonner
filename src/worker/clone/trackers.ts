@@ -16,6 +16,7 @@ import type { CheerioAPI } from "cheerio";
 import type { AnyNode, Element } from "domhandler";
 import tpw from "third-party-web/nostats-subset";
 import { getDomain } from "tldts";
+import { dataUriScript, decodeEncodedLoaders, loaderEquivalent, withDecodedLoaders } from "@/detection/encoded-loader";
 import {
   GTAG_FAMILY,
   SAFE_URLS,
@@ -343,17 +344,24 @@ function refineGoogle(match: TrackerMatch | null, text: string): TrackerMatch | 
 /**
  * Classifica o código de um `<script>` inline. Reconhece o código-base dos
  * pixels/chats (padrões fortes), carregadores pequenos que injetam um script
- * de rastreador, e scripts feitos só de chamadas de rastreamento
+ * de rastreador — inclusive os codificados (atob + XOR, o código novo da
+ * UTMify: src/detection/encoded-loader.ts) —, e scripts feitos só de chamadas de rastreamento
  * (`fbq('track', …)`, `gtag('event', …)`). Scripts que misturam essas chamadas
  * com outro código (ex.: clique do botão que também redireciona) ficam.
  */
-export function classifyInlineScript(code: string): TrackerMatch | null {
+export function classifyInlineScript(code: string, pageUrl?: string): TrackerMatch | null {
   if (typeof code !== "string") return null;
   const text = code.trim();
   if (!text || FRAMEWORK_DATA.test(text)) return null;
 
   for (const sig of TRACKER_SIGNATURES) {
     if (sig.inline?.some((re) => re.test(text))) return refineGoogle(sigMatch(sig), text);
+  }
+
+  // Carregador codificado: o endereço do rastreador só aparece decodificado (evidência forte, como as assinaturas).
+  for (const loader of decodeEncodedLoaders(text)) {
+    const hit = classifyUrl(loader.url.startsWith("//") ? `https:${loader.url}` : loader.url, pageUrl || undefined);
+    if (hit) return refineGoogle(hit, loaderEquivalent(loader));
   }
 
   if (text.length <= INLINE_URL_SCAN_MAX) {
@@ -562,6 +570,15 @@ function isContentLink(rels: string[], as: string | undefined): boolean {
   return false;
 }
 
+/** Endereço absoluto (para comparar o src injetado com o do carregador), ou null. */
+function absoluteUrl(raw: string, base: string): string | null {
+  try {
+    return new URL(raw.startsWith("//") ? `https:${raw}` : raw, base || undefined).href;
+  } catch {
+    return null;
+  }
+}
+
 function firstAttr(el: Element, names: readonly string[]): string | undefined {
   for (const name of names) {
     const value = el.attribs[name]?.trim();
@@ -602,6 +619,27 @@ export function removeTrackers($: CheerioAPI, pageUrl: string, options: RemoveTr
   const doomed = new Set<AnyNode>();
   const classify = (raw: string) => classifyUrl(raw, pageUrl || undefined);
   const classifySource = (raw: string) => classifyUrlSource(raw, pageUrl || undefined);
+  /** Código de um <script>: o de dentro, ou o de um src em data: (JS inline adiado por plugin de cache). */
+  const scriptCode = (el: Element): string | null => {
+    const src = firstAttr(el, SCRIPT_SRC_ATTRS);
+    return src ? dataUriScript(src) : ($(el).html() ?? "");
+  };
+  // Scripts que um carregador codificado de rastreador injeta (o DOM renderizado do modo
+  // Editável já os tem): saem junto com o carregador, sem virar outro item na lista — só
+  // quando o <script> do carregador é removido e listado como esse mesmo rastreador.
+  const injectedByLoaders = new Set<string>();
+  $("script").each((_, el) => {
+    if (!("attribs" in el) || NON_JS_TYPES.test(el.attribs.type ?? "")) return;
+    const code = scriptCode(el) ?? "";
+    const owner = classifyInlineScript(code, pageUrl);
+    if (!owner) return;
+    for (const loader of decodeEncodedLoaders(code)) {
+      const url = absoluteUrl(loader.url, pageUrl);
+      if (url && refineGoogle(classify(url), loaderEquivalent(loader))?.vendor === owner.vendor) {
+        injectedByLoaders.add(url);
+      }
+    }
+  });
 
   const record = (
     el: Element,
@@ -632,13 +670,19 @@ export function removeTrackers($: CheerioAPI, pageUrl: string, options: RemoveTr
       case "script": {
         if (NON_JS_TYPES.test(el.attribs.type ?? "")) return;
         const src = firstAttr(el, SCRIPT_SRC_ATTRS);
-        if (src) {
+        const code = scriptCode(el);
+        if (src && code === null) {
           const match = classify(src);
-          if (match) record(el, match, "script-src", $.html(el));
+          if (!match) return;
+          const url = absoluteUrl(src, pageUrl);
+          if (url && injectedByLoaders.has(url)) doomed.add(el);
+          else record(el, match, "script-src", $.html(el));
           return;
         }
-        const match = classifyInlineScript($(el).html() ?? "");
-        if (match) record(el, match, "script-inline", $.html(el));
+        const match = classifyInlineScript(code ?? "", pageUrl);
+        // O ID de um carregador codificado (window.pixelId da UTMify) só aparece decodificado.
+        const idText = src ? `${$.html(el)}\n${withDecodedLoaders(code ?? "")}` : withDecodedLoaders($.html(el));
+        if (match) record(el, match, "script-inline", idText);
         return;
       }
       case "noscript": {

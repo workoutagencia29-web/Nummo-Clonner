@@ -93,5 +93,5 @@ export const PIXEL_ID_HELP: Record<PixelVendorId, string> = {
   KWAI: "Kwai for Business → Ferramentas → Pixel → ID do pixel.",
   GA4: "Google Analytics → Administrador → Fluxos de dados → ID da métrica (G-…).",
   GOOGLE_ADS: "Google Ads → Metas → Conversões → Tag do Google → ID (AW-…). Cada conversão tem um rótulo.",
-  UTMIFY: "Painel da UTMify → Integrações → Pixel → copie o ID que aparece no código.",
+  UTMIFY: "Painel da UTMify → aba Pixel → ID do pixel (no código novo, que vem codificado, o ID não aparece escrito).",
 };

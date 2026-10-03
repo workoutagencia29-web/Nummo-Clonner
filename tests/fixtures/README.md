@@ -36,6 +36,7 @@ await srv.close();
 | `grande` | 230 cartões (~3000 elementos), CSS com ~2000 regras, 10 imagens repetidas e um checkout 230×. |
 | `shadow` | `<oferta-card>` com shadow root aberto (texto, imagens e checkout só lá dentro) e CSS-in-JS via `insertRule` (o `<style>` fica vazio e a página só aparece se o CSSOM for serializado). |
 | `lento` | `delayMs: 400` em todas as respostas (página e CSS). |
+| `codificado` | Pixel e script de UTMs da UTMify no formato novo (codificado: `atob` + XOR, ID falso `a1b2c3d4e5f60718293a4b5c`) e outro pixel codificado dentro de `<script src="data:text/javascript;base64,…">` (JS inline adiado por plugin de cache, ID falso `f0e1d2c3b4a5968778695a4b`). Continuam: um carregador codificado do próprio site (carrega `js/widget.js`, que põe `data-widget` no `<html>`) e um `atob` comum. |
 | `presto` | WordPress/Elementor com Presto Player: `<presto-player>` (web component com o CSS em `adoptedStyleSheets` do shadow root e ícones SVG sem tamanho) com vídeo do YouTube (`//www.youtube.com/embed/…`, canto de 18px em `--presto-player-border-radius`) e com mp4 relativo + capa; títulos `.elementor-invisible` que só aparecem com o script; `<selo-garantia>` com CSS só em `adoptedStyleSheets`; checkout Cakto. |
 
 ## ZIPs (`zips/`)

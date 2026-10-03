@@ -1,0 +1,9 @@
+{
+  "utmifyPixelId": "a1b2c3d4e5f60718293a4b5c",
+  "utmifyPixelIdDataUri": "f0e1d2c3b4a5968778695a4b",
+  "removidos": ["UTMify"],
+  "ficam": ["R2FyYW50aWEgZGUgNyBkaWFz", "js/widget.js"],
+  "widget": "o carregador codificado do próprio site carrega js/widget.js, que põe data-widget=\"#ff6600\" no <html>",
+  "checkout": "https://pay.kiwify.com.br/MentoriaTrafego",
+  "obs": "pixel e script de UTMs da UTMify no formato codificado (atob + XOR), mais um pixel codificado dentro de <script src=\"data:text/javascript;base64,…\"> (JS inline adiado por plugin de cache); o carregador do próprio site e o atob do selo continuam"
+}

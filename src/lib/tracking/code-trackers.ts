@@ -2,6 +2,10 @@
  * Pixels e tags de rastreamento dentro de código livre (da oferta ou da
  * página): o código-base da Meta colado em "Códigos da página", um gtag, o GTM…
  *
+ * Carregadores codificados (atob + XOR, o código novo da UTMify) e scripts em
+ * data: (JS adiado por plugin de cache) são lidos decodificados
+ * (readableCode, src/detection/encoded-loader.ts).
+ *
  * Usa as assinaturas próprias do clonador (src/detection/trackers.ts, só dados:
  * roda no painel, no servidor e na prévia, sem a base third-party-web), na mesma
  * ordem de decisão de src/worker/clone/trackers.ts: exceções com caminho,
@@ -19,6 +23,7 @@
  * - o painel e o editor avisam quando um código "Essencial" tem rastreador
  *   (ele carregaria antes do "Aceitar").
  */
+import { readableCode } from "@/detection/encoded-loader";
 import {
   GTAG_FAMILY,
   SAFE_URLS,
@@ -142,7 +147,7 @@ export function codeUrls(...codes: (string | null | undefined)[]): string[] {
   const out = new Set<string>();
   for (const code of codes) {
     if (typeof code !== "string") continue;
-    for (const m of code.replace(/\\\//g, "/").matchAll(URL_IN_CODE)) out.add(m[0]);
+    for (const m of readableCode(code).replace(/\\\//g, "/").matchAll(URL_IN_CODE)) out.add(m[0]);
   }
   return [...out];
 }
@@ -159,7 +164,7 @@ export function unknownScriptHosts(
   const out = new Set<string>();
   for (const code of codes) {
     if (typeof code !== "string") continue;
-    for (const m of code.matchAll(SCRIPT_SRC)) {
+    for (const m of readableCode(code).matchAll(SCRIPT_SRC)) {
       const src = (m[1] ?? m[2] ?? m[3] ?? "").trim().replace(/&amp;/gi, "&");
       const url = /^(https?:)?\/\//i.test(src) ? parse(src) : null;
       if (url && ownVerdict(src) === null && !known(url.href)) out.add(url.hostname.toLowerCase());
@@ -178,7 +183,7 @@ export function detectCodeTrackers(...codes: (string | null | undefined)[]): str
   const byCallOnly = new Set<string>();
   for (const code of codes) {
     if (typeof code !== "string" || !code.trim()) continue;
-    const text = code.replace(/\\\//g, "/");
+    const text = readableCode(code).replace(/\\\//g, "/");
     for (const m of text.matchAll(URL_IN_CODE)) {
       const vendor = ownVerdict(m[0]);
       if (vendor && vendor !== "known") {
