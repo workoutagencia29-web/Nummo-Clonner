@@ -2,6 +2,7 @@
  * Documentos de página no editor: abrir, salvar (com checagem de revisão para
  * não sobrescrever o que outra aba salvou) e histórico de versões.
  */
+
 import { randomUUID } from "node:crypto";
 import { rm } from "node:fs/promises";
 import { gunzipSync, gzipSync } from "node:zlib";
@@ -16,9 +17,11 @@ import {
   legacySignals,
   withProjectFormat,
 } from "@/lib/legacy-repair";
+import { formatAmount } from "@/lib/payments/rules";
 import { packProject, unpackProject } from "@/lib/project-data";
 import { deleteObject, getObject, putContentAddressed, putObject, storagePath } from "@/lib/storage";
 import { blankPageHtml } from "@/lib/templates";
+import { offerHasWheel } from "@/server/services/wheel";
 
 const ASSET = "/os-assets/";
 /** Quantas versões automáticas guardar por documento. */
@@ -55,7 +58,15 @@ async function documentOrThrow(documentId: string) {
                   },
                   links: {
                     orderBy: { position: "asc" },
-                    select: { id: true, key: true, label: true, url: true, kind: true },
+                    select: {
+                      id: true,
+                      key: true,
+                      label: true,
+                      url: true,
+                      kind: true,
+                      target: true,
+                      payment: { select: { name: true, amountCents: true, currency: true, locale: true } },
+                    },
                   },
                 },
               },
@@ -125,7 +136,23 @@ export interface EditorPayload {
   offer: { id: string; name: string };
   /** Páginas do funil, com o documento principal de cada uma (para trocar de página no editor). */
   pages: { id: string; name: string; slug: string; type: string; isHome: boolean; documentId: string | null }[];
-  links: { id: string; key: string; label: string; url: string; kind: string }[];
+  /**
+   * Links da oferta. `payment`: link de "Pagamento na página" com o produto
+   * salvo — resumo para mostrar ("Curso · MX$ 297,00"); o botão abre a janela
+   * de pagamento e o `url` não vale.
+   */
+  links: {
+    id: string;
+    key: string;
+    label: string;
+    url: string;
+    kind: string;
+    payment?: string | null;
+    /** Idioma do produto de pagamento (es/en/pt), para o bloco "Acesso ao produto". */
+    paymentLocale?: string | null;
+  }[];
+  /** Alguma página da oferta tem roleta de desconto (visibilidade "só para quem ganhou"). */
+  hasWheel?: boolean;
   documents: { id: string; device: "ALL" | "DESKTOP" | "MOBILE" }[];
   /** Página aberta antes de correções do editor: o que reparar ao abrir (src/lib/legacy-repair.ts). */
   repair?: LegacyRepair | null;
@@ -199,7 +226,15 @@ export async function getEditorPayload(documentId: string): Promise<EditorPayloa
       const main = docs.find((d) => d.device === "ALL") ?? docs.find((d) => d.device === "DESKTOP") ?? docs[0];
       return { id: p.id, name: p.name, slug: p.slug, type: p.type, isHome: p.isHome, documentId: main?.id ?? null };
     }),
-    links: page.offer.links,
+    links: page.offer.links.map(({ target, payment, ...l }) => ({
+      ...l,
+      payment:
+        target === "PAYMENT" && payment
+          ? `${payment.name} · ${formatAmount(payment.amountCents, payment.currency)}`
+          : null,
+      paymentLocale: target === "PAYMENT" && payment ? payment.locale.toLowerCase() : null,
+    })),
+    hasWheel: await offerHasWheel(page.offer.id),
     documents: siblings,
   };
 }

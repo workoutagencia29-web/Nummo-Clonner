@@ -7,8 +7,14 @@
  * - Elementos com delay de VSL (data-os-delay="<segundos>") ficam escondidos e
  *   aparecem depois do tempo configurado. Na prévia, ?os_mostrar_delay=1 mostra tudo.
  * - Widgets dos blocos do editor (data-os-widget): contador, barra de escassez,
- *   notificação de compra, popup de saída, formulário de captura e player VTurb
- *   (src/runtime/widgets). Nada disso roda dentro do editor.
+ *   notificação de compra, popup de saída, formulário de captura, player VTurb,
+ *   quiz e roleta de desconto (src/runtime/widgets). Nada disso roda dentro do editor.
+ * - Prêmio da roleta nas outras páginas da oferta (src/runtime/widgets/prize.ts):
+ *   botões de checkout com o link do desconto, faixa com o contador e
+ *   visibilidade "só para quem ganhou".
+ * - Pagamento na página (src/runtime/payments): botões data-os-pay abrem a
+ *   janela de pagamento do produto (script à parte, window.__osPay, que também
+ *   liga o bloco "Acesso ao produto" da página de obrigado).
  * - [data-os-year] mostra o ano atual (rodapé).
  * - Páginas clonadas no modo Editável: FAQ/abas/acordeões e ganchos do clonador
  *   voltam a funcionar (src/runtime/clone-compat.ts). Cópias "Preservar JS"
@@ -18,13 +24,17 @@
  * Fases seguintes acrescentam: repasse de UTMs, pixels e consentimento.
  */
 import { initCloneCompat } from "./clone-compat";
+import { initPayments } from "./payments/click";
 import { initCountdowns } from "./widgets/countdown";
 import { initExitPopups } from "./widgets/exit-popup";
 import { initLeadForms, leadWait } from "./widgets/lead-form";
+import { initPrize } from "./widgets/prize";
+import { initQuizzes } from "./widgets/quiz";
 import { initSalesNotifications } from "./widgets/sales-notification";
 import { initScarcity } from "./widgets/scarcity";
 import { addCss, isPreview, navigate } from "./widgets/util";
 import { initVturb } from "./widgets/vturb";
+import { initWheels, keepWheelHrefs } from "./widgets/wheel";
 
 interface OsWindow extends Window {
   __osRuntime?: boolean;
@@ -177,6 +187,8 @@ interface OsWindow extends Window {
       initExitPopups,
       initLeadForms,
       initVturb,
+      initQuizzes,
+      initWheels,
     ]) {
       try {
         init();
@@ -190,7 +202,8 @@ interface OsWindow extends Window {
     // Cópia "Preservar JS": os scripts originais continuam rodando e já cuidam de
     // FAQ, abas e menu — a compatibilidade desfaria o que eles acabaram de fazer.
     const keepsOriginalJs = !!document.querySelector('meta[name="os-preserve-js"]');
-    const steps = [setupDelays, setupWidgets, setupAutoplay];
+    // O prêmio primeiro: os botões de checkout já levam ao desconto quando a página aparece.
+    const steps = [initPrize, initPayments, setupDelays, setupWidgets, setupAutoplay];
     if (!keepsOriginalJs) steps.push(initCloneCompat);
     // Cada parte isolada: um erro numa não impede as outras.
     for (const step of steps) {
@@ -200,6 +213,14 @@ interface OsWindow extends Window {
         // segue com as outras partes
       }
     }
+  }
+
+  // Já, ao carregar o script (fim do <body>): o destino do "Resgatar" da roleta
+  // como veio no HTML, antes de o rastreamento completar os links no DOMContentLoaded.
+  try {
+    keepWheelHrefs();
+  } catch {
+    // segue sem
   }
 
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", start);

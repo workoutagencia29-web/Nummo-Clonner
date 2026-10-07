@@ -79,6 +79,19 @@ export function navigate(url: URL, newTab?: boolean): boolean {
   return true;
 }
 
+let autoScrollUntil = 0;
+
+/**
+ * A página vai rolar sozinha (ex.: o quiz voltando ao topo ao trocar de etapa):
+ * o popup de saída não conta essa rolagem como a pessoa saindo da página.
+ */
+export function markAutoScroll(ms = 1200) {
+  autoScrollUntil = Date.now() + ms;
+}
+
+/** Rolagem feita pela própria página (markAutoScroll) ainda em andamento. */
+export const autoScrolling = () => Date.now() < autoScrollUntil;
+
 /** Aparelho de toque (celular/tablet). */
 export function isTouch() {
   return matchMedia("(hover: none), (pointer: coarse)").matches;

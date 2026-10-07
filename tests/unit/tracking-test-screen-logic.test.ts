@@ -452,6 +452,19 @@ describe("troubleshootingTips", () => {
 
   it("sem regras de evento e limite de passos", () => {
     expect(ids(tips([row("RUNTIME", "START", "LOADED")], { rules: [] }))).toEqual(["no-rules"]);
+    // Página de quiz sem regras: os eventos do quiz chegam, a dica não diz que "só o PageView dispara".
+    const quiz = tips(
+      [
+        row("RUNTIME", "START", "LOADED"),
+        row("CONSENT", "ACCEPTED", "FIRED"),
+        row("META", "PageView", "FIRED", { event: "PAGE_VIEW" }),
+        row("META", "QuizPergunta1", "FIRED", { quiz_pergunta: 1, quiz_total: 4 }),
+        row("META", "QuizConcluido", "FIRED", { quiz_total: 4 }),
+      ],
+      { rules: [] },
+    ).find((t) => t.id === "no-rules");
+    expect(quiz?.text).not.toMatch(/Só o PageView/);
+    expect(quiz?.text).toMatch(/eventos automáticos do quiz/);
     const full = troubleshootingTips({
       events: [],
       summaries: [],
@@ -628,12 +641,12 @@ describe("modo do aviso de cookies na tela de teste", () => {
     expect(testSteps({ consentMode: "OPT_IN", acceptLabel: "Concordo", noticeLabel: "Entendi" })).toEqual([
       "Abra a página de teste (ela abre numa aba nova).",
       "Clique em “Concordo” no aviso de cookies.",
-      "Clique no botão de compra e envie o formulário.",
+      "Use a página como um visitante: responda o quiz, clique no botão de compra ou envie o formulário.",
     ]);
     expect(testSteps({ consentMode: "NOTICE", acceptLabel: "Aceitar", noticeLabel: "Ok" })).toEqual([
       "Abra a página de teste (ela abre numa aba nova).",
       "Os pixels já carregam; “Ok” só fecha o aviso de cookies.",
-      "Clique no botão de compra e envie o formulário.",
+      "Use a página como um visitante: responda o quiz, clique no botão de compra ou envie o formulário.",
     ]);
     const off = testSteps({ consentMode: "OFF", acceptLabel: "Aceitar", noticeLabel: "Entendi" });
     expect(off).toHaveLength(2);

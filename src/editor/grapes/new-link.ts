@@ -14,12 +14,30 @@ export interface NewLinkRequest {
   component: Component;
   /** Tipo sugerido (botão de WhatsApp → WHATSAPP). */
   kind: "CHECKOUT" | "UPSELL" | "DOWNSELL" | "WHATSAPP" | "OTHER";
+  /** Nome sugerido ("Checkout 30% OFF"); sem ele, o do tipo. */
+  name?: string;
+  /** Liga ao link criado de outro jeito (ex.: fatia da roleta); sem ele, data-os-link no elemento. */
+  bind?: (key: string) => void;
+}
+
+const handlers = new WeakMap<Editor, (req: NewLinkRequest) => void>();
+
+/**
+ * Abre o diálogo de link novo de fora de uma lista "Link da oferta" (ex.: o
+ * prêmio de uma fatia da roleta). false = o editor não tem o diálogo.
+ */
+export function requestNewLink(editor: Editor, req: NewLinkRequest): boolean {
+  const handler = handlers.get(editor);
+  if (!handler) return false;
+  handler(req);
+  return true;
 }
 
 export const newLinkOption = { id: NEW_LINK_OPTION, label: "＋ Criar link da oferta…" };
 
 export function installNewLinkOption(editor: Editor, onRequest: (req: NewLinkRequest) => void) {
   watchEditor(editor);
+  handlers.set(editor, onRequest);
   // O GrapesJS pode avisar a mesma mudança mais de uma vez: um pedido por elemento.
   const pending = new WeakSet<Component>();
   const handler = (component: Component) => {
@@ -39,5 +57,8 @@ export function installNewLinkOption(editor: Editor, onRequest: (req: NewLinkReq
     });
   };
   editor.on("component:update:attributes", handler);
-  return () => editor.off("component:update:attributes", handler);
+  return () => {
+    editor.off("component:update:attributes", handler);
+    if (handlers.get(editor) === onRequest) handlers.delete(editor);
+  };
 }

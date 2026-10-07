@@ -2,10 +2,12 @@
  * Leitura da oferta para o ZIP: páginas, versões, documentos (com ou sem o
  * HTML), links e pixels com envio pelo servidor. Só ofertas fora da lixeira.
  */
+
 import { prisma } from "@/lib/db";
 import { UserError } from "@/lib/errors";
 import type { LayoutPage } from "@/lib/export/layout";
 import type { ServerEventVendor } from "@/lib/export/options";
+import { RENDER_LINK_SELECT, type RenderLink, renderLinks } from "@/lib/payments/links";
 import { serverApiEnabled } from "@/lib/tracking/schema";
 
 export const OFFER_NOT_FOUND = "Oferta não encontrada. Ela pode ter sido excluída ou estar na lixeira.";
@@ -45,7 +47,9 @@ export interface SourcePage {
 export interface ExportSource {
   offer: { id: string; name: string; settings: unknown; liveUrl: string | null; updatedAt: Date };
   pages: SourcePage[];
-  links: { key: string; url: string }[];
+  /** kind: CHECKOUT, UPSELL… (os botões de checkout levam o prêmio da roleta). */
+  /** Links da oferta (pay = "Pagamento na página", ver src/lib/payments/links.ts). */
+  links: RenderLink[];
 }
 
 function assetMapOf(value: unknown): Record<string, string> | null {
@@ -68,7 +72,10 @@ export async function loadExportSource(offerId: string, { withHtml = true } = {}
       settings: true,
       liveUrl: true,
       updatedAt: true,
-      links: { orderBy: [{ position: "asc" }, { createdAt: "asc" }], select: { key: true, url: true } },
+      links: {
+        orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+        select: RENDER_LINK_SELECT,
+      },
       pages: {
         orderBy: [{ position: "asc" }, { createdAt: "asc" }],
         select: {
@@ -110,7 +117,7 @@ export async function loadExportSource(offerId: string, { withHtml = true } = {}
       liveUrl: offer.liveUrl,
       updatedAt: offer.updatedAt,
     },
-    links: offer.links,
+    links: renderLinks(offer.links),
     pages: offer.pages.map((p) => ({
       ...p,
       variants: p.variants.map((v) => ({

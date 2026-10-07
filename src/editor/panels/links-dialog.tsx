@@ -4,6 +4,7 @@ import {
   AnchorIcon,
   CheckIcon,
   CircleAlertIcon,
+  CreditCardIcon,
   CrosshairIcon,
   ExternalLinkIcon,
   FileTextIcon,
@@ -46,6 +47,7 @@ import { createOfferLinkAction, updateOfferLinkAction } from "@/server/actions/o
 import type { LinkClassification } from "@/server/services/bulk-replace";
 import type { EditorPayload } from "@/server/services/documents";
 import type { EditorDialogProps } from "../editor-app";
+import { PAYMENT_LINK_BADGE } from "../grapes/components";
 
 type OfferLink = EditorPayload["links"][number];
 type Kind = "CHECKOUT" | "UPSELL" | "DOWNSELL" | "WHATSAPP" | "OTHER";
@@ -125,7 +127,12 @@ export function LinksDialog({ editor, payload, open, onOpenChange, saveNow, navi
 
   /** Endereço efetivo do grupo (links da oferta: a URL do link). */
   const urlOf = useCallback(
-    (g: LinkGroup) => (g.kind === "offer-link" ? (linkByKey.get(g.linkKey ?? "")?.url ?? "") : g.url),
+    (g: LinkGroup) => {
+      if (g.kind !== "offer-link") return g.url;
+      const link = linkByKey.get(g.linkKey ?? "");
+      // Pagamento na página: o endereço guardado não vale (o botão abre a janela de pagamento).
+      return link && !link.payment ? link.url : "";
+    },
     [linkByKey],
   );
 
@@ -463,13 +470,19 @@ function GroupCard(props: GroupCardProps) {
           <div className="flex flex-wrap items-center gap-1.5">
             <p className="truncate text-sm font-medium">{groupTitle(props)}</p>
             {isLink && link && <Badge variant="secondary">Link da oferta</Badge>}
+            {isLink && link?.payment && <Badge variant="outline">{PAYMENT_LINK_BADGE}</Badge>}
             {isLink && link && platform && <Badge variant="outline">{platform}</Badge>}
             {!isLink && classification?.kind === "checkout" && <Badge variant="outline">Sem link da oferta</Badge>}
             <Badge variant="outline" className="text-muted-foreground">
               {plural(group.items.length, "elemento", "elementos")}
             </Badge>
           </div>
-          {effectiveUrl ? (
+          {isLink && link?.payment ? (
+            <p className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+              <CreditCardIcon className="size-3 shrink-0" aria-hidden="true" />
+              <span className="truncate">Abre a janela de pagamento: {link.payment}</span>
+            </p>
+          ) : effectiveUrl ? (
             <p className="flex min-w-0 items-center gap-1 font-mono text-xs text-muted-foreground" title={effectiveUrl}>
               <span className="truncate">{effectiveUrl}</span>
               {isAbsolute(effectiveUrl) && (
@@ -516,7 +529,7 @@ function GroupCard(props: GroupCardProps) {
       <div className="mt-2 flex flex-wrap gap-1.5 pl-11">
         {isLink ? (
           <>
-            {link && (
+            {link && !link.payment && (
               <ActionButton active={editing === "link-url"} onClick={() => setEditing("link-url")} disabled={disabled}>
                 <PencilIcon />
                 Editar endereço do link
@@ -727,7 +740,7 @@ function BindForm({
             <SelectItem key={l.key} value={l.key}>
               <span className="font-medium">{l.label}</span>
               <span className="max-w-56 truncate text-xs text-muted-foreground">
-                {displayUrl(l.url) ?? "sem endereço"}
+                {l.payment ? PAYMENT_LINK_BADGE : (displayUrl(l.url) ?? "sem endereço")}
               </span>
             </SelectItem>
           ))}

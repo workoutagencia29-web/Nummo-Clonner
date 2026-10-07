@@ -6,34 +6,63 @@
  */
 import * as cheerio from "cheerio";
 import { restoreDoctype } from "@/lib/doctype";
-import { slugify } from "@/lib/text";
+import { PAY_ATTR } from "@/lib/payments/contract";
+import { SLUG_MAX, slugify } from "@/lib/text";
 
 export const LINK_ATTR = "data-os-link";
 
 export interface OfferLinkValue {
   key: string;
   url: string;
+  /**
+   * "Pagamento na página" com o produto salvo: o botão abre a janela de
+   * pagamento (data-os-pay), não vai a endereço nenhum.
+   */
+  pay?: boolean;
 }
 
-/** Chave estável a partir do nome ("Checkout principal" → "checkout-principal"). */
+/** O link leva a algum lugar: endereço preenchido ou pagamento na página. */
+export function linkHasDestination(link: { url: string; pay?: boolean }): boolean {
+  return Boolean(link.pay) || Boolean(link.url.trim());
+}
+
+/**
+ * Chave estável a partir do nome ("Checkout principal" → "checkout-principal").
+ * Nunca passa de SLUG_MAX, nem com o sufixo de nome repetido ("-2"): a chave
+ * de um link de pagamento precisa caber no PRODUCT_KEY_RE.
+ */
 export function linkKey(label: string, taken: Iterable<string>) {
   const used = new Set(taken);
   const root = slugify(label) || "link";
   if (!used.has(root)) return root;
   for (let i = 2; ; i++) {
-    const candidate = `${root}-${i}`;
+    const suffix = `-${i}`;
+    const candidate = `${root.slice(0, SLUG_MAX - suffix.length).replace(/-+$/, "")}${suffix}`;
     if (!used.has(candidate)) return candidate;
   }
 }
 
-/** Troca o destino de todo elemento ligado a um link da oferta. */
+/**
+ * Troca o destino de todo elemento ligado a um link da oferta. Link de
+ * pagamento na página: o elemento ganha data-os-pay="<chave>" (a janela de
+ * pagamento abre no clique, src/runtime), o <a> fica com href="#" e os outros
+ * perdem o data-os-href — nada leva ao checkout antigo do site clonado.
+ */
 export function applyOfferLinks(html: string, links: OfferLinkValue[]) {
   if (!html.includes(LINK_ATTR)) return html;
-  const byKey = new Map(links.filter((l) => l.url).map((l) => [l.key, l.url]));
+  const byKey = new Map(links.filter((l) => l.url && !l.pay).map((l) => [l.key, l.url]));
+  const pay = new Set(links.filter((l) => l.pay).map((l) => l.key));
   const $ = cheerio.load(html);
   $(`[${LINK_ATTR}]`).each((_, el) => {
     const node = $(el);
-    const url = byKey.get(node.attr(LINK_ATTR) ?? "");
+    const key = node.attr(LINK_ATTR) ?? "";
+    if (pay.has(key)) {
+      node.attr(PAY_ATTR, key);
+      if (el.tagName === "a" || el.tagName === "area") node.attr("href", "#");
+      node.removeAttr("data-os-href");
+      return;
+    }
+    const url = byKey.get(key);
     if (!url) return;
     if (el.tagName === "a" || el.tagName === "area") node.attr("href", url);
     else if (el.tagName === "form") node.attr("action", url);

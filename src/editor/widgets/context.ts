@@ -11,6 +11,12 @@ export interface WidgetLink {
   label: string;
   /** CHECKOUT | UPSELL | DOWNSELL | WHATSAPP | OTHER */
   kind?: string;
+  /** Endereço atual (vazio = link ainda sem endereço). */
+  url?: string;
+  /** "Pagamento na página" com produto (resumo): o link tem destino mesmo sem endereço. */
+  payment?: string | null;
+  /** Idioma do produto de pagamento (es/en/pt): o bloco "Acesso ao produto" nasce nele. */
+  paymentLocale?: string | null;
 }
 
 export interface WidgetPage {

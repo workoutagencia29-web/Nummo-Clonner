@@ -30,11 +30,13 @@ import {
   PlusIcon,
   SearchIcon,
   SmartphoneIcon,
+  SparklesIcon,
   SplitIcon,
   Trash2Icon,
 } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useId, useState } from "react";
+import { type ExistingFunnelPages, FunnelDialog } from "@/components/offers/funnel-dialog";
 import { PageDialog, type PageDialogPage } from "@/components/offers/page-dialog";
 import { PageSeoDialog } from "@/components/offers/settings/page-seo-dialog";
 import { VariantsDialog } from "@/components/offers/variants/variants-dialog";
@@ -99,8 +101,19 @@ export interface PageRow extends PageDialogPage {
   mobileDocumentId?: string | null;
 }
 
+const NO_FUNNEL: ExistingFunnelPages = { quiz: [], wheel: [] };
+
 /** Lista das páginas do funil, com arrastar para reordenar. */
-export function PagesList({ offerId, pages }: { offerId: string; pages: PageRow[] }) {
+export function PagesList({
+  offerId,
+  pages,
+  existingFunnel = NO_FUNNEL,
+}: {
+  offerId: string;
+  pages: PageRow[];
+  /** Páginas que já têm quiz / roleta (o funil em 1 clique avisa antes de criar outro). */
+  existingFunnel?: ExistingFunnelPages;
+}) {
   const [items, setItems] = useState(pages);
   // id estável entre servidor e navegador (evita aviso de hidratação do dnd-kit).
   const dndId = useId();
@@ -109,6 +122,7 @@ export function PagesList({ offerId, pages }: { offerId: string; pages: PageRow[
   const [deleting, setDeleting] = useState<PageRow | null>(null);
   const [seoPage, setSeoPage] = useState<{ id: string; name: string } | null>(null);
   const [abPage, setAbPage] = useState<{ id: string; name: string } | null>(null);
+  const [funnelOpen, setFunnelOpen] = useState(false);
   const reorder = useAction(reorderPagesAction);
   const setHome = useAction(setHomePageAction);
   const duplicate = useAction(duplicatePageAction);
@@ -146,16 +160,22 @@ export function PagesList({ offerId, pages }: { offerId: string; pages: PageRow[
           (seudominio.com.br). As outras ficam no endereço delas (seudominio.com.br/upsell). Arraste para mudar a ordem
           do funil.
         </p>
-        <Button
-          variant="outline"
-          onClick={() => {
-            setDialogPage(null);
-            setDialogOpen(true);
-          }}
-        >
-          <PlusIcon />
-          Adicionar página
-        </Button>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => setFunnelOpen(true)}>
+            <SparklesIcon />
+            Adicionar funil Quiz → Roleta
+          </Button>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setDialogPage(null);
+              setDialogOpen(true);
+            }}
+          >
+            <PlusIcon />
+            Adicionar página
+          </Button>
+        </div>
       </div>
 
       <DndContext
@@ -203,6 +223,14 @@ export function PagesList({ offerId, pages }: { offerId: string; pages: PageRow[
         offerId={offerId}
         page={dialogPage}
         existingSlugs={items.filter((p) => p.id !== dialogPage?.id).map((p) => p.slug)}
+      />
+
+      <FunnelDialog
+        open={funnelOpen}
+        onOpenChange={setFunnelOpen}
+        offerId={offerId}
+        pages={items}
+        existing={existingFunnel}
       />
 
       <PageSeoDialog offerId={offerId} page={seoPage} onClose={() => setSeoPage(null)} />

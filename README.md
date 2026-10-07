@@ -66,13 +66,14 @@ A cópia não depende do site original: todos os arquivos ficam em `data/storage
 No topo ficam o nome, o status, o **Baixar ZIP** e o menu **Ações**. Logo abaixo, o cartão **Próximos passos** mostra o que falta para a oferta sair pronta, cada item com um atalho:
 
 - botões de compra sem link, ou links que ainda levam ao **checkout da página clonada** (troque pelo seu);
+- com pagamento na página: chave da Kyvo, página de obrigado com o bloco de acesso e link de acesso (ver [Pagamento na página](#pagamento-na-página-kyvo));
 - marcadores `{{EMPRESA}}`, `{{CNPJ}}`, `{{EMAIL}}` sem os dados da empresa;
 - pixel (opcional), ZIP gerado e **Onde está no ar** (o endereço do site depois de subir).
 
 O cartão pode ser recolhido e some quando o obrigatório está feito. As abas (a escolhida fica no endereço da página, então recarregar volta nela):
 
 - **Páginas do funil** — a lista das páginas (arraste para reordenar). Em cada uma: **Editar** e o menu **⋯** (**Ver página**, Editar o layout do celular, Nome, endereço e tipo…, **SEO da página…**, **Teste A/B…**, Tornar página inicial, Duplicar página, Excluir página). **Adicionar página** usa a mesma galeria de modelos da "Nova oferta".
-- **Links e checkouts** — os links nomeados da oferta (checkout principal, upsell, WhatsApp…). Os botões das páginas guardam só o nome do link: trocar o endereço aqui troca em **todos os botões de todas as páginas**. O endereço é conferido na hora (um `pay.kiwify` sem o final, por exemplo, é recusado com a explicação).
+- **Links e checkouts** — os links nomeados da oferta (checkout principal, upsell, WhatsApp…). Os botões das páginas guardam só o nome do link: trocar o endereço aqui troca em **todos os botões de todas as páginas**. O endereço é conferido na hora (um `pay.kiwify` sem o final, por exemplo, é recusado com a explicação). Um link de checkout pode virar **Pagamento na página** (ver [Pagamento na página](#pagamento-na-página-kyvo)).
 - **Pixels e rastreamento** — ver [Pixels e rastreamento](#pixels-e-rastreamento).
 - **Empresa e SEO** — dados da empresa e SEO (ver [Empresa e SEO](#empresa-e-seo)).
 - **Detalhes** — **Onde está no ar** (o endereço do site depois de subir o ZIP), a página original (de onde foi clonada) e notas. Nome, pasta, tags e status ficam no menu **Ações** do topo.
@@ -85,14 +86,55 @@ Os formulários das abas mostram **Alterações não salvas · Descartar · Salv
 
 Na oferta, clique em **Editar** ao lado da página. O editor abre em tela cheia (em telas com menos de 900 px de largura ele avisa e oferece **Ver página**):
 
-- **Esquerda — Blocos / Camadas / Páginas.** Clique num bloco para colocá-lo logo abaixo do item selecionado (ou arraste para a página). São mais de 40 blocos prontos: títulos, textos, botões, **botão do checkout**, contador regressivo, barra de escassez, notificação de compra, tabela de preços, garantia, WhatsApp, popup de saída, vídeos (YouTube, Vimeo, VTurb, Panda ou arquivo), depoimentos, FAQ, formulário de captura (webhook e/ou redirecionamento) e rodapé com termos e política.
+- **Esquerda — Blocos / Camadas / Páginas.** Clique num bloco para colocá-lo logo abaixo do item selecionado (ou arraste para a página). São mais de 40 blocos prontos: títulos, textos, botões, **botão do checkout**, contador regressivo, barra de escassez, notificação de compra, tabela de preços, garantia, WhatsApp, popup de saída, vídeos (YouTube, Vimeo, VTurb, Panda ou arquivo), depoimentos, FAQ, formulário de captura (webhook e/ou redirecionamento), **quiz**, **roleta de desconto** e rodapé com termos e política.
 - **Centro — a página.** Um clique seleciona (num botão, seleciona o botão inteiro, com o link; outro clique entra no texto dele); **dois cliques num texto editam o texto**; dois cliques numa imagem trocam a imagem (ou **Configurações → Trocar imagem**). Use os botões Computador / Tablet / Celular no topo para ajustar cada tamanho de tela separadamente. O zoom aparece no topo ("50%"): **Tamanho real (100%)** mostra a página sem reduzir (role para os lados) e **[** / **]** escondem os painéis da esquerda e da direita para a página ficar maior.
 - **Direita — Estilo e Configurações.** Cor, fonte, tamanho, espaçamento, fundo, borda (classes e estados como "ao passar o mouse" ficam em **Avançado**, no fim do Estilo) e, em Configurações, o **Link da oferta** do botão (checkout, upsell, WhatsApp…), a página do funil, o **Evento ao clicar**, o "Aparece depois de (segundos)" da VSL e as opções de cada bloco. Em "Link da oferta", **＋ Criar link da oferta…** cria o link e já liga o botão.
 - **Topo:** desfazer/refazer (⌘Z / ⇧⌘Z), **Localizar e substituir** (nesta página ou em todas), **Links e checkouts** (todos os destinos da página, com troca em massa), **Código** (HTML do elemento, CSS da página e códigos livres do head/body), **Histórico** (salve um ponto de restauração com nome e volte a qualquer ponto), **Modo prévia** (a página rodando de verdade ali no editor, com os scripts) e **Ver página** (abre numa aba nova, como o visitante vê). "Versão" no editor é só a do teste A/B; páginas clonadas com celular separado têm o **layout do computador** e o **layout do celular**.
 
 Tudo é salvo sozinho a cada alteração ("Salvo às …"); ⌘S salva na hora. Se a mesma página for alterada em outra aba, o editor pergunta o que fica.
 
-**Montar do zero:** em **Nova oferta** (ou **Adicionar página**), escolha um modelo pronto na galeria: página de vendas longa, VSL, captura, upsell, downsell, obrigado, advertorial, política de privacidade, termos de uso ou em branco.
+**Montar do zero:** em **Nova oferta** (ou **Adicionar página**), escolha um modelo pronto na galeria: página de vendas longa, VSL, advertorial, **quiz**, **roleta**, captura, upsell, downsell, obrigado, política de privacidade, termos de uso ou em branco.
+
+### Quiz (perguntas e respostas antes da oferta)
+
+Para o funil **anúncio → quiz → próxima página** (ex.: a roleta de desconto ou a página de vendas): crie a página com o modelo **Quiz** ou solte o bloco **Quiz** (categoria "Quiz e roleta") em qualquer página. Não pede contato: são só perguntas.
+
+- **No editor** todas as etapas aparecem uma embaixo da outra, cada uma com o selo "Etapa 2 de 7 · Pergunta". Textos, emojis e imagens se editam com dois cliques, como no resto da página. Na página publicada aparece **uma etapa por vez**.
+- **Configurações do quiz** (clique no quiz, ou numa etapa e em "Selecionar o bloco de fora"): **＋ Adicionar pergunta / informação / tela "Analisando"**, barra de progresso e botão "Voltar" (ligam/desligam), **para onde vai o botão final** (página do funil, link da oferta ou endereço) e as **cores** (principal, opção marcada e botão final) — valem para o quiz inteiro.
+- **Numa pergunta**: **＋ Adicionar opção**, **escolha múltipla** (aparece o "Continuar"), formato **Lista** ou **Cartões (2 por linha)** e o que vai nas opções (emoji, imagem ou só texto). Escolha única avança sozinha ao tocar.
+- **Tela "Analisando"**: quantos segundos dura e as mensagens que se alternam (uma por linha).
+- Duplicar, excluir e mudar etapas e opções de lugar: barra do elemento selecionado (Duplicar / Excluir / Arrastar) ou **Camadas**. A **etapa final** não sai nem se duplica (sem ela o quiz não levaria a lugar nenhum): só se edita.
+- **Pixels**: sem configurar nada, cada pergunta respondida e a conclusão vão para os pixels — Meta e TikTok: `QuizPergunta1`, `QuizPergunta2`… e `QuizConcluido`; GA4: `quiz_pergunta_1`… e `quiz_concluido` (com o mesmo aviso de cookies dos outros eventos). Comparando as contagens, você vê **em que pergunta as pessoas desistem** (no Gerenciador de Eventos da Meta e em Relatórios → Eventos do GA4). O texto das respostas nunca é enviado. Para desligar: Configurações do quiz → "Mandar cada resposta para os pixels". Para otimizar campanhas por um evento padrão (ex.: Lead), use **Evento ao clicar** no botão final.
+- O botão final leva as UTMs do anúncio para a próxima página, como os outros links do funil.
+- Dois quizzes na mesma página: os eventos do segundo levam `quiz_numero: 2` (o primeiro não muda), para as contagens não se misturarem.
+
+### Roleta de desconto (depois do quiz, antes da página de vendas)
+
+Funil completo: **anúncio → quiz → roleta → página de vendas com o desconto ganho**.
+
+**Jeito rápido — funil em 1 clique:** na oferta, aba **Páginas do funil**, clique em **Adicionar funil Quiz → Roleta**. Na janela:
+- escolha a **página de vendas** (já vem a página inicial);
+- confira os **prêmios** (10%, 20%, 30% e 50% OFF, com chances 40/30/20/10 — dá para mudar o texto e a chance, tirar e adicionar prêmios) e cole o **link do checkout com desconto** de cada um (e um cupom, se quiser). Pode deixar links em branco para preencher depois: o "Próximos passos" avisa até estar tudo ligado;
+- clique em **Criar funil**.
+
+O Offer Studio cria a página **Quiz** e a página **Roleta** já ligadas (o botão final do quiz leva à roleta e o "Resgatar" leva à página de vendas), um link "Checkout 30% OFF" etc. para cada prêmio em **Links e checkouts**, e o **quiz vira a página inicial**: o link do anúncio passa a abrir nele, e a página de vendas continua na oferta, no endereço dela (ex.: `/principal/`). Depois, a janela oferece **Abrir o quiz no editor** e **Ver o funil**. Se a oferta já tem um quiz ou uma roleta, a janela avisa antes de criar outro.
+
+**Passo a passo (montando você mesmo):**
+
+1. Em **Links e checkouts** (ou direto na roleta, em "＋ Criar link da oferta…"), cadastre um **checkout com desconto** para cada prêmio (ex.: "Checkout 30% OFF").
+2. Crie a página com o modelo **Roleta** (ou solte o bloco **Roleta de desconto**). No quiz, o botão final vai para a página da roleta.
+3. Clique na roleta → **Configurações → Fatias**: para cada fatia, o texto ("30% OFF"), a cor, a **chance** de sair e o **prêmio** (o checkout com aquele desconto). Cupom é opcional (só aparece para o visitante, com botão copiar). Também dá para ter uma fatia **"Sem prêmio"** (o texto dela vira "Não foi dessa vez"). Toda fatia precisa ter pelo menos 1% de chance (uma fatia que nunca sai pode ser considerada propaganda enganosa).
+4. Em **Ao resgatar o prêmio**, escolha a página de vendas.
+5. Na página de vendas, ligue os botões de compra a um link do tipo **Checkout**: são esses que passam a levar ao checkout do prêmio (o "Próximos passos" avisa se nenhum estiver ligado). Se a roleta estiver na própria página de vendas, os botões trocam logo depois do giro. Se o "Resgatar" for ligado direto a um checkout, ele leva ao checkout do prêmio sorteado (pulando a página de vendas).
+
+Na página, a pessoa toca em **GIRAR**, a roda gira e para no prêmio sorteado (pelas chances que você definiu), com confete, o cupom e o botão **RESGATAR MEU DESCONTO**. Cada pessoa gira **uma vez**: se voltar, vê o mesmo prêmio. O prêmio fica guardado por **7 dias** (mude em "Prêmio guardado por").
+
+Na **página de vendas**, quem ganhou:
+- clica em qualquer botão de compra (ligado a um link de checkout) e vai para o **checkout com o desconto** — com as UTMs do anúncio, como sempre;
+- vê no topo a faixa **"🎉 Você ganhou 30% OFF — seu desconto está reservado por 09:59"** (minutos e liga/desliga nas Configurações da roleta). Quando o contador zera, **o desconto continua**: a faixa só muda para "continua reservado — aproveite agora".
+- Para mostrar algo só para quem ganhou (ex.: o preço com desconto), clique no elemento → Configurações → **"Roleta de desconto: mostrar" → "Só para quem ganhou prêmio"** (ou "Só para quem não ganhou", para o preço cheio).
+
+Quem chega direto do anúncio na página de vendas vê tudo como antes. Funciona na prévia, em "Ver página" e no ZIP (em qualquer pasta e até aberto direto do computador), também com teste A/B. **Pixels**: `RoletaGirou` e `RoletaResgatou` (GA4: `roleta_girou`, `roleta_resgatou`) com o prêmio que saiu, sem configurar nada. Se faltar o checkout de algum prêmio, o "Próximos passos" e o ZIP avisam, com o atalho **Abrir no editor**.
 
 ---
 
@@ -112,6 +154,22 @@ No ZIP, cada versão vai para uma pasta própria (`oferta-a/`, `oferta-b/`…) e
 - Todo evento leva a versão vista em **`os_versao`** (A, B…): Meta (parâmetro do evento), GA4 (parâmetro + propriedade de usuário), TikTok/Kwai (menos o PageView deles, que não aceita parâmetros) e `eventos.php`.
 - O link do checkout ganha a marca **`versao-a`/`versao-b`**: no parâmetro `src` na Hotmart, Kiwify e Eduzz (o `sck`/`xcod` nunca muda) e no `utm_content` nas outras plataformas. A marca só entra quando o parâmetro ainda não existe: um `utm_content` que veio do anúncio (o "nome|ID" que a UTMify lê) **nunca é alterado**. Nessas plataformas, para separar as vendas do tráfego pago por versão, use um link de checkout diferente em cada versão.
 - Na **Prévia** e no **Testar pixels**, a versão aberta também vai nos eventos.
+
+---
+
+## Pagamento na página (Kyvo)
+
+Em vez de mandar o comprador para um checkout externo, o botão de compra abre uma **janela de pagamento por cima da página** — SPEI (México, MXN), cartão (EUR/USD/MXN), Bizum (Espanha, EUR) e MB WAY (Portugal, EUR) — pela Kyvo. Depois de pagar, o comprador vai para a **página de obrigado**, que mostra o botão de acesso ao produto **só para quem pagou** (o link de acesso fica guardado no servidor, nunca na página).
+
+1. **Chave da Kyvo**: em **Configurações → Pagamentos**, cole a chave da API (`kyvo_live_…`, com as permissões `spei_charges:create`, `card_charges:create` e `transactions:read`) e clique em **Testar conexão**. A chave fica só neste Mac e no `pagamento.php` do ZIP.
+2. **Link de pagamento**: na oferta, aba **Links e checkouts**, troque o destino do checkout para **Pagamento na página** e preencha o produto: nome, valor, moeda, formas de pagamento, idioma da janela, **página de obrigado** e **link de acesso** (área de membros, arquivo…).
+3. **Botões**: no editor, ligue os botões de compra a esse link (**Link da oferta**), como qualquer checkout.
+4. **Página de obrigado**: no editor da página de obrigado, adicione o bloco **Acesso ao produto** (categoria Conversão).
+5. **Teste na prévia**: **Ver página** → clique em comprar. Na prévia nada é cobrado: os botões "Simular pagamento aprovado/recusado" mostram cada caso, até o acesso na página de obrigado.
+6. **Publique**: baixe o ZIP. Ele leva o `pagamento.php` e a pasta `pagamento-dados/` (com a chave — **não compartilhe**). A hospedagem precisa de **PHP 7.4+ com cURL** e do site em **HTTPS** (Hostinger, HostGator, cPanel; ative o SSL grátis no painel). Em Netlify, Vercel ou Cloudflare Pages o pagamento não funciona.
+7. **Teste com valor baixo**: abra `seudominio.com.br/pagamento.php` (deve dizer "funcionando", com a chave cadastrada e HTTPS "sim"). Depois mude por um tempo o valor do produto para 1,00, gere o ZIP, suba e faça uma compra de verdade: a janela confirma, leva à página de obrigado e o botão de acesso abre o produto. A venda aparece no painel da Kyvo. Volte o valor certo e suba de novo.
+
+O **"Próximos passos"** e os avisos do ZIP mostram o que falta (chave, página de obrigado, link de acesso, bloco de acesso), cada um com o botão para resolver. No painel da Kyvo, conecte a **UTMify** e os **pixels pelo servidor**: a Kyvo recebe as UTMs da venda e manda o Purchase com o mesmo ID do pedido que a janela usa nos pixels do navegador (sem contar duas vezes). Mudou o valor, o link de acesso ou a chave? Gere o ZIP de novo e suba.
 
 ---
 
@@ -138,6 +196,8 @@ assets/                   imagens, estilos, fontes, vídeos e os scripts das pá
 eventos.php               opcional (API de Conversões / Events API)
 eventos-dados/config.php  os tokens do eventos.php — NÃO compartilhe
 eventos-dados/.htaccess   bloqueia a pasta dos tokens (arquivo oculto no Mac)
+pagamento.php             com "Pagamento na página": cobranças da Kyvo e acesso de quem pagou
+pagamento-dados/          a chave da Kyvo e os produtos — NÃO compartilhe (com .htaccess)
 404.html                  página "não encontrada" (endereço errado ou antigo)
 LEIA-ME.txt               este passo a passo, com os detalhes da sua oferta
 ```
@@ -162,7 +222,7 @@ Os endereços entre as páginas são **relativos**: a oferta funciona na raiz do
 
 > O `.htaccess` começa com ponto e fica oculto. No Gerenciador de Arquivos, **Configurações → Mostrar arquivos ocultos** faz ele aparecer. Ele fica dentro da pasta `eventos-dados/`, junto com o `config.php` dos tokens (o ZIP nunca traz um `.htaccess` na raiz: o da hospedagem continua valendo).
 
-**Netlify, Cloudflare Pages e outras sem PHP:** descompacte o ZIP no computador e arraste a pasta para o painel (deploy manual). Gere o ZIP **sem** o `eventos.php`: sem PHP, o arquivo com o seu token ficaria visível.
+**Netlify, Cloudflare Pages e outras sem PHP:** descompacte o ZIP no computador e arraste a pasta para o painel (deploy manual). Gere o ZIP **sem** o `eventos.php`: sem PHP, o arquivo com o seu token ficaria visível. O pagamento na página também não funciona nelas (não suba o `pagamento.php` nem a pasta `pagamento-dados`).
 
 **FTP (FileZilla):** descompacte o ZIP no computador e envie todo o conteúdo para `public_html` (ou para a subpasta), mantendo as pastas.
 

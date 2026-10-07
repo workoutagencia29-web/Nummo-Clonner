@@ -46,7 +46,9 @@ describe("aviso de botão sem link no ZIP", () => {
     expect(warning).toBeTruthy();
     expect(warning).toContain("“Página principal”");
     const doc = await prisma.pageDocument.findFirstOrThrow({ where: { variant: { page: { offerId: offer.id } } } });
-    expect(plan.deadButtonPages).toEqual([{ name: "Página principal", documentId: doc.id }]);
+    expect(plan.deadButtonPages).toEqual([
+      { name: "Página principal", documentId: doc.id, buy: true, quiz: false, wheel: false },
+    ]);
   });
 
   it("botão ligado a um link com endereço (ou com endereço digitado) não avisa; link sem endereço avisa", async () => {

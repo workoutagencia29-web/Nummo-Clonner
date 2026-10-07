@@ -229,6 +229,7 @@ describe("biblioteca de blocos", () => {
       "cta-grande",
       "cta-checkout",
       "contador",
+      "quiz",
       "escassez",
       "notificacao-compra",
       "tabela-precos",
@@ -278,6 +279,9 @@ describe("biblioteca de blocos", () => {
       "lead-form": "os-lead-form",
       whatsapp: "os-whatsapp",
       vturb: "os-vturb-player",
+      quiz: "os-quiz",
+      wheel: "os-wheel",
+      access: "os-access",
     });
   });
 
@@ -290,7 +294,7 @@ describe("biblioteca de blocos", () => {
 });
 
 describe("script das páginas", () => {
-  it("a parte dos widgets continua pequena (meta: menos de 13,5 KB minificado)", () => {
+  it("a parte dos widgets continua pequena (meta: menos de 30 KB minificado)", () => {
     const entry = [
       'import { initCountdowns } from "./src/runtime/widgets/countdown";',
       'import { initExitPopups } from "./src/runtime/widgets/exit-popup";',
@@ -299,8 +303,11 @@ describe("script das páginas", () => {
       'import { initScarcity } from "./src/runtime/widgets/scarcity";',
       'import { addCss } from "./src/runtime/widgets/util";',
       'import { initVturb } from "./src/runtime/widgets/vturb";',
+      'import { initQuizzes } from "./src/runtime/widgets/quiz";',
+      'import { initWheels } from "./src/runtime/widgets/wheel";',
+      'import { initPrize } from "./src/runtime/widgets/prize";',
       "addCss();",
-      "for (const f of [initCountdowns, initScarcity, initSalesNotifications, initExitPopups, initLeadForms, initVturb]) f();",
+      "for (const f of [initPrize, initCountdowns, initScarcity, initSalesNotifications, initExitPopups, initLeadForms, initVturb, initQuizzes, initWheels]) f();",
     ].join("\n");
     const widgets = buildSync({
       stdin: { contents: entry, resolveDir: process.cwd(), loader: "ts" },
@@ -312,7 +319,14 @@ describe("script das páginas", () => {
     }).outputFiles[0].text;
     // 12 KB até a revisão da Fase 3 (hoje ~12,9 KB): popup/aviso fora de seções com
     // delay, aviso acima do WhatsApp, navegação segura e "nada foi enviado" no formulário.
-    expect(Buffer.byteLength(widgets, "utf8")).toBeLessThan(13_500);
+    // Quiz (etapas, escolha única/múltipla, "Analisando", voltar, acessibilidade e
+    // avisos para os pixels): +~3,7 KB com o CSS (~17,2 KB no total).
+    // Roleta de desconto (giro, resultado, confete, uma vez por visitante) e o
+    // prêmio nas outras páginas (botões de checkout, faixa com contador e cupom,
+    // visibilidade): +~11,5 KB com o CSS, ~4 KB com gzip (~28,9 KB no total).
+    // Correções da revisão da roleta (checkout na página da roleta, memória por
+    // oferta, destino original do "Resgatar"): +~0,7 KB (hoje ~29,6 KB).
+    expect(Buffer.byteLength(widgets, "utf8")).toBeLessThan(30_000);
     // O script inteiro (widgets + botões com data-os-href + delay de VSL) compila.
     expect(runtimeScript()).toContain("os-widgets-css");
   });

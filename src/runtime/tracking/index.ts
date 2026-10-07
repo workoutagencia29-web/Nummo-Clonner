@@ -22,15 +22,22 @@
  *   eventos.php (config.server), também pelo servidor. No teste A/B
  *   (config.variant), cada evento leva a versão (os_versao) e os links de
  *   checkout ganham a marca dela (./forwarding.ts, markVersion).
- * - Regras de evento (./rules.ts) e repasse de UTMs/IDs de clique (./forwarding.ts):
+ * - Regras de evento (./rules.ts), eventos do quiz (./quiz.ts: cada pergunta
+ *   respondida e a conclusão) e da roleta (./wheel.ts: giro e resgate), com o
+ *   mesmo consentimento, e repasse de
+ *   UTMs/IDs de clique (./forwarding.ts):
  *   no "Pedir permissão", o que fica guardado e os IDs de clique de anúncio no
  *   checkout esperam o "Aceitar" (entre as páginas do funil eles seguem no
  *   endereço, para quem aceitar numa página seguinte); "Recusar" tira os dois.
- * - window.__osTracking: { pending(), settled(ms), leaving } (scripts dos pixels
+ * - Compra da janela de pagamento (./purchase.ts, evento "os:purchase"):
+ *   Purchase com o valor/moeda do produto e eventID = pedidoExterno.
+ * - window.__osTracking: { pending(), settled(ms), leaving, relink(), payMeta() } (scripts dos pixels
  *   ainda carregando; a página esperando para sair), usado pelo script das
  *   páginas para não trocar de página antes de o evento sair (formulário de
  *   captura, botões data-os-href) — e por ./rules.ts, para um link clicado
- *   durante essa espera também esperar.
+ *   durante essa espera também esperar. relink() completa de novo os links
+ *   (a roleta muda o destino do "Resgatar" depois do giro). payMeta() dá à
+ *   janela de pagamento as UTMs/IDs de clique que valem com a escolha de cookies da hora.
  * - Modo "preview": nenhum pixel nem código de marketing carrega (não suja os
  *   dados); banner e repasse de UTMs funcionam. Modo "test": cada passo é
  *   informado ao painel (./report.ts).
@@ -49,10 +56,13 @@ import {
   startLeadPass,
   withoutClickIds,
 } from "./forwarding";
+import { type PurchaseEvent, startPurchaseEvents } from "./purchase";
+import { type QuizEvent, startQuizEvents } from "./quiz";
 import { beacon, type Report, reporter } from "./report";
 import { startRules } from "./rules";
 import { $$, closest, cookie, doc, on, ready, setCookie, uuid, win } from "./util";
 import { consentState, createVendors, gtag } from "./vendors";
+import { startWheelEvents } from "./wheel";
 
 /** Formato do fbclid da Meta (vai para o cookie _fbc: nada de ";" que injetaria atributos). */
 const FBCLID = /^[A-Za-z0-9_.-]{1,500}$/;
@@ -62,7 +72,8 @@ const PII = /^(name|nome|first_name|last_name|email|e-mail|phone|telefone|tel|ce
 /** O endereço da página sem dados pessoais na query (event_source_url). */
 function pageUrl() {
   const url = new URL(location.href);
-  for (const k of Array.from(url.searchParams.keys())) if (PII.test(k)) url.searchParams.delete(k);
+  // "pedido": a credencial do link de acesso da página de obrigado (src/lib/payments/contract.ts, ORDER_PARAM).
+  for (const k of Array.from(url.searchParams.keys())) if (PII.test(k) || k === "pedido") url.searchParams.delete(k);
   return url.href;
 }
 
@@ -112,32 +123,44 @@ function start(cfg: Cfg, report: Report) {
   // Sem escolha ainda, os IDs de clique seguem nos links do funil (só no endereço,
   // do próprio site): quem aceitar na página seguinte não perde a atribuição.
   const redecorate = startForwarding(cfg, (funnel) => (granted || (funnel && choice !== "rejected") ? all : stripped));
+  // O script das páginas refaz os links depois de mudar um destino (o "Resgatar" da roleta).
+  win.__osTracking.relink = redecorate;
+  // Janela de pagamento: os parâmetros que valem com a escolha da hora (src/runtime/payments/meta.ts).
+  win.__osTracking.payMeta = () => (granted ? all : stripped);
   startLeadPass(cfg);
   const clickId = (k: string) => cleanParam(k, query.get(k)) || all[k] || null;
 
   const vendors = createVendors(cfg, report);
-  const queue: Ev[] = [];
+  /** Eventos esperando o "Aceitar" (padrão, do quiz, da roleta ou a compra da janela de pagamento). */
+  const queue: (Ev | QuizEvent | PurchaseEvent)[] = [];
   let enabled = false;
 
-  /** Evento para os pixels (e para o eventos.php) com um eventID novo. */
-  const send = (ev: Ev) => {
-    const eventId = uuid();
+  /**
+   * Evento para os pixels (e para o eventos.php; o do quiz, só pelo navegador)
+   * com um eventID novo — a compra da janela de pagamento leva o pedidoExterno
+   * (o mesmo event_id do Purchase que o gateway manda pelo servidor).
+   */
+  const send = (ev: Ev | QuizEvent | PurchaseEvent) => {
+    const buy = (ev as PurchaseEvent).std ? (ev as PurchaseEvent) : null;
+    const eventId = buy ? buy.id : uuid();
     vendors.send(ev, eventId);
+    const std = buy ? buy.std : typeof ev === "string" ? ev : null;
+    if (!std) return;
     const names: Record<string, string> = {};
     for (const v of server ? server.vendors : []) {
-      const n = nameOf(cfg, v, ev);
+      const n = nameOf(cfg, v, std);
       // O PageView do TikTok (ttq.page) não leva eventID: pelo servidor, contaria duas vezes.
-      if (n && !(v === "TIKTOK" && ev === "PAGE_VIEW")) names[v] = n;
+      if (n && !(v === "TIKTOK" && std === "PAGE_VIEW")) names[v] = n;
     }
     if (!server || !Object.keys(names).length) return;
     try {
       beacon(server.endpoint, {
-        event: ev,
+        event: std,
         event_name: names,
         event_id: eventId,
         event_time: Math.floor(Date.now() / 1000),
         event_source_url: pageUrl(),
-        ...amountOf(cfg, ev),
+        ...(buy ? buy.amount : amountOf(cfg, std)),
         ...versionOf(cfg),
         fbp: cookie("_fbp"),
         fbc: cookie("_fbc"),
@@ -173,13 +196,14 @@ function start(cfg: Cfg, report: Report) {
     ready(activateGated);
   };
 
-  /** Manda o evento (true = saiu agora para os pixels). */
-  const fire = (ev: Ev) => {
+  /** Manda o evento, padrão, do quiz ou a compra (true = saiu agora para os pixels). */
+  const fire = (ev: Ev | QuizEvent | PurchaseEvent) => {
     if (enabled && granted) {
       send(ev);
       return true;
     }
-    if (choice === "rejected") report("CONSENT", ev, "BLOCKED");
+    if (choice === "rejected")
+      report("CONSENT", typeof ev === "string" ? ev : (ev as PurchaseEvent).std || (ev as QuizEvent).name, "BLOCKED");
     else queue.push(ev);
     return false;
   };
@@ -294,6 +318,9 @@ function start(cfg: Cfg, report: Report) {
     try {
       // O mesmo objeto do script das páginas: a espera para sair (`leaving`) é uma só.
       startRules(cfg, fire, api);
+      startQuizEvents(fire);
+      startWheelEvents(fire);
+      startPurchaseEvents(fire);
     } catch (e) {
       report("RUNTIME", "ERROR", "ERROR", { message: `${e}`.slice(0, 300) });
     }

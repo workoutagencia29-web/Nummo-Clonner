@@ -101,6 +101,15 @@ function insertionPoint(html: string): { at: number; wrapHead: boolean; hasChars
 }
 
 /**
+ * Põe `block` no começo do <head> (depois das metas de charset/viewport do
+ * início): antes do rastreamento e de qualquer script da página.
+ */
+export function injectAtHeadStart(html: string, block: string): string {
+  const { at, wrapHead } = insertionPoint(html);
+  return `${html.slice(0, at)}${wrapHead ? `<head>${block}</head>` : block}${html.slice(at)}`;
+}
+
+/**
  * Coloca a configuração e a tag do script (`scriptTag`: externo na prévia,
  * embutido no ZIP) no começo do <head>. Substitui um rastreamento anterior.
  *

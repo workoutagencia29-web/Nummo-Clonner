@@ -40,6 +40,7 @@ import {
   type BackupManifest,
   compatibilityProblem,
   DAMAGED_MESSAGE,
+  ENCRYPTED_COLUMNS,
   isBackupStorageKey,
   LOCAL_SETTING_KEYS,
   READ_STALLED_MESSAGE,
@@ -794,7 +795,8 @@ async function restoreDatabase(input: DatabaseRestoreInput) {
       for await (const raw of lines(await archive.openEntry(plan.file), stats, timeouts.readStallMs, plan.bytes)) {
         rows++;
         let text = raw.toString("utf8");
-        if (plan.name === "AppSetting" || plan.name === "PixelConfig" || selfCols.length) {
+        const secretCols = ENCRYPTED_COLUMNS[plan.name] ?? [];
+        if (plan.name === "AppSetting" || secretCols.length || selfCols.length) {
           let row: Record<string, unknown>;
           try {
             row = JSON.parse(text) as Record<string, unknown>;
@@ -802,12 +804,16 @@ async function restoreDatabase(input: DatabaseRestoreInput) {
             throw damaged();
           }
           if (plan.name === "AppSetting" && typeof row.key === "string" && localKeys.has(row.key)) continue;
-          if (plan.name === "PixelConfig" && reencrypt && typeof row.accessTokenEnc === "string") {
-            const next = reencryptToken(row.accessTokenEnc, input.backupKey, input.currentKey);
-            if (next) {
-              row.accessTokenEnc = next;
-              text = JSON.stringify(row);
-              reencrypted++;
+          if (reencrypt) {
+            for (const col of secretCols) {
+              const value = row[col];
+              if (typeof value !== "string") continue;
+              const next = reencryptToken(value, input.backupKey, input.currentKey);
+              if (next) {
+                row[col] = next;
+                text = JSON.stringify(row);
+                reencrypted++;
+              }
             }
           }
           if (updateSql && selfCols.some((c) => row[c] !== null && row[c] !== undefined)) {

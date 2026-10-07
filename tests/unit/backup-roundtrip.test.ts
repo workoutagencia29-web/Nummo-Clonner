@@ -26,6 +26,7 @@ import {
   cleanupRichData,
   createRichData,
   fileSha,
+  KYVO_KEY,
   type RichData,
   rewriteArchive,
   STORAGE_ROOT,
@@ -229,6 +230,17 @@ describe("restauração completa", () => {
     // Tokens continuam legíveis e o autoincremento continua do último número.
     const pixels = await prisma.pixelConfig.findMany({ orderBy: { vendor: "asc" } });
     expect(pixels.map((p) => decryptSecret(p.accessTokenEnc as string))).toEqual([META_TOKEN, TIKTOK_TOKEN]);
+    // Chave do gateway de pagamento e o produto (métodos, página de obrigado, link de acesso) voltam.
+    const gateway = await prisma.paymentGateway.findUniqueOrThrow({ where: { provider: "KYVO" } });
+    expect(decryptSecret(gateway.apiKeyEnc)).toBe(KYVO_KEY);
+    const product = await prisma.paymentProduct.findFirstOrThrow({ include: { link: true } });
+    expect(product).toMatchObject({
+      methods: ["CARD", "BIZUM", "MB_WAY"],
+      currency: "EUR",
+      thankYouPageId: data.fx.upsellId,
+      accessUrl: "https://membros.exemplo.com/curso",
+      link: { target: "PAYMENT", key: "pagamento" },
+    });
     const maxLog = await prisma.cloneLog.aggregate({ _max: { id: true } });
     const log = await prisma.cloneLog.create({
       data: {
@@ -398,9 +410,13 @@ describe("chave dos tokens de outro Mac", () => {
       tmpRoot: path.join(work, "tmp"),
       encryptionKey: otherKey,
     });
-    expect(result.reencrypted).toBe(2);
+    // 2 tokens de pixel + a chave da Kyvo.
+    expect(result.reencrypted).toBe(3);
     const pixels = await prisma.pixelConfig.findMany({ orderBy: { vendor: "asc" } });
     expect(pixels.map((p) => decryptSecret(p.accessTokenEnc as string, otherKey))).toEqual([META_TOKEN, TIKTOK_TOKEN]);
+    const gateway = await prisma.paymentGateway.findUniqueOrThrow({ where: { provider: "KYVO" } });
+    expect(decryptSecret(gateway.apiKeyEnc, otherKey)).toBe(KYVO_KEY);
+    expect(() => decryptSecret(gateway.apiKeyEnc)).toThrow();
     // Com a chave antiga não abre mais (foi trocada de verdade).
     expect(() => decryptSecret(pixels[0].accessTokenEnc as string)).toThrow();
   }, 60_000);

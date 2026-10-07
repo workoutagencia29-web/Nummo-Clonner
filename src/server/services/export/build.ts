@@ -55,6 +55,14 @@ import {
   upPrefix,
 } from "@/lib/export/paths";
 import {
+  PAGAMENTO_CONFIG_FILE,
+  PAGAMENTO_FILE,
+  PAGAMENTO_HTACCESS_FILE,
+  pagamentoConfigPhp,
+  pagamentoHtaccess,
+  pagamentoPhp,
+} from "@/lib/export/payment-php";
+import {
   EVENTOS_CONFIG_FILE,
   EVENTOS_FILE,
   eventosConfigPhp,
@@ -69,15 +77,18 @@ import { companyMarkersIn, companyMarkersWarning, OG_IMAGE_WARNING } from "@/lib
 import { effectiveSeo, type OfferSettings, parseOfferSettings, parsePageSeo, type Seo } from "@/lib/offer-settings";
 import { parsePageCode } from "@/lib/page-code";
 import { renderPageHtml } from "@/lib/page-render";
-import { runtimeScript, trackingScript } from "@/lib/runtime-bundle";
+import { METHOD_LABEL } from "@/lib/payments/rules";
+import { PAYMENT_SCRIPT_ATTR, paymentScript, runtimeScript, trackingScript } from "@/lib/runtime-bundle";
 import { seoRenderFrom } from "@/lib/seo-render";
 import { getObject, objectInfo, storagePath } from "@/lib/storage";
 import { blankPageHtml } from "@/lib/templates";
 import { loadTracking } from "@/lib/tracking/config";
 import { TRACKING_SCRIPT_ATTR } from "@/lib/tracking/runtime-config";
 import { explicitPageCodeCategory } from "@/lib/tracking/schema";
+import { wheelRenderData } from "@/lib/wheel-prizes";
 import { readPixelTokenForServerFile } from "@/server/services/tracking";
 import { NO_PAGES_MESSAGE } from "./keys";
+import { loadPaymentExport, zipPaymentConfig, zipPaymentRender } from "./payments";
 import { planFrom, README_FILE, SERVER_VENDOR_LABEL, uniqueVendors } from "./plan";
 import { PRESERVE_COPY_MAX_BYTES } from "./preserve";
 import { type ExportSource, loadExportSource, type SourceDocument, type SourcePage, serverEventPixels } from "./source";
@@ -116,12 +127,13 @@ function scriptFile(prefix: string, code: string) {
 export const SCRIPTS_FAILED_MESSAGE =
   "Não foi possível preparar os scripts das páginas (rastreamento e botões). Feche e abra o Offer Studio e tente de novo.";
 
-/** Scripts do Offer Studio compilados (os mesmos da prévia). */
-function pageScripts() {
+/** Scripts do Offer Studio compilados (os mesmos da prévia); a janela de pagamento só com pagamento na página. */
+function pageScripts(withPayments: boolean) {
   try {
     return {
       runtime: scriptFile("os-runtime", runtimeScript()),
       tracking: scriptFile("os-tracking", trackingScript()),
+      payment: withPayments ? scriptFile("os-pagamento", paymentScript()) : null,
     };
   } catch (err) {
     console.error("[export] os scripts das páginas não compilaram:", err);
@@ -187,18 +199,20 @@ export async function buildExport(input: BuildInput): Promise<BuildResult> {
   const early: string[] = [];
   const serverPixels = input.options.serverEvents ? await serverPixelsWithTokens(input.offerId, early) : [];
   const serverVendors: ServerEventVendor[] = uniqueVendors(serverPixels);
-  const plan = planFrom(source, input.options, serverVendors);
+  const payment = await loadPaymentExport(input.offerId);
+  const plan = planFrom(source, input.options, serverVendors, payment);
   const warnings = [...plan.warnings, ...early];
   const { layout } = plan;
 
   const settings = parseOfferSettings(source.offer.settings);
   const liveBase = liveBaseUrl(source.offer.liveUrl);
-  const { runtime, tracking } = pageScripts();
+  const { runtime, tracking, payment: paymentJs } = pageScripts(payment !== null);
 
   /** Conteúdo gerado (páginas, scripts, PHP, LEIA-ME), por caminho no ZIP. */
   const generated = new Map<string, Buffer>();
   generated.set(`${ASSETS_DIR}${runtime.name}`, runtime.data);
   generated.set(`${ASSETS_DIR}${tracking.name}`, tracking.data);
+  if (paymentJs) generated.set(`${ASSETS_DIR}${paymentJs.name}`, paymentJs.data);
   /** Arquivos /os-assets/ citados (a copiar para assets/). */
   const wanted = new Set<string>();
   const brokenLinks = new Set<string>();
@@ -211,6 +225,12 @@ export async function buildExport(input: BuildInput): Promise<BuildResult> {
   const pages = new Map(source.pages.map((p) => [p.id, p]));
   const docs = new Map<string, SourceDocument>();
   for (const p of source.pages) for (const v of p.variants) for (const d of v.documents) docs.set(d.id, d);
+  // Roleta de desconto: prêmios de todas as páginas (a página de vendas usa o prêmio ganho em outra).
+  const wheel = wheelRenderData(
+    [...docs.values()].map((d) => d.html),
+    source.links,
+    source.offer.id,
+  );
   /** HTML final de cada página (o divisor copia metas da versão de controle). */
   const rendered = new Map<string, string>();
   /** HTML da primeira página do ZIP que não é o divisor (idioma do 404.html). */
@@ -253,6 +273,15 @@ export async function buildExport(input: BuildInput): Promise<BuildResult> {
         : null,
       company: settings.company,
       seo,
+      wheel,
+      // Pagamento na página: o pagamento.php da raiz e a página de obrigado, relativos a esta pasta.
+      payments: zipPaymentRender(payment, {
+        rel,
+        pageHref,
+        scriptTag: paymentJs
+          ? `<script src="${rel}${ASSETS_DIR}${paymentJs.name}" ${PAYMENT_SCRIPT_ATTR}></script>`
+          : "",
+      }),
     });
     // Verificação de domínio (Meta, Google…) colada nos códigos livres: sempre
     // no <head> de verdade. O código em espera do "Aceitar" já a deixa de fora
@@ -402,6 +431,16 @@ export async function buildExport(input: BuildInput): Promise<BuildResult> {
     generated.set(HTACCESS_FILE, Buffer.from(htaccess(), "utf8"));
   }
 
+  // pagamento.php (+ pagamento-dados/config.php com a chave e o .htaccess que bloqueia a pasta)
+  if (payment) {
+    generated.set(PAGAMENTO_FILE, Buffer.from(pagamentoPhp(), "utf8"));
+    generated.set(
+      PAGAMENTO_CONFIG_FILE,
+      Buffer.from(pagamentoConfigPhp(await zipPaymentConfig(payment, layout.pageDirs)), "utf8"),
+    );
+    generated.set(PAGAMENTO_HTACCESS_FILE, Buffer.from(pagamentoHtaccess(), "utf8"));
+  }
+
   // 404.html: "não encontrada" (e, na Cloudflare Pages, nada de entregar o divisor para qualquer caminho)
   generated.set(NOT_FOUND_FILE, Buffer.from(notFoundHtml(settings.language || htmlLang(firstHtml())), "utf8"));
 
@@ -430,6 +469,14 @@ export async function buildExport(input: BuildInput): Promise<BuildResult> {
           variants: s.variants.map((v) => ({ name: v.name, folder: v.folder, percent: v.percent })),
         })),
         serverEvents: serverVendors.map((v) => SERVER_VENDOR_LABEL[v]),
+        payments: payment
+          ? payment.products.map((p) => ({
+              name: p.name,
+              // Texto simples: o espaço do Intl ("MX$ 497,00") vira espaço comum.
+              price: p.price.replace(/\s/g, " "),
+              methods: p.methods.map((m) => METHOD_LABEL[m]),
+            }))
+          : [],
         preserveJs: plan.preserveJsPages,
         hiddenFromSearch: [...hiddenByType],
         warnings,

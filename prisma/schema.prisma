@@ -181,21 +181,31 @@ enum OfferLinkKind {
   OTHER
 }
 
+/// Para onde um link da oferta leva.
+enum OfferLinkTarget {
+  URL // Endereço (checkout externo, WhatsApp…)
+  PAYMENT // Pagamento na página (janela do gateway de pagamento, ver PaymentProduct)
+}
+
 /// Links da oferta (checkout principal, upsell, WhatsApp…). Botões das páginas
 /// guardam só a chave (data-os-link="checkout"); trocar a URL aqui atualiza todos
 /// os botões de todas as páginas na prévia e no ZIP.
 model OfferLink {
-  id        String        @id @default(cuid())
+  id        String          @id @default(cuid())
   offerId   String
-  offer     Offer         @relation(fields: [offerId], references: [id], onDelete: Cascade)
+  offer     Offer           @relation(fields: [offerId], references: [id], onDelete: Cascade)
   /// Chave estável usada nos botões (minúsculas, números e hífen).
   key       String
   label     String
   url       String
-  kind      OfferLinkKind @default(CHECKOUT)
-  position  Int           @default(0)
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
+  kind      OfferLinkKind   @default(CHECKOUT)
+  /// URL: os botões levam ao `url`. PAYMENT: abrem a janela de pagamento do
+  /// produto (`payment`); o `url` fica guardado para quando voltar a ser endereço.
+  target    OfferLinkTarget @default(URL)
+  position  Int             @default(0)
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
+  payment   PaymentProduct?
 
   @@unique([offerId, key])
   @@index([offerId, position])
@@ -244,6 +254,8 @@ model Page {
   removedItems  RemovedItem[]
   checkoutLinks CheckoutLink[]
   eventRules    EventRule[]
+  /// Produtos de pagamento que mandam o comprador para esta página depois de pagar.
+  thankYouOf    PaymentProduct[]
 
   @@unique([offerId, slug])
   @@index([offerId, position])
@@ -607,6 +619,74 @@ model PixelTestEvent {
   detail    Json             @default("{}")
 
   @@index([sessionId, id])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Pagamentos (pagamento na página, com o gateway do usuário — ver src/lib/payments)
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PaymentProvider {
+  KYVO
+}
+
+enum PaymentCurrency {
+  MXN
+  EUR
+  USD
+}
+
+enum PaymentMethod {
+  SPEI // Transferência no México (só MXN)
+  CARD // Cartão (qualquer moeda)
+  BIZUM // Espanha (só EUR)
+  MB_WAY // Portugal (só EUR)
+}
+
+/// Idioma da janela de pagamento (para o comprador).
+enum PaymentLocale {
+  ES
+  EN
+  PT
+}
+
+/// Conta do gateway de pagamento (Configurações → Pagamentos). Uma por
+/// gateway. A chave da API fica criptografada (AES-256-GCM, src/lib/crypto.ts),
+/// só é lida no servidor e só vai para o pagamento.php do ZIP.
+model PaymentGateway {
+  provider    PaymentProvider @id
+  apiKeyEnc   String
+  /// Último "Testar conexão": quando e o resultado (ok, invalid_key, missing_scope…).
+  checkedAt   DateTime?
+  checkStatus String?
+  createdAt   DateTime        @default(now())
+  updatedAt   DateTime        @updatedAt
+}
+
+/// Produto vendido com o pagamento na página: o que o comprador paga ao clicar
+/// num botão ligado ao link (OfferLink.target = PAYMENT). Valor e moeda saem
+/// sempre daqui (nunca do navegador). O link de acesso só é entregue pelo
+/// servidor a quem pagou (nunca vai para o HTML).
+model PaymentProduct {
+  id             String          @id @default(cuid())
+  linkId         String          @unique
+  link           OfferLink       @relation(fields: [linkId], references: [id], onDelete: Cascade)
+  provider       PaymentProvider @default(KYVO)
+  /// Nome do produto mostrado ao comprador.
+  name           String
+  /// Valor em centavos da moeda.
+  amountCents    Int
+  currency       PaymentCurrency
+  methods        PaymentMethod[]
+  locale         PaymentLocale
+  /// Página do funil para onde o comprador vai depois de pagar.
+  thankYouPageId String?
+  thankYouPage   Page?           @relation(fields: [thankYouPageId], references: [id], onDelete: SetNull)
+  /// Link de acesso ao produto (área de membros, arquivo…), entregue só para pedido pago.
+  accessUrl      String          @default("")
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+
+  @@index([thankYouPageId])
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

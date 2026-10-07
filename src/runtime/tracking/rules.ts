@@ -15,9 +15,11 @@
  * Formulários contam no ENVIO, nunca no clique: clicar num campo de um
  * formulário de checkout não é iniciar o checkout.
  *
- * Clique num link (<a>/<area>) ou envio de formulário que leva a outra página
- * enquanto o script de um pixel ainda carrega (ex.: "Comprar" logo depois do
- * "Aceitar"): a navegação espera o pixel (até 0,8 s), senão o evento se perde
+ * Clique num link (<a>/<area>) que leva a outra página enquanto o script de um
+ * pixel ainda carrega (ex.: "Comprar" ou o botão final do quiz logo depois do
+ * "Aceitar"), com ou sem evento no próprio clique, ou envio de formulário que
+ * mandou um evento nesse meio-tempo: a navegação espera o pixel (até 0,8 s),
+ * senão o PageView, o que esperou o "Aceitar" e o evento do clique se perdem
  * junto com a página. Quem decide é um ouvinte no fim do caminho do evento
  * (bolha da janela) — ou, se o script da página parar a propagação, logo depois
  * do ouvinte dela: se a página tratou o evento (preventDefault: modal, checkout
@@ -355,7 +357,11 @@ export function startRules(cfg: Cfg, fire: (ev: Ev) => boolean, wait: VendorWait
           });
         } else events.push(ev);
       }
-      if (hit(events) && wait.pending()) hold(e);
+      hit(events);
+      // Pixel ainda carregando: o PageView e o que esperou o "Aceitar" (ex.:
+      // eventos do quiz) estão na fila dele — o link espera, mesmo sem evento
+      // no próprio clique (como os botões data-os-href).
+      if (wait.pending()) hold(e);
     },
     true,
   );

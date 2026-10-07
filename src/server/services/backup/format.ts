@@ -7,7 +7,8 @@
  *   storage/<chave>       arquivos usados pelas ofertas (endereçados por hash,
  *                         versões salvas, saídas de clonagens ainda em revisão)
  *   storage-index.jsonl   chave, tamanho e SHA-256 de cada arquivo acima
- *   secrets.json          APP_ENCRYPTION_KEY (lê os tokens dos pixels em outro Mac)
+ *   secrets.json          APP_ENCRYPTION_KEY (lê os tokens dos pixels e a chave do
+ *                         gateway de pagamento em outro Mac)
  *   manifest.json         versão do formato e do app, migrations, contagens,
  *                         SHA-256 de cada entrada, impressão digital da chave
  *
@@ -60,6 +61,15 @@ export const LOCAL_TABLES = ["_prisma_migrations", "Backup", "BackupRestore", "S
  * códigos de verificação, contagem de tentativas de login e links de prévia).
  */
 export const TRANSIENT_TABLES = ["session", "verification", "rateLimit", "PreviewToken"] as const;
+/**
+ * Colunas com segredos criptografados com a APP_ENCRYPTION_KEY (src/lib/crypto.ts):
+ * restaurando o backup de outro Mac (outra chave), são criptografadas de novo
+ * com a chave deste. Segredo novo numa tabela nova: acrescente aqui.
+ */
+export const ENCRYPTED_COLUMNS: Record<string, readonly string[]> = {
+  PixelConfig: ["accessTokenEnc"],
+  PaymentGateway: ["apiKeyEnc"],
+};
 /** Configurações (AppSetting) deste Mac: ficam de fora do backup e a restauração mantém. */
 export const LOCAL_SETTING_KEYS = ["backup", "install"] as const;
 

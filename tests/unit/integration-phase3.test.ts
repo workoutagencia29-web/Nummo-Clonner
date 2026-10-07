@@ -152,7 +152,8 @@ describe("script das páginas (widgets + clones)", () => {
 
   it("é pequeno, único e idempotente", () => {
     const script = runtimeScript();
-    expect(script.length).toBeLessThan(40 * 1024);
+    // 40 KB até a roleta de desconto (roleta + prêmio na página de vendas: +~11,5 KB).
+    expect(script.length).toBeLessThan(42 * 1024);
     expect(script).toContain("__osRuntime");
     expect(script).toContain("__osCloneCompat");
     const once = injectRuntime("<html><head></head><body></body></html>", "<script data-os-runtime></script>");

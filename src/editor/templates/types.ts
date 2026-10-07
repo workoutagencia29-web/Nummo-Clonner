@@ -4,7 +4,7 @@ import type { PageType } from "@/generated/prisma/enums";
 /** Tipos de página que têm modelo pronto (subconjunto do PageType do banco). */
 export type TemplatePageType = Extract<
   PageType,
-  "SALES" | "VSL" | "CAPTURE" | "UPSELL" | "DOWNSELL" | "THANK_YOU" | "ADVERTORIAL" | "LEGAL"
+  "SALES" | "VSL" | "QUIZ" | "CAPTURE" | "UPSELL" | "DOWNSELL" | "THANK_YOU" | "ADVERTORIAL" | "LEGAL" | "OTHER"
 >;
 
 /** O que a tela precisa para mostrar um modelo (sem o HTML, que é pesado). */

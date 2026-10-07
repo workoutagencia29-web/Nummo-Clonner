@@ -6,9 +6,11 @@ import { parseTheme, THEME_COOKIE } from "@/lib/theme";
 import { getWorkerStatus } from "@/server/queries";
 import { getBackupOverview, listBackups } from "@/server/services/backup";
 import { listTags } from "@/server/services/organize";
+import { listPaymentGateways } from "@/server/services/payments/gateways";
 import { requireSession } from "@/server/session";
 import { AccountForm, PasswordForm } from "./account-forms";
 import { BackupCard } from "./backup-card";
+import { PaymentsCard } from "./payments-card";
 import { SystemStatus } from "./system-status";
 import { TagsManager } from "./tags-manager";
 import { ThemePicker } from "./theme-picker";
@@ -17,19 +19,22 @@ export const metadata: Metadata = { title: "Configurações" };
 
 export default async function ConfiguracoesPage() {
   const session = await requireSession();
-  const [tags, worker, cookieStore, backup, backups] = await Promise.all([
+  const [tags, worker, cookieStore, backup, backups, gateways] = await Promise.all([
     listTags(),
     getWorkerStatus(),
     cookies(),
     getBackupOverview(),
     listBackups(),
+    listPaymentGateways(),
   ]);
 
   return (
     <div className="flex max-w-3xl flex-col gap-6">
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Configurações</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Sua conta, aparência, tags, backup e o estado do sistema.</p>
+        <p className="mt-1 text-sm text-muted-foreground">
+          Sua conta, aparência, tags, pagamentos, backup e o estado do sistema.
+        </p>
       </div>
 
       <Card>
@@ -69,6 +74,19 @@ export default async function ConfiguracoesPage() {
         </CardHeader>
         <CardContent>
           <TagsManager tags={tags.map((t) => ({ id: t.id, name: t.name, color: t.color, count: t._count.offers }))} />
+        </CardContent>
+      </Card>
+
+      <Card id="pagamentos" className="scroll-mt-6">
+        <CardHeader>
+          <CardTitle>Pagamentos</CardTitle>
+          <CardDescription>
+            Para o comprador pagar dentro da página, sem ir para outro site. Cadastre aqui a chave do seu gateway e, na
+            aba “Links e checkouts” da oferta, crie um link do tipo “Pagamento na página”.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <PaymentsCard gateways={gateways} />
         </CardContent>
       </Card>
 

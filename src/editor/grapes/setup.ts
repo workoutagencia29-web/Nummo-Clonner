@@ -584,6 +584,31 @@ function titleCanvasFrame(editor: Editor) {
   editor.on("canvas:frame:load", apply);
 }
 
+/**
+ * A raiz de cada página do projeto é sempre o "wrapper". Uma página em branco
+ * (<body> só com uma quebra de linha, como blankPageHtml) era importada com a
+ * raiz detectada como "text" (o GrapesJS acha que um <body> só com texto é um
+ * texto); salvo assim, o projeto não abria mais (canvas vazio, erro no
+ * renderHead). Conserta projetos já salvos com esse defeito.
+ */
+export function fixPageRoots<T>(project: T): T {
+  const pages = (project as { pages?: { frames?: { component?: { type?: string } }[] }[] } | null)?.pages;
+  for (const page of Array.isArray(pages) ? pages : []) {
+    for (const frame of Array.isArray(page?.frames) ? page.frames : []) {
+      const root = frame?.component;
+      if (root && typeof root === "object" && root.type && root.type !== "wrapper") root.type = "wrapper";
+    }
+  }
+  return project;
+}
+
+/** Importa o HTML da página (primeira abertura) mantendo a raiz como "wrapper" (ver fixPageRoots). */
+export function importPageHtml(editor: Editor, html: string) {
+  editor.setComponents(html, { asDocument: true } as never);
+  const wrapper = editor.getWrapper();
+  if (wrapper && wrapper.get("type") !== "wrapper") wrapper.set("type", "wrapper");
+}
+
 export function createEditor(containers: EditorContainers, project: unknown | null): Editor {
   const editor = grapesjs.init({
     container: containers.canvas,
@@ -597,7 +622,7 @@ export function createEditor(containers: EditorContainers, project: unknown | nu
     canvasCss: CANVAS_CSS + WIDGET_CANVAS_CSS,
     noticeOnUnload: false,
     storageManager: false,
-    projectData: project ?? undefined,
+    projectData: project ? fixPageRoots(project) : undefined,
     // Plugins rodam antes de carregar o projeto: os tipos do Offer Studio precisam
     // existir para o projeto salvo voltar certo.
     plugins: [

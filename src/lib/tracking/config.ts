@@ -3,8 +3,10 @@
  * (pixels ligados, regras da oferta + da página, links de checkout,
  * configurações). A parte pura fica em ./compose (testável sem banco).
  */
+
 import { prisma } from "@/lib/db";
 import { planLayout } from "@/lib/export/layout";
+import { RENDER_LINK_SELECT, renderLinks } from "@/lib/payments/links";
 import { composeTrackingConfig, type TrackingVariant } from "./compose";
 import type { TrackingMode, TrackingRuntimeConfig } from "./runtime-config";
 import { parseTrackingSettings, resolvePolicyPage, type TrackingSettings } from "./schema";
@@ -111,7 +113,7 @@ export async function loadTracking(opts: BuildTrackingOptions): Promise<LoadedTr
       },
       links: {
         orderBy: [{ position: "asc" }, { createdAt: "asc" }],
-        select: { key: true, kind: true, url: true },
+        select: RENDER_LINK_SELECT,
       },
       pages: {
         orderBy: [{ position: "asc" }, { createdAt: "asc" }],
@@ -138,7 +140,8 @@ export async function loadTracking(opts: BuildTrackingOptions): Promise<LoadedTr
     settings,
     pixels: offer.pixels,
     rules: offer.eventRules,
-    links: offer.links,
+    // Link de pagamento na página: sem endereço (o host guardado não conta como checkout).
+    links: renderLinks(offer.links),
     pageId: opts.pageId,
     policyUrl,
     test: opts.test ?? null,

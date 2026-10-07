@@ -2,7 +2,9 @@
  * Transforma o HTML salvo de uma página no HTML servido ao visitante (prévia e,
  * na Fase 5, ZIP): marcadores da empresa ({{EMPRESA}}…) viram os dados da
  * oferta, links do funil (os-page:<id>) viram endereços reais, botões
- * ligados a links da oferta recebem a URL atual, o SEO (título, descrição,
+ * ligados a links da oferta recebem a URL atual (ou, nos de pagamento na
+ * página, data-os-pay), a roleta de desconto leva o mapa de prêmios (e marca
+ * os botões de checkout), os produtos de pagamento vão no #os-pagamento, o SEO (título, descrição,
  * favicon, imagem de compartilhamento, noindex, idioma) entra no <head>, os
  * códigos livres (da oferta e da página: head / início e fim do body) entram,
  * o script do Offer Studio vai antes do </body> e, com rastreamento, a
@@ -12,12 +14,14 @@ import { INTERNAL_LINK_PREFIX } from "@/lib/internal-links";
 import { applyOfferLinks, type OfferLinkValue } from "@/lib/offer-links";
 import { type Company, fillCompanyPlaceholders } from "@/lib/offer-settings";
 import { injectPageCode, PAGE_CODE_FIELDS, type PageCustomCode, unclosedCodePart } from "@/lib/page-code";
+import { injectOrderStrip, injectPaymentConfig, type PaymentRender } from "@/lib/payments/render";
 import { injectRuntime } from "@/lib/runtime-bundle";
 import { applySeo, type SeoRender } from "@/lib/seo-render";
 import { resolveCodeCategoryFull } from "@/lib/tracking/code-trackers-server";
 import { gateCode, injectTracking } from "@/lib/tracking/inject";
 import type { TrackingRuntimeConfig } from "@/lib/tracking/runtime-config";
 import type { CodeCategoryId } from "@/lib/tracking/schema";
+import { applyWheelPrizes, type WheelRender } from "@/lib/wheel-prizes";
 
 /**
  * Código livre com a categoria de consentimento. Sem categoria (a pessoa nunca
@@ -58,6 +62,18 @@ export interface RenderOptions {
   company?: Company | null;
   /** SEO da página (effectiveSeo + idioma, ver seoRenderFrom). Campos vazios mantêm o da página. */
   seo?: SeoRender | null;
+  /**
+   * Roleta de desconto da oferta (wheelRenderData): mapa de prêmios e botões de
+   * checkout marcados, para a página de vendas usar o prêmio ganho. A
+   * visibilidade condicional ("só para quem ganhou") vale mesmo sem ele.
+   */
+  wheel?: WheelRender | null;
+  /**
+   * Pagamento na página (produtos públicos da oferta + endpoint): vira o JSON
+   * #os-pagamento lido pela janela de pagamento. Os botões ligados a links de
+   * pagamento (`links` com pay) ganham data-os-pay mesmo sem ele.
+   */
+  payments?: PaymentRender | null;
 }
 
 const PAGE_LINK_RE = new RegExp(`${INTERNAL_LINK_PREFIX}([a-z0-9]{20,32})`, "g");
@@ -113,6 +129,8 @@ export function renderPageHtml(html: string, opts: RenderOptions) {
   let out = opts.company ? fillCompanyPlaceholders(html, opts.company) : html;
   out = out.replace(PAGE_LINK_RE, (_, id: string) => opts.pageHref(id));
   out = applyOfferLinks(out, opts.links);
+  out = applyWheelPrizes(out, opts.wheel);
+  out = injectPaymentConfig(out, opts.payments);
   out = applySeo(out, opts.seo);
   const tracking = opts.tracking ?? null;
   const gate = gatesCode(tracking);
@@ -125,6 +143,8 @@ export function renderPageHtml(html: string, opts: RenderOptions) {
     const marketingCode = tracking.config.marketingCode || offerCode.waits || pageCode.waits;
     out = injectTracking(out, { ...tracking.config, marketingCode }, tracking.scriptTag);
   }
+  // Por último: no começo do <head>, na frente do rastreamento e de qualquer script.
+  out = injectOrderStrip(out, opts.payments);
   return out;
 }
 

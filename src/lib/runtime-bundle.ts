@@ -2,7 +2,9 @@
  * Compila os scripts das páginas para IIFEs minificados, uma vez por processo:
  * - src/runtime/os-runtime.ts (widgets, delay, botões) — antes do </body>;
  * - src/runtime/tracking/index.ts (consentimento, pixels, eventos, UTMs) — no
- *   começo do <head> (ver src/lib/tracking/inject.ts).
+ *   começo do <head> (ver src/lib/tracking/inject.ts);
+ * - src/runtime/payments/index.ts (janela de pagamento) — só nas ofertas com
+ *   "Pagamento na página", antes do </body> (ver src/lib/payments/render.ts).
  * Usado pelo servidor de prévia e pela exportação. Só roda em Node
  * (worker/prévia), nunca no bundle do Next.
  */
@@ -13,6 +15,14 @@ import { TRACKING_SCRIPT_ATTR } from "@/lib/tracking/runtime-config";
 
 let cached: string | null = null;
 let trackingCached: string | null = null;
+let paymentCached: string | null = null;
+
+/** Atributo da tag do script da janela de pagamento (para não pôr duas vezes). */
+export const PAYMENT_SCRIPT_ATTR = "data-os-pay-script";
+/** Caminho do script da janela de pagamento na prévia. */
+export const PAYMENT_SCRIPT_PATH = "/os-pagamento.js";
+/** Tag do script da janela de pagamento servido pela prévia. */
+export const PAYMENT_SCRIPT_TAG = `<script src="${PAYMENT_SCRIPT_PATH}" ${PAYMENT_SCRIPT_ATTR}></script>`;
 
 /** Caminho do script de rastreamento na prévia (e no ZIP, se sair como arquivo). */
 export const TRACKING_SCRIPT_PATH = "/os-tracking.js";
@@ -53,6 +63,17 @@ export function trackingScript(): string {
   if (!existsSync(entry)) return "/* os-tracking: script ainda não disponível */";
   trackingCached = bundle(entry);
   return trackingCached;
+}
+
+/** Script da janela de pagamento (src/runtime/payments/index.ts). */
+export function paymentScript(): string {
+  paymentCached ??= bundle(path.join(process.cwd(), "src/runtime/payments/index.ts"));
+  return paymentCached;
+}
+
+/** Tag com o script da janela de pagamento embutido (ZIP), à prova de "</script>". */
+export function inlinePaymentScriptTag(): string {
+  return `<script ${PAYMENT_SCRIPT_ATTR}>${paymentScript().replace(/<\/(script)/gi, "<\\/$1")}</script>`;
 }
 
 /** Tag com o script de rastreamento embutido (ZIP), à prova de "</script>" no código. */

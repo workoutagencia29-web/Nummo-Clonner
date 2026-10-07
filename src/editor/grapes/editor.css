@@ -920,6 +920,144 @@
   line-height: 1.35;
 }
 
+/* Fatias da roleta de desconto (campo os-slices, src/editor/widgets/wheel.ts). */
+.os-panel .os-sl {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.os-panel .os-sl-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.os-panel .os-sl-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--os-field-radius);
+  background: var(--os-soft);
+}
+.os-panel .os-sl-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+.os-panel .os-sl input,
+.os-panel .os-sl select {
+  min-width: 0;
+  height: 28px;
+  padding: 0 7px;
+  border: 1px solid var(--input);
+  border-radius: calc(var(--os-field-radius) - 2px);
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 12.5px;
+}
+.os-panel .os-sl input:focus-visible,
+.os-panel .os-sl select:focus-visible,
+.os-panel .os-sl button:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+.os-panel .os-sl .os-sl-color {
+  flex: none;
+  width: 28px;
+  padding: 2px;
+  cursor: pointer;
+}
+.os-panel .os-sl .os-sl-text {
+  flex: 1;
+  font-weight: 600;
+}
+.os-panel .os-sl .os-sl-chance {
+  flex: none;
+  width: 58px;
+}
+.os-panel .os-sl .os-sl-prize,
+.os-panel .os-sl .os-sl-coupon {
+  flex: 1;
+}
+.os-panel .os-sl-label {
+  flex: none;
+  width: 46px;
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+}
+.os-panel .os-sl-unit {
+  color: var(--muted-foreground);
+}
+.os-panel .os-sl-real {
+  margin-left: auto;
+  color: var(--muted-foreground);
+  font-size: 11px;
+  text-align: right;
+}
+.os-panel .os-sl-icon {
+  flex: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--muted-foreground);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+}
+.os-panel .os-sl-icon:hover:not(:disabled) {
+  background: var(--os-hover);
+  color: var(--foreground);
+}
+.os-panel .os-sl-icon:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.os-panel .os-sl-warn,
+.os-panel .os-sl-alert {
+  margin: 0;
+  padding: 5px 7px;
+  border-radius: 5px;
+  background: color-mix(in oklch, #f59e0b 16%, transparent);
+  color: color-mix(in oklch, #b45309 80%, var(--foreground));
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+.os-panel .os-sl-alert {
+  background: color-mix(in oklch, var(--destructive) 13%, transparent);
+  color: var(--destructive);
+}
+.os-panel .os-sl-sum {
+  margin: 0;
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+  line-height: 1.35;
+}
+.os-panel .os-sl-add {
+  height: var(--os-field-h);
+  border: 1px dashed var(--border);
+  border-radius: var(--os-field-radius);
+  background: var(--background);
+  color: var(--foreground);
+  font: 500 12.5px var(--font-sans);
+  cursor: pointer;
+}
+.os-panel .os-sl-add:hover:not(:disabled) {
+  background: var(--os-hover);
+}
+.os-panel .os-sl-add:disabled {
+  color: var(--muted-foreground);
+  cursor: default;
+}
+
 /* ─── Imagens (janela do GrapesJS) ─────────────────────────────────────────── */
 
 .os-editor .gjs-mdl-container {

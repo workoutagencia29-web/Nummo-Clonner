@@ -12,7 +12,9 @@
  *   document → um documento específico
  *
  * Rotas comuns: /os-assets/<arquivo> (arquivos por hash), /os-runtime.js (script do
- * Offer Studio), /os-tracking.js (script de rastreamento) e, no modo "Preservar
+ * Offer Studio), /os-tracking.js (script de rastreamento), /os-pagamento.js
+ * (janela de pagamento), POST /__os/pagamento (pagamento na página, SEMPRE
+ * simulado na prévia) e, no modo "Preservar
  * JS", os arquivos nos caminhos originais.
  *
  * Rastreamento (Fase 4): páginas de oferta/documento recebem a configuração de
@@ -37,14 +39,26 @@ import { parseByteRange } from "@/lib/http-range";
 import { effectiveSeo, parseOfferSettings, parsePageSeo } from "@/lib/offer-settings";
 import { parsePageCode } from "@/lib/page-code";
 import { type CategorizedCode, isMobileUserAgent, renderPageHtml, type TrackingRenderOptions } from "@/lib/page-render";
+import { PAYMENT_MAX_BODY, PREVIEW_PAYMENT_ENDPOINT, paymentError } from "@/lib/payments/contract";
 import { type PreviewTarget, resolvePreviewToken } from "@/lib/preview";
-import { runtimeScript, TRACKING_SCRIPT_PATH, TRACKING_SCRIPT_TAG, trackingScript } from "@/lib/runtime-bundle";
+import {
+  PAYMENT_SCRIPT_PATH,
+  PAYMENT_SCRIPT_TAG,
+  paymentScript,
+  runtimeScript,
+  TRACKING_SCRIPT_PATH,
+  TRACKING_SCRIPT_TAG,
+  trackingScript,
+} from "@/lib/runtime-bundle";
 import { type SeoRender, seoRenderFrom } from "@/lib/seo-render";
 import { getObject, mimeFromKey, objectInfo, storagePath } from "@/lib/storage";
 import { loadTracking } from "@/lib/tracking/config";
 import { PIXEL_TEST_ENDPOINT, PIXEL_TEST_MAX_BODY, PIXEL_TEST_PARAM } from "@/lib/tracking/runtime-config";
 import { explicitPageCodeCategory } from "@/lib/tracking/schema";
+import { loadRenderLinks, offerPaymentRender } from "@/server/services/payments/products";
+import { handleSimulatedPayment } from "@/server/services/payments/simulation";
 import { findActivePixelTestSession, PIXEL_TEST_HTTP_STATUS, recordPixelTestEvent } from "@/server/services/pixel-test";
+import { offerWheelRender } from "@/server/services/wheel";
 import type { CloneResult } from "@/worker/clone/types";
 import { findMappedAsset } from "./asset-map";
 
@@ -304,12 +318,16 @@ async function resolve(
     const test = await testModeFor(req, url, page.offerId);
     if (test.kind === "invalid") return { html: TEST_EXPIRED_PAGE(), assetMap, status: 410 };
     if (test.kind === "enter") return { html: null, assetMap, cookies: test.cookies, redirect: test.redirect };
-    const links = await prisma.offerLink.findMany({
-      where: { offerId: page.offerId },
-      select: { key: true, url: true },
-    });
+    const links = await loadRenderLinks(page.offerId);
     const html = renderPageHtml(doc.html ?? "", {
       links,
+      wheel: await offerWheelRender(page.offerId, links),
+      payments: await offerPaymentRender(page.offerId, {
+        endpoint: PREVIEW_PAYMENT_ENDPOINT,
+        simulation: true,
+        pageHref: () => "#",
+        scriptTag: PAYMENT_SCRIPT_TAG,
+      }),
       pageHref: () => "#",
       runtimeTag: RUNTIME_TAG,
       customCode: pageCodeOf(page.customCode),
@@ -344,14 +362,23 @@ async function resolve(
   const test = await testModeFor(req, url, target.offerId);
   if (test.kind === "invalid") return { html: TEST_EXPIRED_PAGE(), assetMap, status: 410 };
   if (test.kind === "enter") return { html: null, assetMap, cookies: test.cookies, redirect: test.redirect };
-  const [links, offer] = await Promise.all([
-    prisma.offerLink.findMany({ where: { offerId: target.offerId }, select: { key: true, url: true } }),
-    prisma.offer.findUnique({ where: { id: target.offerId }, select: { settings: true } }),
-  ]);
   const pageHref = (id: string) => `/p/${id}`;
+  const [links, offer, payments] = await Promise.all([
+    loadRenderLinks(target.offerId),
+    prisma.offer.findUnique({ where: { id: target.offerId }, select: { settings: true } }),
+    // Prévia: pagamento SEMPRE simulado (nada é cobrado a partir do app).
+    offerPaymentRender(target.offerId, {
+      endpoint: PREVIEW_PAYMENT_ENDPOINT,
+      simulation: true,
+      pageHref,
+      scriptTag: PAYMENT_SCRIPT_TAG,
+    }),
+  ]);
   return {
     html: renderPageHtml(doc.html ?? "", {
       links,
+      wheel: await offerWheelRender(target.offerId, links),
+      payments,
       pageHref,
       runtimeTag: RUNTIME_TAG,
       customCode: doc.customCode,
@@ -426,10 +453,7 @@ const TEST_ERRORS: Record<keyof typeof PIXEL_TEST_HTTP_STATUS, string> = {
  * 4 KB, token de uma sessão desta oferta e ainda válida.
  */
 async function handlePixelTest(req: IncomingMessage, res: ServerResponse, host: string, target: PreviewTarget) {
-  const origin = req.headers.origin;
-  const fetchSite = req.headers["sec-fetch-site"];
-  const sameOrigin = origin ? origin.toLowerCase() === `http://${host}` : !fetchSite || fetchSite === "same-origin";
-  if (!sameOrigin) {
+  if (!isSameOrigin(req, host)) {
     sendJson(res, 403, { error: "Pedido de outro site recusado." });
     return;
   }
@@ -465,6 +489,39 @@ async function handlePixelTest(req: IncomingMessage, res: ServerResponse, host: 
   sendJson(res, PIXEL_TEST_HTTP_STATUS[result.reason], { error: TEST_ERRORS[result.reason] });
 }
 
+/** Pedido da mesma origem (a própria página da prévia). */
+function isSameOrigin(req: IncomingMessage, host: string) {
+  const origin = req.headers.origin;
+  const fetchSite = req.headers["sec-fetch-site"];
+  return origin ? origin.toLowerCase() === `http://${host}` : !fetchSite || fetchSite === "same-origin";
+}
+
+/**
+ * POST /__os/pagamento: endpoint de pagamento da página na prévia — SEMPRE em
+ * simulação (src/server/services/payments/simulation.ts), com o mesmo
+ * contrato do pagamento.php do ZIP (src/lib/payments/contract.ts). Só da
+ * própria página, JSON até PAYMENT_MAX_BODY.
+ */
+async function handlePayment(req: IncomingMessage, res: ServerResponse, host: string, target: PreviewTarget) {
+  const reply = (r: { status: number; body: unknown }) => sendJson(res, r.status, r.body);
+  if (!isSameOrigin(req, host)) return reply(paymentError("origem"));
+  const type = String(req.headers["content-type"] ?? "").toLowerCase();
+  if (type && !type.startsWith("application/json") && !type.startsWith("text/plain")) {
+    return reply(paymentError("invalido"));
+  }
+  const offerId = await offerIdOf(target);
+  if (!offerId) return reply(paymentError("produto_desconhecido"));
+  const body = await readBody(req, PAYMENT_MAX_BODY);
+  if (body === null) return reply(paymentError("corpo_grande"));
+  let json: unknown;
+  try {
+    json = JSON.parse(body);
+  } catch {
+    return reply(paymentError("invalido"));
+  }
+  reply(await handleSimulatedPayment(offerId, json));
+}
+
 async function handle(req: IncomingMessage, res: ServerResponse) {
   baseHeaders(res);
   const host = (req.headers.host ?? "").toLowerCase();
@@ -480,7 +537,8 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
   }
 
   const isTestReport = req.method === "POST" && pathname === PIXEL_TEST_ENDPOINT;
-  if (req.method !== "GET" && req.method !== "HEAD" && !isTestReport) {
+  const isPayment = req.method === "POST" && pathname === PREVIEW_PAYMENT_ENDPOINT;
+  if (req.method !== "GET" && req.method !== "HEAD" && !isTestReport && !isPayment) {
     sendText(res, 405, "Método não permitido.", "text/plain; charset=utf-8");
     return;
   }
@@ -504,8 +562,18 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
     return;
   }
 
+  if (isPayment) {
+    await handlePayment(req, res, host, target);
+    return;
+  }
+
   if (pathname === "/os-runtime.js") {
     sendText(res, 200, runtimeScript(), "text/javascript; charset=utf-8");
+    return;
+  }
+
+  if (pathname === PAYMENT_SCRIPT_PATH) {
+    sendText(res, 200, paymentScript(), "text/javascript; charset=utf-8");
     return;
   }
 

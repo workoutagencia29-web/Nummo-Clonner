@@ -3,6 +3,7 @@
 import { ChevronDownIcon, UploadIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { PAGAMENTO_CONFIG_DIR, PAGAMENTO_FILE } from "@/lib/export/payment-php";
 import { EVENTOS_CONFIG_DIR } from "@/lib/export/php";
 import { EVENTS_FILE } from "./logic";
 
@@ -51,11 +52,14 @@ export function HostingGuide({
   open,
   onOpenChange,
   preserveJsPages = [],
+  hasPayments = false,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Páginas no modo "Preservar JS" (só funcionam na raiz do domínio). */
   preserveJsPages?: string[];
+  /** O ZIP leva o pagamento.php (pagamento na página). */
+  hasPayments?: boolean;
 }) {
   return (
     <Collapsible open={open} onOpenChange={onOpenChange} className="rounded-lg border">
@@ -146,6 +150,13 @@ export function HostingGuide({
             Cloudflare Pages, use <strong>Upload assets</strong>. Nessas hospedagens, deixe a opção do{" "}
             <Code>{EVENTS_FILE}</Code> desligada (sem PHP, o arquivo com o seu token ficaria visível).
           </p>
+          {hasPayments && (
+            <p>
+              O pagamento na página <strong>não funciona</strong> nessas hospedagens: ele precisa de PHP e HTTPS. Não
+              envie para lá o <Code>{PAGAMENTO_FILE}</Code> nem a pasta <Code>{PAGAMENTO_CONFIG_DIR}</Code> (ela guarda
+              a chave da Kyvo).
+            </p>
+          )}
         </Section>
 
         <Section title="Depois de subir, teste">
@@ -164,6 +175,13 @@ export function HostingGuide({
               código, a hospedagem não tem PHP: apague na hora o <Code>{EVENTS_FILE}</Code> e a pasta{" "}
               <Code>{EVENTOS_CONFIG_DIR}</Code> (ela guarda o seu token).
             </li>
+            {hasPayments && (
+              <li>
+                Abra <strong>seudominio.com.br/{PAGAMENTO_FILE}</strong>: deve aparecer “funcionando”, com a chave da
+                Kyvo cadastrada e HTTPS “sim”. Depois faça uma compra de teste com um valor baixo (o LEIA-ME.txt explica
+                o passo a passo) e confira a venda no painel da Kyvo.
+              </li>
+            )}
           </ul>
         </Section>
       </CollapsibleContent>

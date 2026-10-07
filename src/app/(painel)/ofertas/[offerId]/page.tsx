@@ -23,9 +23,12 @@ import { TrackingTab } from "@/components/offers/tracking/tracking-tab";
 import { Button } from "@/components/ui/button";
 import { TabsContent } from "@/components/ui/tabs";
 import { dateTime, plural } from "@/lib/format";
+import { gatewayKeyState } from "@/lib/payments/checks";
 import { getOfferDetail, getSidebarData } from "@/server/queries";
-import { linkUsage, listOfferLinks } from "@/server/services/offer-links";
+import { existingFunnel } from "@/server/services/funnel";
+import { linkUsageDetail, listOfferLinks } from "@/server/services/offer-links";
 import { listTags } from "@/server/services/organize";
+import { listPaymentGateways } from "@/server/services/payments/gateways";
 import { getOfferReadiness } from "@/server/services/readiness";
 import { requireSession } from "@/server/session";
 
@@ -57,7 +60,12 @@ export default async function OfferPage({ params, searchParams }: PageProps<"/of
   const query = await searchParams;
   const [offer, tags, sidebar] = await Promise.all([getOfferDetail(offerId), listTags(), getSidebarData()]);
   if (!offer) notFound();
-  const [links, usage] = await Promise.all([listOfferLinks(offer.id), linkUsage(offer.id)]);
+  const [links, usage, funnel, gateways] = await Promise.all([
+    listOfferLinks(offer.id),
+    linkUsageDetail(offer.id),
+    existingFunnel(offer.id),
+    listPaymentGateways(),
+  ]);
   const readiness = await getOfferReadiness({ id: offer.id, liveUrl: offer.liveUrl, links });
 
   const folders = sidebar.folders.map(({ id, name }) => ({ id, name }));
@@ -151,10 +159,22 @@ export default async function OfferPage({ params, searchParams }: PageProps<"/of
               variantCount: p._count.variants,
               ...documentsOf(p.variants[0]?.documents ?? []),
             }))}
+            existingFunnel={funnel}
           />
         </TabsContent>
         <TabsContent value="links" keepMounted className="mt-4">
-          <OfferLinks offerId={offer.id} links={links.map((l) => ({ ...l, usage: usage.get(l.key) ?? 0 }))} />
+          <OfferLinks
+            offerId={offer.id}
+            links={links.map((l) => ({
+              ...l,
+              usage: usage.buttons.get(l.key) ?? 0,
+              prizes: usage.prizes.get(l.key) ?? 0,
+            }))}
+            pages={offer.pages.map((p) => ({ id: p.id, name: p.name, type: p.type }))}
+            paymentsKey={gatewayKeyState(
+              gateways.find((g) => g.configured) ?? { configured: false, keyUnreadable: false, checkStatus: null },
+            )}
+          />
         </TabsContent>
         <TabsContent value="rastreamento" keepMounted className="mt-4">
           <Suspense fallback={<TrackingSkeleton />}>

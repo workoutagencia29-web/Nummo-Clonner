@@ -17,6 +17,7 @@ import { conversionBlocks } from "./conversion";
 import { footerBlocks } from "./footer";
 import { formBlocks } from "./forms";
 import { proofBlocks } from "./proof";
+import { quizBlocks } from "./quiz";
 import { BLOCK_CATEGORIES, type OsBlock } from "./shared";
 import { structureBlocks } from "./structure";
 import { videoBlocks } from "./video";
@@ -30,6 +31,7 @@ export const ALL_BLOCKS: OsBlock[] = [
   ...basicBlocks.filter((b) => b.category !== "basicos"),
   ...structureBlocks,
   ...conversionBlocks,
+  ...quizBlocks,
   ...videoBlocks,
   ...proofBlocks,
   ...formBlocks,

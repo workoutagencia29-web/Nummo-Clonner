@@ -1,9 +1,11 @@
 /**
  * Blocos de conversão: botões (inclusive ligado ao checkout da oferta),
- * contador, escassez, notificação de compra, preços, garantia, WhatsApp e
- * popup de saída. Os que têm comportamento usam os widgets de
+ * contador, escassez, notificação de compra, preços, garantia, WhatsApp,
+ * popup de saída e "Acesso ao produto" (página de obrigado do pagamento na página). Os que têm comportamento usam os widgets de
  * src/editor/widgets (opções em "Configurações").
  */
+import { PROP_ACCESS_LANG } from "@/editor/widgets/access";
+import { accessDef } from "@/editor/widgets/access-content";
 import { buttonDef } from "@/editor/widgets/button";
 import { countdownDef } from "@/editor/widgets/countdown";
 import { exitPopupDef } from "@/editor/widgets/exit-popup";
@@ -460,5 +462,16 @@ export const conversionBlocks: OsBlock[] = [
       '<rect x="3" y="3" width="18" height="18" rx="2" stroke-dasharray="2 2"/><rect x="6.5" y="7" width="11" height="10" rx="1.5"/><path d="m14.5 9-1.5 1.5"/>',
     ),
     content: exitPopupDef(),
+  },
+  {
+    id: "acesso-produto",
+    label: "Acesso ao produto",
+    category: "conversao",
+    media: icon(
+      '<rect x="4" y="10" width="16" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 7.5-2"/><circle cx="12" cy="15.5" r="1.5"/>',
+    ),
+    // Nasce no idioma do produto de pagamento da oferta (ver src/editor/widgets/access.ts).
+    content: { ...accessDef(), [PROP_ACCESS_LANG]: true },
+    select: true,
   },
 ];

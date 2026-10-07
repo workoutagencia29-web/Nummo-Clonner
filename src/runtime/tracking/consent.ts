@@ -27,7 +27,7 @@ export function saveChoice(choice: Choice, session: boolean) {
 // Estilos isolados no shadow DOM: o CSS da página (clonada) não mexe no banner.
 // "Aceitar" e "Recusar" com o mesmo destaque (guia de cookies da ANPD).
 const CSS =
-  ".b{position:fixed;z-index:2147483000;left:12px;right:12px;bottom:12px;margin:auto;max-width:720px;display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:14px;border-radius:12px;font:14px/1.45 system-ui,sans-serif;background:#111827;color:#fff;box-shadow:0 8px 30px #0005}" +
+  ".b{position:fixed;z-index:2147483647;left:12px;right:12px;bottom:12px;margin:auto;max-width:720px;display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:14px;border-radius:12px;font:14px/1.45 system-ui,sans-serif;background:#111827;color:#fff;box-shadow:0 8px 30px #0005}" +
   ".l{background:#fff;color:#111827;border:1px solid #ddd}.bl,.br{max-width:380px}.bl{right:auto}.br{left:auto}" +
   "p{margin:0;flex:1 1 240px}a{color:inherit}.a{display:flex;gap:8px;margin-left:auto}" +
   "button{font:inherit;font-weight:600;cursor:pointer;border-radius:8px;padding:9px 16px;border:1px solid #fff;background:#fff;color:#111827}" +

@@ -11,7 +11,7 @@ import { afterAll, beforeEach, describe, expect, it, vi } from "vitest";
 vi.mock("@/server/session", () => ({ requireSession: vi.fn(async () => ({ user: { id: "u1" } })) }));
 vi.mock("next/cache", () => ({ revalidatePath: vi.fn() }));
 
-import { deleteDescription } from "@/components/offers/offer-links";
+import { deleteDescription, usageLabel } from "@/components/offers/offer-links";
 import { prisma } from "@/lib/db";
 import { internalLink, referencedPageIds } from "@/lib/internal-links";
 import { renderPageHtml } from "@/lib/page-render";
@@ -183,6 +183,22 @@ describe("excluir link da oferta (#10)", () => {
     );
     expect(deleteDescription({ usage: 1, url: "" })).toBe(
       "Este link está sem URL: 1 botão ligado a ele volta para o endereço que tinha antes de ser ligado.",
+    );
+  });
+
+  it("link usado como prêmio da roleta: a aba diz “Prêmio da roleta” e a exclusão diz que a fatia fica sem desconto", () => {
+    expect(usageLabel({ usage: 0, prizes: 1 })).toBe("Prêmio da roleta");
+    expect(usageLabel({ usage: 0, prizes: 2 })).toBe("Prêmio de 2 fatias da roleta");
+    expect(usageLabel({ usage: 2, prizes: 1 })).toBe("2 botões · prêmio da roleta");
+    expect(usageLabel({ usage: 1 })).toBe("1 botão ligado");
+    expect(usageLabel({ usage: 0, prizes: 0 })).toBe("Nenhum botão ligado");
+    // Sem URL (o funil em 1 clique cria assim): nada de "botão" que não existe.
+    expect(deleteDescription({ usage: 0, prizes: 1, url: "" })).toBe(
+      "É o prêmio de 1 fatia da roleta: ela continua na roda, mas quem ganhar não vai para nenhum checkout com desconto até você ligar outro link a ela no editor.",
+    );
+    // Com URL: a fatia não "continua levando" para o endereço.
+    expect(deleteDescription({ usage: 1, prizes: 2, url: "https://pay.kiwify.com.br/abc" })).toBe(
+      "1 botão continua levando para https://pay.kiwify.com.br/abc, mas deixa de acompanhar as mudanças deste link. É o prêmio de 2 fatias da roleta: elas continuam na roda, mas quem ganhar não vai para nenhum checkout com desconto até você ligar outro link a elas no editor.",
     );
   });
 });

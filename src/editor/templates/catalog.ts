@@ -11,6 +11,8 @@ export const TEMPLATE_IDS = [
   "vendas-longa",
   "vsl",
   "advertorial",
+  "quiz",
+  "roleta",
   "captura",
   "upsell",
   "downsell",
@@ -43,6 +45,20 @@ const SUMMARIES: Record<PageTemplateId, Omit<TemplateSummary, "id" | "thumbnail"
     description: "Matéria em formato jornalístico, marcada como publicidade, com chamadas para a oferta.",
     pageType: "ADVERTORIAL",
     pageName: "Advertorial",
+  },
+  quiz: {
+    name: "Quiz",
+    description:
+      "Perguntas e respostas para quem chega do anúncio, com tela “Analisando” e botão final para a próxima página do funil.",
+    pageType: "QUIZ",
+    pageName: "Quiz",
+  },
+  roleta: {
+    name: "Roleta",
+    description:
+      "Roleta de desconto depois do quiz: 1 giro por pessoa, prêmio guardado e levado à página de vendas, com faixa e contador.",
+    pageType: "OTHER",
+    pageName: "Roleta",
   },
   captura: {
     name: "Captura de leads",

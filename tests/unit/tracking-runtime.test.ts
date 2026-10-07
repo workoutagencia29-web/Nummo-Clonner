@@ -1337,10 +1337,15 @@ describe("robustez", () => {
   // do formulário para o checkout: ~10,5 KB com gzip. 25 KB desde o refix 3 (clique
   // tratado pela página, espera compartilhada com o os-runtime e o botão de enviar
   // no Safari antigo); 26 KB desde a Fase 6 (versão A/B em cada evento e a marca
-  // no checkout); o limite com gzip, o que de fato trafega, não mudou.
-  it(`cabe no orçamento: ${SCRIPT.length} bytes minificado (< 26 KB; ${gzipSync(SCRIPT).length} com gzip)`, () => {
-    expect(SCRIPT.length).toBeLessThan(26 * 1024);
-    expect(gzipSync(SCRIPT).length).toBeLessThan(11 * 1024);
+  // no checkout); o limite com gzip, o que de fato trafega, não mudou até o quiz:
+  // 11,5 KB com gzip desde os eventos do quiz (cada pergunta e a conclusão, ~0,25 KB);
+  // 26,5 KB minificado desde os eventos da roleta (giro e resgate, ~0,35 KB; gzip igual);
+  // 27 KB minificado e 11,75 KB com gzip desde a compra da janela de pagamento
+  // (Purchase com o valor do produto e o pedido como eventID, e os parâmetros
+  // para a cobrança: ~0,2 KB — a janela e a metadata ficam no script dela).
+  it(`cabe no orçamento: ${SCRIPT.length} bytes minificado (< 27 KB; ${gzipSync(SCRIPT).length} com gzip)`, () => {
+    expect(SCRIPT.length).toBeLessThan(27 * 1024);
+    expect(gzipSync(SCRIPT).length).toBeLessThan(11.75 * 1024);
   });
 });
 
@@ -1635,6 +1640,30 @@ describe("eventos: formulários, botão de enviar e navegação", () => {
       .filter((u) => u.startsWith("https://www.facebook.com/tr"))
       .map((u) => new URL(u).searchParams.get("ev"));
     expect(tr).toEqual(["PageView", "InitiateCheckout"]);
+    await site.context.close();
+  });
+
+  it("link SEM evento logo depois do Aceitar (ex.: botão final do quiz): a navegação espera e o que esperou o Aceitar chega à Meta", async () => {
+    const beacon = `(function(){var q=fbq.queue.slice();fbq.queue.length=0;
+      fbq.callMethod=function(){var a=[].slice.call(arguments);if(a[0]==="track"||a[0]==="trackCustom")navigator.sendBeacon("https://www.facebook.com/tr?ev="+a[1]);};
+      q.forEach(function(a){fbq.callMethod.apply(fbq,a)});})();`;
+    // Sem regra nenhuma: o clique no link não dispara evento.
+    const cfg = config({ pixels: [PX.META], rules: [] });
+    const site = await open(pageHtml(cfg, `<a id="go" href="https://roleta.example.com/girar">Girar a roleta</a>`), {
+      stubs: { [META_URL]: beacon },
+      delay: { [META_URL]: 700 },
+      external: { "https://roleta.example.com/": "<!doctype html><h1>roleta</h1>" },
+    });
+    const { page } = site;
+    await accept(page);
+    await page.waitForTimeout(150);
+    await page.click("#go");
+    await page.waitForURL(/roleta\.example\.com/);
+    await settle(page, 500);
+    const tr = site.requests
+      .filter((u) => u.startsWith("https://www.facebook.com/tr"))
+      .map((u) => new URL(u).searchParams.get("ev"));
+    expect(tr).toEqual(["PageView"]);
     await site.context.close();
   });
 
@@ -1995,7 +2024,10 @@ describe("refix 1: funil, formulário de captura e consentimento", () => {
       pixels: [PX.META],
       server: { endpoint: "/eventos.php", vendors: ["META"] },
     });
-    const site = await open(pageHtml(cfg), { query: "?utm_source=fb&email=ana%40example.com&nome=Ana&cpf=123" });
+    // "pedido": credencial do link de acesso da página de obrigado (pagamento na página).
+    const site = await open(pageHtml(cfg), {
+      query: "?utm_source=fb&email=ana%40example.com&nome=Ana&cpf=123&pedido=tx_segredo",
+    });
     await expect.poll(() => site.server.length).toBe(1);
     expect(site.server[0].event_source_url).toBe("http://site.test/oferta?utm_source=fb");
     await site.context.close();
@@ -2172,9 +2204,12 @@ describe("refix 1: código em espera e navegadores antigos", () => {
 
   it("os scripts compilados não usam APIs que o Safari 13 não tem", () => {
     for (const code of [SCRIPT, runtimeScript()]) {
-      for (const api of ["Object.hasOwn", ".at(", "findLast", "replaceAll", "structuredClone"]) {
+      for (const api of ["Object.hasOwn", "findLast", "replaceAll", "structuredClone"]) {
         expect(code.includes(api), api).toBe(false);
       }
+      // Array.prototype.at: a chamada de método (o minificador pode dar o nome "at" a
+      // uma função própria, como em "...at(t,u)", que não é a API).
+      expect(/[\w$)\]]\.at\(/.test(code), ".at(").toBe(false);
     }
   });
 });

@@ -4,10 +4,13 @@
  * Avisos do "Antes de subir" com a solução ali mesmo: o endereço do site
  * (imagem de compartilhamento) e os dados da empresa ({{EMPRESA}}… nas
  * páginas legais). Salvou → a prévia do ZIP é refeita; com o ZIP pronto, o
- * botão já gera o ZIP de novo.
+ * botão já gera o ZIP de novo. Os do pagamento na página levam para onde se
+ * resolve (Configurações → Pagamentos, o link na aba "Links e checkouts", a
+ * página de obrigado no editor, os eventos dos pixels).
  */
 import Link from "next/link";
 import { useId, useState } from "react";
+import { offerLinkHref } from "@/components/offers/offer-link-href";
 import { COMPANY_FIELDS, COMPANY_MAX, companyEmailProblem } from "@/components/offers/settings/helpers";
 import { Button } from "@/components/ui/button";
 import { FieldError } from "@/components/ui/field";
@@ -183,14 +186,77 @@ export function ExportWarning({ text, c }: { text: string; c: ExportController }
       {text}
       {fix?.kind === "liveUrl" && <LiveUrlFix c={c} />}
       {fix?.kind === "company" && <CompanyFix c={c} fields={fix.fields} />}
-      {fix?.kind === "deadButtons" && <DeadButtonsFix c={c} />}
+      {fix?.kind === "deadButtons" && <DeadButtonsFix c={c} quiz={fix.quiz ?? false} wheel={fix.wheel ?? false} />}
+      {fix && (fix.kind === "paymentKey" || fix.kind === "purchaseRule") && (
+        <FixLinks
+          c={c}
+          links={[
+            fix.kind === "paymentKey"
+              ? { href: "/configuracoes#pagamentos", label: "Abrir Configurações → Pagamentos" }
+              : { href: `/ofertas/${c.offerId}?aba=rastreamento&secao=eventos`, label: "Abrir os eventos dos pixels" },
+          ]}
+        />
+      )}
+      {fix?.kind === "paymentLink" && <PaymentLinkFix c={c} text={text} />}
+      {fix?.kind === "accessBlock" && <AccessBlockFix c={c} text={text} />}
     </>
   );
 }
 
-/** Botão de compra sem link: abre a página no editor (lá, “Link da oferta” ou “Links e checkouts”). */
-function DeadButtonsFix({ c }: { c: ExportController }) {
-  const pages = c.plan.data?.deadButtonPages ?? [];
+/** Botões que levam para onde o aviso se resolve (fecham o diálogo do ZIP). */
+function FixLinks({ c, links }: { c: ExportController; links: { href: string; label: string }[] }) {
+  if (!links.length) return null;
+  return (
+    <div className="mt-2 flex flex-wrap gap-2">
+      {links.map((l) => (
+        <Button key={l.href} size="sm" variant="outline" asChild>
+          <Link href={l.href} onClick={() => c.setOpen(false)}>
+            {l.label}
+          </Link>
+        </Button>
+      ))}
+    </div>
+  );
+}
+
+/** Link de pagamento com algo faltando: abre o link na aba "Links e checkouts". */
+function PaymentLinkFix({ c, text }: { c: ExportController; text: string }) {
+  const all = c.plan.data?.paymentLinks ?? [];
+  const named = all.filter((l) => text.includes(`“${l.label}”`));
+  const links = (named.length ? named : all).slice(0, 4).map((l) => ({
+    href: offerLinkHref(c.offerId, l.linkId),
+    label: `Abrir o link “${l.label}”`,
+  }));
+  return (
+    <FixLinks
+      c={c}
+      links={links.length ? links : [{ href: `/ofertas/${c.offerId}?aba=links`, label: "Abrir Links e checkouts" }]}
+    />
+  );
+}
+
+/** Página de obrigado sem o bloco "Acesso ao produto": abre no editor. */
+function AccessBlockFix({ c, text }: { c: ExportController; text: string }) {
+  const all = c.plan.data?.accessBlockPages ?? [];
+  const named = all.filter((p) => text.includes(`“${p.name}”`));
+  return (
+    <FixLinks
+      c={c}
+      links={(named.length ? named : all).slice(0, 4).map((p) => ({
+        href: `/editor/${p.documentId}`,
+        label: `Abrir “${p.name}” no editor`,
+      }))}
+    />
+  );
+}
+
+/**
+ * Botão de compra sem link (lá, “Link da oferta” ou “Links e checkouts”), botão
+ * final do quiz sem destino (Configurações do quiz) ou roleta com prêmio sem
+ * link / "Resgatar" sem destino (Configurações da roleta): abre a página no editor.
+ */
+function DeadButtonsFix({ c, quiz, wheel }: { c: ExportController; quiz: boolean; wheel: boolean }) {
+  const pages = (c.plan.data?.deadButtonPages ?? []).filter((p) => (quiz ? p.quiz : wheel ? p.wheel : p.buy !== false));
   if (!pages.length) return null;
   return (
     <div className="mt-2 flex flex-wrap gap-2">

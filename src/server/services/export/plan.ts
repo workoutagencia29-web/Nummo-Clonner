@@ -15,15 +15,22 @@ import {
   serverEventsTreeLabel,
 } from "@/lib/export/options";
 import { ASSETS_DIR } from "@/lib/export/paths";
+import { PAGAMENTO_CONFIG_FILE, PAGAMENTO_FILE, PAGAMENTO_HTACCESS_FILE } from "@/lib/export/payment-php";
 import { EVENTOS_CONFIG_FILE, EVENTOS_FILE, HTACCESS_FILE } from "@/lib/export/php";
 import {
   COMPANY_MARKER_FIELD,
   companyMarkersWarning,
   deadButtonsWarning,
+  deadQuizButtonsWarning,
+  deadWheelButtonsWarning,
   OG_IMAGE_WARNING,
   REQUIRED_COMPANY_MARKERS,
+  wheelPrizesWarning,
 } from "@/lib/export/warnings";
+import { linkHasDestination } from "@/lib/offer-links";
 import { type Company, effectiveSeo, parseOfferSettings, parsePageSeo } from "@/lib/offer-settings";
+import { prizesWithoutLink, WHEEL_MARK } from "@/lib/wheel-prizes";
+import { loadPaymentExport, type PaymentExport, paymentPlanFixes, paymentWarnings } from "./payments";
 import { type PreservePlan, planPreserveFiles } from "./preserve";
 import { type ExportSource, layoutPages, loadExportSource, serverEventPixels } from "./source";
 
@@ -39,6 +46,10 @@ export const SERVER_VENDOR_LABEL: Record<ServerEventVendor, string> = {
 
 export { OG_IMAGE_WARNING };
 
+/** Item do pagamento.php em "O que vai no ZIP". */
+export const PAYMENT_TREE_LABEL =
+  "Precisa de PHP e HTTPS · cria as cobranças da Kyvo e entrega o acesso só a quem pagou";
+
 /** Caminhos do ZIP que não são do "Preservar JS" (prévia: os scripts do Offer Studio entram como "assets/"). */
 export function reservedZipPaths(layout: Layout, extra: Iterable<string> = []): string[] {
   return [
@@ -47,6 +58,9 @@ export function reservedZipPaths(layout: Layout, extra: Iterable<string> = []): 
     EVENTOS_FILE,
     EVENTOS_CONFIG_FILE,
     HTACCESS_FILE,
+    PAGAMENTO_FILE,
+    PAGAMENTO_CONFIG_FILE,
+    PAGAMENTO_HTACCESS_FILE,
     README_FILE,
     ...extra,
   ];
@@ -87,6 +101,8 @@ export interface PlanContext {
   preserveJsPages: string[];
   /** Arquivos do "Preservar JS" que vão no ZIP (e os que ficaram de fora). */
   preserve: PreservePlan;
+  /** Pagamento na página (null = sem pagamento.php). */
+  payment: PaymentExport | null;
   warnings: string[];
   tree: ExportTreeItem[];
 }
@@ -96,6 +112,7 @@ export function planFrom(
   source: ExportSource,
   options: ExportOptions,
   serverVendors: ServerEventVendor[],
+  payment: PaymentExport | null = null,
 ): PlanContext {
   const layout = planLayout(layoutPages(source), { splitter: options.splitter });
   const warnings = [...layout.warnings];
@@ -137,6 +154,8 @@ export function planFrom(
     );
   }
 
+  warnings.push(...paymentWarnings(payment));
+
   const settings = parseOfferSettings(source.offer.settings);
   const hasOgImage = source.pages.some((p) => effectiveSeo(settings, parsePageSeo(p.seo)).ogImageKey);
   if (hasOgImage && !source.offer.liveUrl) warnings.push(OG_IMAGE_WARNING);
@@ -175,9 +194,16 @@ export function planFrom(
       { path: HTACCESS_FILE, kind: "file", label: "Bloqueia a pasta dos tokens (Apache)" },
     );
   }
+  if (payment) {
+    tree.push(
+      { path: PAGAMENTO_FILE, kind: "file", label: PAYMENT_TREE_LABEL },
+      { path: PAGAMENTO_CONFIG_FILE, kind: "file", label: "Chave da Kyvo e produtos do pagamento (não compartilhe)" },
+      { path: PAGAMENTO_HTACCESS_FILE, kind: "file", label: "Bloqueia a pasta da chave (Apache)" },
+    );
+  }
   tree.push({ path: README_FILE, kind: "file", label: "Como subir na hospedagem e testar" });
 
-  return { options, layout, serverVendors, serverFiles, preserveJsPages, preserve, warnings, tree };
+  return { options, layout, serverVendors, serverFiles, preserveJsPages, preserve, payment, warnings, tree };
 }
 
 function uniqueVendors(rows: { vendor: ServerEventVendor }[]): ServerEventVendor[] {
@@ -240,15 +266,22 @@ function hasDestination(tag: string, attrs: Record<string, string | undefined>) 
 /**
  * Botões ligados a "nenhum" link da oferta (data-os-link="", como o botão de
  * compra dos modelos) ou a um link sem endereço, que iriam ao ar sem destino.
- * Só lê o HTML das páginas que têm um botão assim.
+ * O botão final do quiz (data-os-qz-go) e o "Resgatar" da roleta
+ * (data-os-wh-go) ficam em listas à parte: levam à próxima página do funil, não
+ * ao checkout (o aviso deles é outro). Também junta os prêmios de roleta sem
+ * link de checkout. Só lê o HTML das páginas que têm um botão assim ou roleta.
  */
-async function pagesWithDeadButtons(offerId: string, links: { key: string; url: string }[]) {
-  const emptyKeys = links.filter((l) => !l.url.trim()).map((l) => l.key);
+async function pagesWithDeadButtons(offerId: string, links: { key: string; url: string; pay?: boolean }[]) {
+  // Link de pagamento na página tem destino (a janela de pagamento), mesmo sem URL.
+  const emptyKeys = links.filter((l) => !linkHasDestination(l)).map((l) => l.key);
   const dead = new Set(["", ...emptyKeys]);
   const docs = await prisma.pageDocument.findMany({
     where: {
       variant: { page: { offerId } },
-      OR: [...dead].map((key) => ({ html: { contains: `${LINK_ATTR}="${key}"` } })),
+      OR: [
+        ...[...dead].map((key) => ({ html: { contains: `${LINK_ATTR}="${key}"` } })),
+        { html: { contains: WHEEL_MARK } },
+      ],
     },
     select: {
       id: true,
@@ -257,37 +290,67 @@ async function pagesWithDeadButtons(offerId: string, links: { key: string; url: 
       variant: { select: { isControl: true, page: { select: { id: true, name: true, position: true } } } },
     },
   });
-  const byPage = new Map<string, { name: string; position: number; documentId: string; buttons: string[] }>();
+  const byPage = new Map<string, DeadPage>();
   for (const doc of docs) {
     if (!doc.html) continue;
     const $ = cheerio.load(doc.html);
-    const buttons: string[] = [];
+    const found: Pick<DeadPage, "buttons" | "quizButtons" | "wheelButtons" | "prizes"> = {
+      buttons: [],
+      quizButtons: [],
+      wheelButtons: [],
+      // Roleta com prêmio sem link de checkout (ou com link sem endereço).
+      prizes: prizesWithoutLink(doc.html, links),
+    };
     $(`[${LINK_ATTR}]`).each((_, el) => {
       const node = $(el);
       if (!dead.has(node.attr(LINK_ATTR) ?? "")) return;
       if (hasDestination(el.tagName, node.attr() ?? {})) return;
-      buttons.push(node.text() || node.attr("value") || node.attr("aria-label") || "");
+      const label = node.text() || node.attr("value") || node.attr("aria-label") || "";
+      const list =
+        node.attr("data-os-qz-go") !== undefined
+          ? found.quizButtons
+          : node.attr("data-os-wh-go") !== undefined
+            ? found.wheelButtons
+            : found.buttons;
+      list.push(label);
     });
-    if (!buttons.length) continue;
+    if (!Object.values(found).some((list) => list.length)) continue;
     const page = doc.variant.page;
     const entry = byPage.get(page.id);
     if (!entry) {
-      byPage.set(page.id, { name: page.name, position: page.position, documentId: doc.id, buttons });
+      byPage.set(page.id, { name: page.name, position: page.position, documentId: doc.id, ...found });
       continue;
     }
-    // O mesmo botão em outra versão A/B ou no layout do celular conta uma vez.
-    for (const b of buttons) if (!entry.buttons.includes(b)) entry.buttons.push(b);
+    // O mesmo botão (ou prêmio) em outra versão A/B ou no layout do celular conta uma vez.
+    for (const k of ["buttons", "quizButtons", "wheelButtons", "prizes"] as const) {
+      for (const b of found[k]) if (!entry[k].includes(b)) entry[k].push(b);
+    }
     if (doc.variant.isControl && doc.device !== "MOBILE") entry.documentId = doc.id;
   }
   return [...byPage.values()].sort((a, b) => a.position - b.position);
+}
+
+interface DeadPage {
+  name: string;
+  position: number;
+  documentId: string;
+  /** Botões de compra sem destino. */
+  buttons: string[];
+  /** Botões finais de quiz sem destino. */
+  quizButtons: string[];
+  /** "Resgatar" da roleta sem destino. */
+  wheelButtons: string[];
+  /** Prêmios da roleta sem link de checkout. */
+  prizes: string[];
 }
 
 /** Prévia do ZIP com as opções escolhidas (padrão: ExportOptionsSchema). */
 export async function exportPlan(offerId: string, rawOptions?: unknown): Promise<ExportPlan> {
   const options = parseExportOptions(rawOptions);
   const source = await loadExportSource(offerId, { withHtml: false });
-  const serverVendors = uniqueVendors(await serverEventPixels(offerId));
-  const ctx = planFrom(source, options, serverVendors);
+  const [pixels, payment] = await Promise.all([serverEventPixels(offerId), loadPaymentExport(offerId)]);
+  const serverVendors = uniqueVendors(pixels);
+  const ctx = planFrom(source, options, serverVendors, payment);
   const warnings = [...ctx.warnings];
   // Página clonada com imagem de compartilhamento própria e sem o endereço no
   // ar: sem endereço completo, o WhatsApp/Facebook não mostram a imagem.
@@ -301,6 +364,12 @@ export async function exportPlan(offerId: string, rawOptions?: unknown): Promise
   const deadPages = await pagesWithDeadButtons(offerId, source.links);
   const dead = deadButtonsWarning(deadPages);
   if (dead) warnings.push(dead);
+  const deadQuiz = deadQuizButtonsWarning(deadPages.map((p) => ({ name: p.name, buttons: p.quizButtons })));
+  if (deadQuiz) warnings.push(deadQuiz);
+  const prizes = wheelPrizesWarning(deadPages);
+  if (prizes) warnings.push(prizes);
+  const deadWheel = deadWheelButtonsWarning(deadPages.map((p) => ({ name: p.name, buttons: p.wheelButtons })));
+  if (deadWheel) warnings.push(deadWheel);
   return {
     offerName: source.offer.name,
     hasVariants: source.pages.some((p) => p.variants.length > 1),
@@ -309,8 +378,15 @@ export async function exportPlan(offerId: string, rawOptions?: unknown): Promise
     preserveJsPages: ctx.preserveJsPages,
     warnings,
     tree: ctx.tree,
+    ...paymentPlanFixes(payment),
     ...(deadPages.length > 0 && {
-      deadButtonPages: deadPages.map((p) => ({ name: p.name, documentId: p.documentId })),
+      deadButtonPages: deadPages.map((p) => ({
+        name: p.name,
+        documentId: p.documentId,
+        buy: p.buttons.length > 0,
+        quiz: p.quizButtons.length > 0,
+        wheel: p.wheelButtons.length > 0 || p.prizes.length > 0,
+      })),
     }),
   };
 }

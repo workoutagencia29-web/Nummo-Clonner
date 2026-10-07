@@ -193,7 +193,7 @@ export async function duplicateOffer(offerId: string) {
       pixels: true,
       eventRules: true,
       assets: true,
-      links: true,
+      links: { include: { payment: true } },
     },
   });
   if (!source) throw new UserError("Oferta não encontrada.");
@@ -315,11 +315,27 @@ export async function duplicateOffer(offerId: string) {
       if (source.links.length) {
         // Os botões guardam a chave do link, então a cópia funciona sem remapear.
         await tx.offerLink.createMany({
-          data: source.links.map(({ id: _id, offerId: _o, createdAt: _c, updatedAt: _u, ...rest }) => ({
+          data: source.links.map(({ id: _id, offerId: _o, createdAt: _c, updatedAt: _u, payment: _p, ...rest }) => ({
             ...rest,
             offerId: copy.id,
           })),
         });
+        // Produtos de pagamento: no link novo (pela chave), com a página de obrigado da cópia.
+        const withPayment = source.links.filter((l) => l.payment);
+        if (withPayment.length) {
+          const copied = await tx.offerLink.findMany({ where: { offerId: copy.id }, select: { id: true, key: true } });
+          const linkIdByKey = new Map(copied.map((l) => [l.key, l.id]));
+          await tx.paymentProduct.createMany({
+            data: withPayment.flatMap((l) => {
+              const linkId = linkIdByKey.get(l.key);
+              if (!l.payment || !linkId) return [];
+              const { id: _id, linkId: _l, createdAt: _c, updatedAt: _u, thankYouPageId, ...rest } = l.payment;
+              return [
+                { ...rest, linkId, thankYouPageId: thankYouPageId ? (pageIdMap.get(thankYouPageId) ?? null) : null },
+              ];
+            }),
+          });
+        }
       }
       if (source.assets.length) {
         // Os arquivos são endereçados por hash: basta referenciar a mesma chave.

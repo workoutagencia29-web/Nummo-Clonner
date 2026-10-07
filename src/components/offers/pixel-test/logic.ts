@@ -359,6 +359,20 @@ export function describeRow(row: PixelTestEventRow): RowText {
   if (row.vendor === "GOOGLE_ADS" && sendTo) {
     subtitle = neutral ? `Conversão de ${eventShortName(neutral)} → ${sendTo}` : `Conversão → ${sendTo}`;
   }
+  // Evento do quiz (src/runtime/tracking/quiz.ts): QuizPergunta2, quiz_concluido…
+  if (typeof d.quiz_total === "number") {
+    // Segundo quiz da mesma página em diante: quiz_numero.
+    const quiz = typeof d.quiz_numero === "number" ? `Quiz ${d.quiz_numero}` : "Quiz";
+    subtitle =
+      typeof d.quiz_pergunta === "number"
+        ? `${quiz}: respondeu a pergunta ${d.quiz_pergunta} de ${d.quiz_total}`
+        : `${quiz} concluído (chegou à etapa final)`;
+  }
+  // Evento da roleta (src/runtime/tracking/wheel.ts): RoletaGirou / roleta_resgatou…
+  if (typeof d.roleta_premio === "string") {
+    const prize = d.roleta_premio ? `“${d.roleta_premio}”` : "um prêmio";
+    subtitle = /resgat/i.test(row.event) ? `Roleta: clicou em resgatar ${prize}` : `Roleta girada: saiu ${prize}`;
+  }
   // Teste A/B: a versão que a plataforma recebeu (os_versao).
   const version = text(d.os_versao);
   if (version) subtitle = subtitle ? `${subtitle} · versão ${version}` : `Versão ${version}`;
@@ -453,7 +467,7 @@ export function testSteps(setup: Pick<PixelTestSetup, "consentMode" | "acceptLab
   else if (setup.consentMode === "NOTICE") {
     steps.push(`Os pixels já carregam; “${setup.noticeLabel || "Entendi"}” só fecha o aviso de cookies.`);
   }
-  steps.push("Clique no botão de compra e envie o formulário.");
+  steps.push("Use a página como um visitante: responda o quiz, clique no botão de compra ou envie o formulário.");
   return steps;
 }
 
@@ -807,11 +821,18 @@ export function troubleshootingTips(ctx: {
   }
 
   if (!rules.some((r) => r.event !== "PAGE_VIEW")) {
+    // Os eventos do quiz (QuizPergunta…, QuizConcluido) e da roleta (RoletaGirou…) saem sem regra nenhuma.
+    const quizFired = events.some((e) => {
+      const d = e.status === "FIRED" ? detailOf(e) : {};
+      return typeof d.quiz_total === "number" || typeof d.roleta_premio === "string";
+    });
     tips.push({
       id: "no-rules",
       tone: "info",
       title: "Nenhuma regra de evento nesta página",
-      text: "Só o PageView dispara. Crie regras de evento (há as recomendadas prontas) na configuração de pixels da oferta.",
+      text: quizFired
+        ? "Além do PageView, só os eventos automáticos do quiz e da roleta disparam (QuizPergunta…, QuizConcluido, RoletaGirou, RoletaResgatou). Para um evento padrão (ex.: Lead ou InitiateCheckout), crie regras de evento (há as recomendadas prontas) na configuração de pixels da oferta ou use o “Evento ao clicar” do botão final do quiz."
+        : "Só o PageView (e os eventos do quiz e da roleta, se a página tiver um) dispara. Crie regras de evento (há as recomendadas prontas) na configuração de pixels da oferta.",
     });
   }
 

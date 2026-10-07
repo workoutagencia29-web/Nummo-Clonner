@@ -16,22 +16,28 @@ import type { OsBlock } from "@/editor/blocks";
 import type { registerDynamicTraits } from "@/editor/grapes/components";
 import type { applyLegacyRepair } from "@/editor/grapes/legacy-repair";
 import type { installNewLinkOption } from "@/editor/grapes/new-link";
-import type { createEditor } from "@/editor/grapes/setup";
+import type { createEditor, importPageHtml } from "@/editor/grapes/setup";
 import type { setWidgetContext } from "@/editor/widgets";
+import type { bindQuizLink } from "@/editor/widgets/quiz";
+import type { bindWheelLink } from "@/editor/widgets/wheel";
 import { finalizeFromEditor } from "@/lib/editor-html";
 import type { OfferLinkValue } from "@/lib/offer-links";
 import { renderPageHtml } from "@/lib/page-render";
 import { runtimeScript } from "@/lib/runtime-bundle";
+import type { WheelRender } from "@/lib/wheel-prizes";
 
 /** O que o bundle de teste expõe na janela do navegador. */
 export interface EditorWindow {
   ed: Editor;
   OS: {
     createEditor: typeof createEditor;
+    importPageHtml: typeof importPageHtml;
     registerDynamicTraits: typeof registerDynamicTraits;
     setWidgetContext: typeof setWidgetContext;
     installNewLinkOption: typeof installNewLinkOption;
     applyLegacyRepair: typeof applyLegacyRepair;
+    bindQuizLink: typeof bindQuizLink;
+    bindWheelLink: typeof bindWheelLink;
     ALL_BLOCKS: OsBlock[];
   };
 }
@@ -43,13 +49,15 @@ export function editorBundle(): Promise<string> {
   bundle ??= build({
     stdin: {
       contents: `
-        import { createEditor } from "@/editor/grapes/setup";
+        import { createEditor, importPageHtml } from "@/editor/grapes/setup";
         import { registerDynamicTraits } from "@/editor/grapes/components";
         import { setWidgetContext } from "@/editor/widgets";
         import { ALL_BLOCKS } from "@/editor/blocks";
         import { installNewLinkOption } from "@/editor/grapes/new-link";
         import { applyLegacyRepair } from "@/editor/grapes/legacy-repair";
-        window.OS = { createEditor, registerDynamicTraits, setWidgetContext, installNewLinkOption, applyLegacyRepair, ALL_BLOCKS };
+        import { bindQuizLink } from "@/editor/widgets/quiz";
+        import { bindWheelLink } from "@/editor/widgets/wheel";
+        window.OS = { createEditor, importPageHtml, registerDynamicTraits, setWidgetContext, installNewLinkOption, applyLegacyRepair, bindQuizLink, bindWheelLink, ALL_BLOCKS };
       `,
       resolveDir: process.cwd(),
       loader: "ts",
@@ -67,7 +75,7 @@ export function editorBundle(): Promise<string> {
 }
 
 export interface TestContext {
-  links?: { key: string; label: string; kind?: string }[];
+  links?: { key: string; label: string; kind?: string; payment?: string | null; paymentLocale?: string | null }[];
   pages?: { id: string; name: string; type?: string }[];
   /** Projeto salvo (getProjectData) para reabrir. */
   project?: unknown;
@@ -103,7 +111,12 @@ export async function openEditor(browser: Browser, ctx: TestContext = {}): Promi
         const ed = w.OS.createEditor({ canvas, blocks, layers, styles, traits }, context.project ?? null);
         w.ed = ed;
         w.OS.setWidgetContext(ed, () => ({ links: context.links ?? [], pages: context.pages ?? [] }));
-        w.OS.registerDynamicTraits(ed, () => ({ links: context.links ?? [], pages: context.pages ?? [] }));
+        // Como o editor: "Roleta de desconto: mostrar" quando a página tem roleta.
+        w.OS.registerDynamicTraits(ed, () => ({
+          links: context.links ?? [],
+          pages: context.pages ?? [],
+          wheel: (ed.getWrapper()?.find('[data-os-widget="wheel"]').length ?? 0) > 0,
+        }));
         ed.on("load", () => resolve());
       }),
     ctx,
@@ -138,13 +151,17 @@ export async function editorOutput(page: Page) {
  * HTML final da página como o visitante recebe: salvamento (finalizeFromEditor)
  * + renderPageHtml (links da oferta, páginas do funil e script embutido).
  */
-export async function exportPage(page: Page, opts: { links?: OfferLinkValue[] } = {}): Promise<string> {
+export async function exportPage(
+  page: Page,
+  opts: { links?: OfferLinkValue[]; wheel?: WheelRender | null } = {},
+): Promise<string> {
   const { html, css } = await editorOutput(page);
   const doc = /<html/i.test(html) ? html : `<!doctype html><html><head></head><body>${html}</body></html>`;
   return renderPageHtml(finalizeFromEditor(doc, css), {
     links: opts.links ?? [],
     pageHref: (id) => `/p/${id}`,
     runtimeTag: `<script data-os-runtime>${runtimeScript()}</script>`,
+    wheel: opts.wheel ?? null,
   });
 }
 

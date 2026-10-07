@@ -4,6 +4,7 @@ import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { OPEN_EXPORT_EVENT } from "@/components/offers/export/logic";
+import { offerLinkHref } from "@/components/offers/offer-link-href";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -46,6 +47,33 @@ function ItemAction({ offerId, item }: { offerId: string; item: ReadinessItem })
         onClick={() => window.dispatchEvent(new Event(OPEN_EXPORT_EVENT))}
       >
         {item.cta}
+      </Button>
+    );
+  }
+  if ("settings" in item.target) {
+    return (
+      <Button size="sm" variant={variant} asChild>
+        <Link href={`/configuracoes#${item.target.settings}`} aria-label={aria}>
+          {item.cta}
+        </Link>
+      </Button>
+    );
+  }
+  if ("link" in item.target) {
+    return (
+      <Button size="sm" variant={variant} asChild>
+        <Link href={offerLinkHref(offerId, item.target.link)} scroll={false} aria-label={aria}>
+          {item.cta}
+        </Link>
+      </Button>
+    );
+  }
+  if ("editor" in item.target) {
+    return (
+      <Button size="sm" variant={variant} asChild>
+        <Link href={`/editor/${item.target.editor}`} aria-label={aria}>
+          {item.cta}
+        </Link>
       </Button>
     );
   }

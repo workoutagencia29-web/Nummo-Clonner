@@ -6,16 +6,18 @@
  * Gatilhos:
  * - computador: o mouse sai da página por cima (data-os-exit, padrão ligado);
  * - celular: depois de data-os-mobile-seconds (padrão 25; 0 desliga) ou ao
- *   rolar para cima rápido (data-os-scrollup, padrão ligado);
+ *   rolar para cima rápido (data-os-scrollup, padrão ligado; a rolagem feita
+ *   pela própria página — markAutoScroll em ./util — não conta);
  * - qualquer aparelho: depois de data-os-seconds (padrão 0 = não) ou ao tentar
  *   voltar com o botão "voltar" (data-os-back, padrão desligado).
  * Os gatilhos de saída só valem depois de data-os-arm segundos (padrão 3).
+ * Com a janela de pagamento aberta (ou depois da compra), o popup não abre.
  *
  * Acessível: o bloco já vem com role="dialog"/aria-modal; aqui o foco fica
  * preso dentro do popup, Esc e "Fechar" fecham, clique fora da caixa fecha e o
  * foco volta para onde estava.
  */
-import { flag, isTouch, load, num, opt, save, widgets } from "./util";
+import { autoScrolling, flag, isTouch, load, num, opt, save, widgets } from "./util";
 
 const FOCUSABLE = "a[href],button:not([disabled]),input:not([disabled]),select,textarea";
 
@@ -73,7 +75,8 @@ export function initExitPopups(root?: ParentNode) {
   }
 
   function open() {
-    if (opened) return;
+    // Janela de pagamento aberta, ou compra já feita nesta página: nada de popup de saída.
+    if (opened || html.classList.contains("os-pw-open") || html.classList.contains("os-pago")) return;
     opened = true;
     for (const off of offs) off();
     if (!always) save(key, "1", true);
@@ -134,8 +137,10 @@ export function initExitPopups(root?: ParentNode) {
       const y = scrollY;
       const t = Date.now();
       deepest = Math.max(deepest, y);
-      // Subida rápida depois de ter lido um pedaço da página.
-      if (y < lastY && deepest > innerHeight && (lastY - y) / Math.max(16, t - lastT) > 1.2) tryOpen();
+      // Subida rápida depois de ter lido um pedaço da página (a rolagem feita
+      // pela própria página, ex.: o quiz voltando ao topo, não conta).
+      if (!autoScrolling() && y < lastY && deepest > innerHeight && (lastY - y) / Math.max(16, t - lastT) > 1.2)
+        tryOpen();
       lastY = y;
       lastT = t;
     });

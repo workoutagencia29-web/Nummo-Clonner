@@ -85,7 +85,7 @@ export interface ServerEventPixel {
 }
 
 /** Texto seguro entre aspas simples do PHP (sem quebras de linha nem caracteres de controle). */
-function phpString(value: string): string {
+export function phpString(value: string): string {
   // biome-ignore lint/suspicious/noControlCharactersInRegex: tira caracteres de controle do token
   const clean = value.replace(/[\u0000-\u001f\u007f]/g, "");
   return `'${clean.replace(/\\/g, "\\\\").replace(/'/g, "\\'")}'`;
@@ -143,68 +143,11 @@ export function htaccess(): string {
 `;
 }
 
-/** eventos.php (PHP 7.4+). Não tem segredos: lê os tokens do eventos-dados/config.php. */
-export function eventosPhp(): string {
-  return `<?php
 /**
- * Offer Studio — eventos.php
- *
- * Recebe os eventos das páginas desta oferta e repassa para a API de Conversões
- * da Meta e para a Events API do TikTok, com o IP e o navegador do visitante
- * (os pixels no navegador mandam o mesmo evento com o mesmo event_id, e as
- * plataformas juntam os dois). Os tokens ficam em eventos-dados/config.php.
- *
- * Requer PHP 7.4 ou mais novo (com cURL ou allow_url_fopen).
- * Teste: abra https://seusite.com/eventos.php no navegador.
+ * Funções PHP do IP do visitante (faixas da Cloudflare, trust_proxy): as mesmas
+ * no eventos.php e no pagamento.php (src/lib/export/payment-php.ts).
  */
-
-define('OS_EVENTOS', 1);
-error_reporting(0);
-@ini_set('display_errors', '0');
-
-const OS_MAX_BODY = ${EVENTOS_MAX_BODY};
-const OS_RATE_LIMIT = ${EVENTOS_RATE_LIMIT};
-const OS_META_URL = 'https://graph.facebook.com/${META_GRAPH_VERSION}/';
-const OS_TIKTOK_URL = '${TIKTOK_EVENTS_URL}';
-
-/** Responde sem corpo e termina. */
-function os_end($status)
-{
-    http_response_code($status);
-    header('Cache-Control: no-store');
-    header('Content-Length: 0');
-    exit;
-}
-
-/** Texto (ou número) aparado, com limite de tamanho e formato; null quando não serve. */
-function os_str($value, $max, $pattern = null)
-{
-    if (!is_string($value) && !is_int($value) && !is_float($value)) {
-        return null;
-    }
-    $value = trim((string) $value);
-    if ($value === '' || strlen($value) > $max) {
-        return null;
-    }
-    if ($pattern !== null && !preg_match($pattern, $value)) {
-        return null;
-    }
-    return $value;
-}
-
-function os_filled($value)
-{
-    return $value !== null && $value !== '';
-}
-
-/** Host de um endereço, em minúsculas ('' quando não tem). */
-function os_host_of($url)
-{
-    $host = parse_url((string) $url, PHP_URL_HOST);
-    return is_string($host) ? strtolower($host) : '';
-}
-
-/** O IP está na faixa (CIDR, IPv4 ou IPv6)? */
+export const PHP_CLIENT_IP_FUNCTIONS = `/** O IP está na faixa (CIDR, IPv4 ou IPv6)? */
 function os_ip_in($ip, $cidr)
 {
     $parts = explode('/', $cidr, 2);
@@ -278,7 +221,70 @@ function os_client_ip($trustProxy)
     return $remote;
 }
 
-/** Limite leve por IP (arquivo temporário; sem pasta temporária gravável, não limita). */
+`;
+
+/** eventos.php (PHP 7.4+). Não tem segredos: lê os tokens do eventos-dados/config.php. */
+export function eventosPhp(): string {
+  return `<?php
+/**
+ * Offer Studio — eventos.php
+ *
+ * Recebe os eventos das páginas desta oferta e repassa para a API de Conversões
+ * da Meta e para a Events API do TikTok, com o IP e o navegador do visitante
+ * (os pixels no navegador mandam o mesmo evento com o mesmo event_id, e as
+ * plataformas juntam os dois). Os tokens ficam em eventos-dados/config.php.
+ *
+ * Requer PHP 7.4 ou mais novo (com cURL ou allow_url_fopen).
+ * Teste: abra https://seusite.com/eventos.php no navegador.
+ */
+
+define('OS_EVENTOS', 1);
+error_reporting(0);
+@ini_set('display_errors', '0');
+
+const OS_MAX_BODY = ${EVENTOS_MAX_BODY};
+const OS_RATE_LIMIT = ${EVENTOS_RATE_LIMIT};
+const OS_META_URL = 'https://graph.facebook.com/${META_GRAPH_VERSION}/';
+const OS_TIKTOK_URL = '${TIKTOK_EVENTS_URL}';
+
+/** Responde sem corpo e termina. */
+function os_end($status)
+{
+    http_response_code($status);
+    header('Cache-Control: no-store');
+    header('Content-Length: 0');
+    exit;
+}
+
+/** Texto (ou número) aparado, com limite de tamanho e formato; null quando não serve. */
+function os_str($value, $max, $pattern = null)
+{
+    if (!is_string($value) && !is_int($value) && !is_float($value)) {
+        return null;
+    }
+    $value = trim((string) $value);
+    if ($value === '' || strlen($value) > $max) {
+        return null;
+    }
+    if ($pattern !== null && !preg_match($pattern, $value)) {
+        return null;
+    }
+    return $value;
+}
+
+function os_filled($value)
+{
+    return $value !== null && $value !== '';
+}
+
+/** Host de um endereço, em minúsculas ('' quando não tem). */
+function os_host_of($url)
+{
+    $host = parse_url((string) $url, PHP_URL_HOST);
+    return is_string($host) ? strtolower($host) : '';
+}
+
+${PHP_CLIENT_IP_FUNCTIONS}/** Limite leve por IP (arquivo temporário; sem pasta temporária gravável, não limita). */
 function os_rate_ok($ip)
 {
     $dir = function_exists('sys_get_temp_dir') ? sys_get_temp_dir() : '';

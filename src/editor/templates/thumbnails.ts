@@ -61,6 +61,54 @@ export const THUMBNAILS: Record<string, string> = {
       lines(160, 224, [120], "#475569", 5),
     "#05070d",
   ),
+  quiz: svg(
+    rect(0, 0, W, 22, "#ffffff") +
+      rect(130, 8, 60, 6, "#1e1b4b", 3) +
+      rect(0, 22, W, H - 22, "#f5f3ff") +
+      lines(160, 36, [190, 140], "#1e1b4b", 9, 14) +
+      rect(70, 70, 180, 160, "#ffffff", 12, ' stroke="#e9e5f5"') +
+      rect(84, 84, 30, 6, "#cbd5e1", 3) +
+      rect(122, 85, 114, 5, "#ede9fe", 2.5) +
+      rect(122, 85, 46, 5, "#7c3aed", 2.5) +
+      lines(160, 104, [120], "#1e293b", 8) +
+      [0, 1, 2, 3]
+        .map(
+          (i) =>
+            rect(
+              86,
+              122 + i * 26,
+              148,
+              20,
+              i === 1 ? "#f5f3ff" : "#ffffff",
+              6,
+              ` stroke="${i === 1 ? "#7c3aed" : "#e5e7eb"}" stroke-width="1.5"`,
+            ) +
+            `<circle cx="98" cy="${132 + i * 26}" r="4" fill="${i === 1 ? "#7c3aed" : "#e5e7eb"}"/>` +
+            rect(108, 129 + i * 26, 70 - (i % 2) * 14, 6, "#64748b", 3) +
+            `<circle cx="222" cy="${132 + i * 26}" r="5" fill="${i === 1 ? "#7c3aed" : "#ffffff"}" stroke="${i === 1 ? "#7c3aed" : "#cbd5e1"}" stroke-width="1.5"/>`,
+        )
+        .join(""),
+  ),
+  roleta: svg(
+    rect(0, 0, W, 22, "#ffffff") +
+      rect(130, 8, 60, 6, "#1e1b4b", 3) +
+      rect(0, 22, W, H - 22, "#f5f3ff") +
+      rect(70, 32, 180, 200, "#ffffff", 12, ' stroke="#e9e5f5"') +
+      lines(160, 44, [120], "#1e1b4b", 8) +
+      `<circle cx="160" cy="122" r="58" fill="#1e1b4b"/>` +
+      ["#7c3aed", "#f59e0b", "#ec4899", "#10b981", "#7c3aed", "#f59e0b", "#ec4899", "#10b981"]
+        .map((c, i) => {
+          const a0 = ((i * 45 - 90) * Math.PI) / 180;
+          const a1 = (((i + 1) * 45 - 90) * Math.PI) / 180;
+          const p = (a: number) => `${(160 + Math.cos(a) * 52).toFixed(1)} ${(122 + Math.sin(a) * 52).toFixed(1)}`;
+          return `<path d="M160 122L${p(a0)}A52 52 0 0 1 ${p(a1)}Z" fill="${c}"/>`;
+        })
+        .join("") +
+      `<circle cx="160" cy="122" r="10" fill="#ffffff" stroke="#1e1b4b" stroke-width="3"/>` +
+      `<path d="M152 58h16l-8 14z" fill="#f43f5e"/>` +
+      rect(96, 194, 128, 22, "#16a34a", 6) +
+      lines(160, 202, [64], "#ffffff", 6),
+  ),
   captura: svg(
     `<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#312e81"/><stop offset="1" stop-color="#0f0c2e"/></linearGradient></defs>` +
       rect(0, 0, W, H, "url(#g)") +

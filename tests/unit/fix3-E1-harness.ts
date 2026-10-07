@@ -117,6 +117,8 @@ const stubs: Plugin = {
         "setHomePageAction",
         "duplicatePageAction",
       ],
+      // "Adicionar funil Quiz → Roleta" na lista de páginas (Fase 2B do funil com quiz).
+      funnel: ["createQuizWheelFunnelAction"],
     };
     b.onLoad({ filter: /.*/, namespace: "action" }, (args) => {
       const names = ACTIONS[args.path];

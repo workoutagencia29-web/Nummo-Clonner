@@ -20,6 +20,12 @@
  *   eventos.php              opcional: API de Conversões (Meta) / Events API (TikTok)
  *   eventos-dados/config.php os tokens do eventos.php (+ eventos-dados/.htaccess,
  *                            que bloqueia a pasta; nada de .htaccess na raiz)
+ *   pagamento.php            com "Pagamento na página": cria as cobranças da Kyvo,
+ *                            confere o status e entrega o link de acesso só a
+ *                            quem pagou (src/lib/export/payment-php.ts)
+ *   pagamento-dados/config.php a chave da Kyvo e os produtos (+ .htaccess que
+ *                            bloqueia a pasta; limites por IP em limites/)
+ *   assets/os-pagamento-<hash>.js  a janela de pagamento (só com pagamento)
  *   LEIA-ME.txt              como subir na hospedagem (pt-BR)
  *   (Preservar JS)           arquivos nos caminhos originais do site (só funcionam
  *                            com a oferta na raiz do domínio — o painel avisa);
@@ -128,8 +134,18 @@ export interface ExportPlan {
   warnings: string[];
   /** Pastas e arquivos, na ordem do funil (página inicial primeiro), depois os arquivos. */
   tree: ExportTreeItem[];
-  /** Páginas com botão sem destino (aviso "ainda não leva a lugar nenhum"): para abrir no editor. */
-  deadButtonPages?: { name: string; documentId: string }[];
+  /**
+   * Páginas com botão sem destino (aviso "ainda não leva a lugar nenhum"): para
+   * abrir no editor. buy = botão de compra sem link; quiz = botão final do quiz
+   * sem destino; wheel = roleta com prêmio sem link ou "Resgatar" sem destino.
+   */
+  deadButtonPages?: { name: string; documentId: string; buy?: boolean; quiz?: boolean; wheel?: boolean }[];
+  /** A oferta tem pagamento na página: o ZIP leva o pagamento.php e a pasta pagamento-dados/. */
+  hasPayments?: boolean;
+  /** Links de pagamento na página com algo faltando (conserto "Abrir o link"). */
+  paymentLinks?: { linkId: string; label: string }[];
+  /** Páginas de obrigado sem o bloco "Acesso ao produto" (conserto "Abrir no editor"). */
+  accessBlockPages?: { name: string; documentId: string }[];
 }
 
 /** Etapas mostradas enquanto o ZIP é gerado. */

@@ -4,7 +4,7 @@
  */
 import { gunzipSync } from "node:zlib";
 import { type PageType, Prisma } from "@/generated/prisma/client";
-import { prisma } from "@/lib/db";
+import { atomically, type Db, prisma } from "@/lib/db";
 import { UserError } from "@/lib/errors";
 import { internalLink } from "@/lib/internal-links";
 import { copyName, slugify, slugProblem, uniqueSlug } from "@/lib/text";
@@ -25,14 +25,14 @@ export const PAGE_TYPE_VALUES = [
   "OTHER",
 ] as const satisfies readonly PageType[];
 
-async function offerOrThrow(offerId: string) {
-  const offer = await prisma.offer.findFirst({ where: { id: offerId, deletedAt: null }, select: { id: true } });
+async function offerOrThrow(offerId: string, db: Db = prisma) {
+  const offer = await db.offer.findFirst({ where: { id: offerId, deletedAt: null }, select: { id: true } });
   if (!offer) throw new UserError("Oferta não encontrada.");
   return offer;
 }
 
-async function pageOrThrow(pageId: string) {
-  const page = await prisma.page.findFirst({
+async function pageOrThrow(pageId: string, db: Db = prisma) {
+  const page = await db.page.findFirst({
     where: { id: pageId, offer: { deletedAt: null } },
     select: { id: true, offerId: true, isHome: true, name: true, slug: true, position: true },
   });
@@ -40,16 +40,16 @@ async function pageOrThrow(pageId: string) {
   return page;
 }
 
-async function takenSlugs(offerId: string, exceptPageId?: string) {
-  const pages = await prisma.page.findMany({
+async function takenSlugs(offerId: string, exceptPageId?: string, db: Db = prisma) {
+  const pages = await db.page.findMany({
     where: { offerId, ...(exceptPageId ? { id: { not: exceptPageId } } : {}) },
     select: { slug: true },
   });
   return pages.map((p) => p.slug);
 }
 
-async function touchOffer(offerId: string) {
-  await prisma.offer.update({ where: { id: offerId }, data: { updatedAt: new Date() } });
+async function touchOffer(offerId: string, db: Db = prisma) {
+  await db.offer.update({ where: { id: offerId }, data: { updatedAt: new Date() } });
 }
 
 export interface CreatePageInput {
@@ -59,12 +59,15 @@ export interface CreatePageInput {
   slug?: string;
   /** Modelo de página inteira (src/editor/templates); sem modelo, começa em branco. */
   templateId?: string | null;
+  /** Ajusta o HTML inicial antes de gravar (ex.: o funil em 1 clique liga os botões às páginas). */
+  adjustHtml?: (html: string) => string;
 }
 
-export async function createPage(input: CreatePageInput) {
-  await offerOrThrow(input.offerId);
+export async function createPage(input: CreatePageInput, db: Db = prisma) {
+  await offerOrThrow(input.offerId, db);
   const start = pageStart(input.templateId, input.name);
-  const taken = await takenSlugs(input.offerId);
+  const html = input.adjustHtml ? input.adjustHtml(start.html) : start.html;
+  const taken = await takenSlugs(input.offerId, undefined, db);
   let slug: string;
   if (input.slug) {
     const problem = slugProblem(input.slug);
@@ -75,9 +78,9 @@ export async function createPage(input: CreatePageInput) {
   } else {
     slug = uniqueSlug(input.name, taken);
   }
-  const last = await prisma.page.aggregate({ where: { offerId: input.offerId }, _max: { position: true } });
-  const hasHome = await prisma.page.count({ where: { offerId: input.offerId, isHome: true } });
-  const page = await prisma.page.create({
+  const last = await db.page.aggregate({ where: { offerId: input.offerId }, _max: { position: true } });
+  const hasHome = await db.page.count({ where: { offerId: input.offerId, isHome: true } });
+  const page = await db.page.create({
     data: {
       offerId: input.offerId,
       name: input.name,
@@ -90,13 +93,13 @@ export async function createPage(input: CreatePageInput) {
           name: "A",
           isControl: true,
           weight: 100,
-          documents: { create: { device: "ALL", html: start.html } },
+          documents: { create: { device: "ALL", html } },
         },
       },
     },
     select: { id: true },
   });
-  await touchOffer(input.offerId);
+  await touchOffer(input.offerId, db);
   return page;
 }
 
@@ -124,9 +127,9 @@ export async function updatePage(input: UpdatePageInput) {
 }
 
 /** Define a ordem das páginas (lista completa de IDs na nova ordem). */
-export async function reorderPages(offerId: string, orderedIds: string[]) {
-  await offerOrThrow(offerId);
-  const pages = await prisma.page.findMany({ where: { offerId }, select: { id: true } });
+export async function reorderPages(offerId: string, orderedIds: string[], db: Db = prisma) {
+  await offerOrThrow(offerId, db);
+  const pages = await db.page.findMany({ where: { offerId }, select: { id: true } });
   const current = new Set(pages.map((p) => p.id));
   if (
     orderedIds.length !== current.size ||
@@ -135,21 +138,21 @@ export async function reorderPages(offerId: string, orderedIds: string[]) {
   ) {
     throw new UserError("A lista de páginas mudou. Recarregue a tela e tente de novo.");
   }
-  await prisma.$transaction(
-    orderedIds.map((id, position) => prisma.page.update({ where: { id }, data: { position } })),
-  );
-  await touchOffer(offerId);
+  await atomically(db, async (tx) => {
+    for (const [position, id] of orderedIds.entries()) await tx.page.update({ where: { id }, data: { position } });
+  });
+  await touchOffer(offerId, db);
 }
 
 /** Marca a página como inicial (vai para a raiz do ZIP). */
-export async function setHomePage(pageId: string) {
-  const page = await pageOrThrow(pageId);
+export async function setHomePage(pageId: string, db: Db = prisma) {
+  const page = await pageOrThrow(pageId, db);
   if (page.isHome) return;
-  await prisma.$transaction([
-    prisma.page.updateMany({ where: { offerId: page.offerId, isHome: true }, data: { isHome: false } }),
-    prisma.page.update({ where: { id: page.id }, data: { isHome: true } }),
-  ]);
-  await touchOffer(page.offerId);
+  await atomically(db, async (tx) => {
+    await tx.page.updateMany({ where: { offerId: page.offerId, isHome: true }, data: { isHome: false } });
+    await tx.page.update({ where: { id: page.id }, data: { isHome: true } });
+  });
+  await touchOffer(page.offerId, db);
 }
 
 /** Duplica uma página dentro da mesma oferta (todas as variações). */

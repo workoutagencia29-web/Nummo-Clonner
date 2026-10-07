@@ -55,9 +55,9 @@ function cssOf(html: string) {
 }
 
 describe("catálogo de modelos", () => {
-  it("tem os 9 modelos pedidos, com tipo de página válido, nome e descrição", () => {
+  it("tem os 11 modelos pedidos, com tipo de página válido, nome e descrição", () => {
     expect(PAGE_TEMPLATES.map((t) => t.id)).toEqual([...TEMPLATE_IDS]);
-    expect(new Set(TEMPLATE_IDS).size).toBe(9);
+    expect(new Set(TEMPLATE_IDS).size).toBe(11);
     expect(PAGE_TEMPLATE_IDS).toBe(TEMPLATE_IDS);
     for (const t of PAGE_TEMPLATES) {
       expect(PAGE_TYPE_VALUES).toContain(t.pageType);
@@ -70,6 +70,8 @@ describe("catálogo de modelos", () => {
       "vendas-longa": "SALES",
       vsl: "VSL",
       advertorial: "ADVERTORIAL",
+      quiz: "QUIZ",
+      roleta: "OTHER",
       captura: "CAPTURE",
       upsell: "UPSELL",
       downsell: "DOWNSELL",
@@ -301,6 +303,50 @@ describe.each(
         expect($(".os-step")).toHaveLength(3);
         expect(html).toContain("{{EMAIL}}");
         break;
+      case "QUIZ": {
+        // Quiz: perguntas (escolha única e múltipla), informação, "Analisando" e final.
+        const quiz = $('[data-os-widget="quiz"]');
+        expect(quiz).toHaveLength(1);
+        expect(quiz.attr("data-os-track")).toBe("1");
+        const kinds = quiz
+          .find("[data-os-qz-step]")
+          .map((_, el) => $(el).attr("data-os-qz-step"))
+          .get();
+        expect(kinds).toEqual(["question", "question", "info", "question", "question", "loading", "final"]);
+        expect(quiz.find('[data-os-qz-step="question"][data-os-multi="1"]')).toHaveLength(1);
+        expect(quiz.find("button[data-os-qz-option]").length).toBeGreaterThanOrEqual(12);
+        expect(quiz.find('[data-os-qz-step="loading"]').attr("data-os-messages")?.split("\n")).toHaveLength(3);
+        // Sem captura de contato; o botão final pede o destino (aviso do canvas e do ZIP).
+        expect($("form, input")).toHaveLength(0);
+        expect(buy).toHaveLength(1);
+        expect(buy.attr("data-os-qz-go")).toBe("");
+        expect(cssOf(html)).toContain(
+          ".os-quiz:not(.os-qz-on):not([data-gjs-type]) .os-qz-step~.os-qz-step{display:none}",
+        );
+        break;
+      }
+      case "OTHER": {
+        // Roleta: 4 fatias de exemplo sem link (avisos do canvas e do ZIP) e o "Resgatar" sem destino.
+        const wheel = $('[data-os-widget="wheel"]');
+        expect(wheel).toHaveLength(1);
+        const slices = JSON.parse(wheel.attr("data-os-slices") ?? "[]") as {
+          text: string;
+          chance: number;
+          link: string;
+        }[];
+        expect(slices.map((s) => [s.text, s.chance, s.link])).toEqual([
+          ["10% OFF", 40, ""],
+          ["20% OFF", 30, ""],
+          ["30% OFF", 20, ""],
+          ["50% OFF", 10, ""],
+        ]);
+        expect(wheel.find("[data-os-wh-disc] svg path[fill]")).toHaveLength(4);
+        expect(wheel.find("[data-os-wh-result][hidden]")).toHaveLength(1);
+        expect(buy).toHaveLength(1);
+        expect(buy.attr("data-os-wh-go")).toBe("");
+        expect(cssOf(html)).toContain(".os-wheel:not(.os-wh-on):not([data-gjs-type]) .os-wh-nojs{display:block}");
+        break;
+      }
       case "ADVERTORIAL":
         expect($(".os-adbar").text()).toBe("Publicidade");
         expect(buy.length).toBeGreaterThanOrEqual(2);

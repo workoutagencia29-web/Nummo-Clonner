@@ -19,6 +19,8 @@ import { useAction } from "@/hooks/use-action";
 import { createOfferLinkAction } from "@/server/actions/offer-links";
 import type { EditorPayload } from "@/server/services/documents";
 import type { NewLinkRequest } from "../grapes/new-link";
+import { bindQuizLink } from "../widgets/quiz";
+import { bindWheelLink } from "../widgets/wheel";
 
 type Kind = NewLinkRequest["kind"];
 
@@ -60,7 +62,7 @@ export function NewLinkDialog({ payload, request, onClose, onBound }: Props) {
   useEffect(() => {
     if (!request) return;
     const taken = new Set(payload.links.map((l) => l.label));
-    const base = DEFAULT_NAME[request.kind];
+    const base = request.name || DEFAULT_NAME[request.kind];
     let name = base;
     for (let i = 2; taken.has(name); i++) name = `${base} ${i}`;
     setLabel(name);
@@ -74,14 +76,23 @@ export function NewLinkDialog({ payload, request, onClose, onBound }: Props) {
     if (!request) return;
     const res = await create.run(
       { offerId: payload.offer.id, label, url, kind },
-      { silentError: true, success: "Link criado e ligado ao elemento." },
+      {
+        silentError: true,
+        success: request.bind ? "Link criado e ligado à fatia da roleta." : "Link criado e ligado ao elemento.",
+      },
     );
     if (!res.ok) {
       setError({ message: res.error, field: res.field });
       return;
     }
     payload.links.push(res.data);
-    request.component.addAttributes({ "data-os-link": res.data.key });
+    // Fatia da roleta: o prêmio dela. Botão final do quiz ou "Resgatar" da roleta:
+    // todos os botões do widget ficam ligados ao link novo e o destino de antes
+    // (página do funil ou endereço) sai.
+    if (request.bind) request.bind(res.data.key);
+    else if (!bindQuizLink(request.component, res.data.key) && !bindWheelLink(request.component, res.data.key)) {
+      request.component.addAttributes({ "data-os-link": res.data.key });
+    }
     onBound(request);
     onClose();
   }

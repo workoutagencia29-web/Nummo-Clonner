@@ -11,11 +11,13 @@ import { advertorialHtml } from "./advertorial";
 import { captureHtml } from "./capture";
 import { type PageTemplateId, TEMPLATE_SUMMARIES } from "./catalog";
 import { privacyHtml, termsHtml } from "./legal";
+import { quizHtml } from "./quiz";
 import { salesHtml } from "./sales";
 import { thankYouHtml } from "./thank-you";
 import type { PageTemplate } from "./types";
 import { downsellHtml, upsellHtml } from "./upsell";
 import { vslHtml } from "./vsl";
+import { wheelHtml } from "./wheel";
 
 export {
   isTemplateId,
@@ -33,6 +35,8 @@ const HTML: Record<PageTemplateId, string> = {
   "vendas-longa": salesHtml,
   vsl: vslHtml,
   advertorial: advertorialHtml,
+  quiz: quizHtml,
+  roleta: wheelHtml,
   captura: captureHtml,
   upsell: upsellHtml,
   downsell: downsellHtml,

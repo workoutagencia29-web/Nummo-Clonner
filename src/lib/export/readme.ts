@@ -1,7 +1,7 @@
 /**
  * LEIA-ME.txt do ZIP (pt-BR): o que tem dentro, como subir na hospedagem
  * (Hostinger, HostGator, cPanel, Netlify…), como funciona o teste A/B, o que o
- * eventos.php precisa e como testar.
+ * eventos.php e o pagamento.php precisam e como testar.
  */
 
 export interface ReadmeSplit {
@@ -24,6 +24,8 @@ export interface ReadmeInput {
   splits: ReadmeSplit[];
   /** Plataformas do eventos.php (vazio = sem eventos.php). */
   serverEvents: string[];
+  /** Produtos do pagamento na página (vazio = sem pagamento.php). */
+  payments?: { name: string; price: string; methods: string[] }[];
   /** Páginas "Preservar JS". */
   preserveJs: string[];
   /** Páginas de obrigado/upsell que saíram fora do Google (noindex) por padrão. */
@@ -37,16 +39,17 @@ function where(dir: string) {
   return dir ? `${dir}` : "(raiz)";
 }
 
-/** "oferta-a/ e oferta-b/", "oferta-a/, oferta-b/ e oferta-c/". */
-function folderList(folders: string[]) {
-  if (folders.length <= 1) return folders.join("");
-  return `${folders.slice(0, -1).join(", ")} e ${folders[folders.length - 1]}`;
+/** "a", "a e b", "a, b e c" (pastas: "oferta-a/ e oferta-b/"). */
+function listPt(items: string[]) {
+  if (items.length <= 1) return items.join("");
+  return `${items.slice(0, -1).join(", ")} e ${items[items.length - 1]}`;
 }
 
 export function leiaMe(input: ReadmeInput): string {
   const out: string[] = [];
   const push = (...lines: string[]) => out.push(...lines);
   const splitAt = new Map(input.splits.map((s) => [s.dir, s]));
+  const payments = input.payments ?? [];
 
   push(
     LINE,
@@ -63,9 +66,7 @@ export function leiaMe(input: ReadmeInput): string {
     const mobile = page.mobile ? " (com versão celular)" : "";
     const split = splitAt.get(page.dir);
     if (split?.splitter) {
-      push(
-        `  ${index}  →  divisor A/B de ${page.name} (sorteia entre ${folderList(split.variants.map((v) => v.folder))})`,
-      );
+      push(`  ${index}  →  divisor A/B de ${page.name} (sorteia entre ${listPt(split.variants.map((v) => v.folder))})`);
     } else if (split) {
       push(`  ${index}  →  ${page.name} — versão ${split.variants[0]?.name ?? "A"}, sem divisor${mobile}`);
     } else {
@@ -83,6 +84,13 @@ export function leiaMe(input: ReadmeInput): string {
           "  eventos.php  →  envio de eventos pelo servidor (API de Conversões / Events API)",
           "  eventos-dados/config.php  →  tokens usados pelo eventos.php (NÃO compartilhe)",
           "  eventos-dados/.htaccess  →  bloqueia a pasta dos tokens (arquivo oculto no Mac/Windows)",
+        ]
+      : []),
+    ...(payments.length
+      ? [
+          "  pagamento.php  →  pagamento na página (cobranças da Kyvo e acesso só de quem pagou)",
+          "  pagamento-dados/config.php  →  chave da Kyvo e produtos (NÃO compartilhe)",
+          "  pagamento-dados/.htaccess  →  bloqueia a pasta da chave (arquivo oculto no Mac/Windows)",
         ]
       : []),
     "  LEIA-ME.txt  →  este arquivo (não precisa subir para a hospedagem)",
@@ -118,6 +126,9 @@ export function leiaMe(input: ReadmeInput): string {
     "  junto o 404.html: sem ele, a Cloudflare Pages mostra a página inicial em",
     "  qualquer endereço errado.",
     ...(input.serverEvents.length ? ["  ATENÇÃO: nesses serviços o eventos.php NÃO funciona. Veja abaixo."] : []),
+    ...(payments.length
+      ? ["  ATENÇÃO: nesses serviços o pagamento na página (pagamento.php) NÃO funciona. Veja abaixo."]
+      : []),
     "",
     "FTP (FileZilla): descompacte o ZIP no computador e envie todo o conteúdo",
     "para public_html (ou para a subpasta), mantendo as pastas.",
@@ -251,6 +262,65 @@ export function leiaMe(input: ReadmeInput): string {
       '  3. No Gerenciador de Eventos da Meta (aba "Testar eventos") ou no',
       "     TikTok Events Manager, abra a sua página e aceite os cookies: o",
       '     evento aparece como "Navegador" e "Servidor".',
+      "",
+    );
+  }
+
+  if (payments.length) {
+    push(
+      "",
+      "PAGAMENTO NA PÁGINA (pagamento.php)",
+      "-----------------------------------",
+      "",
+      `Produtos: ${payments.map((p) => `${p.name} (${p.price} · ${listPt(p.methods)})`).join("; ")}.`,
+      "",
+      "Os botões de compra abrem a janela de pagamento da Kyvo por cima da",
+      "página. O pagamento.php cria a cobrança com o valor salvo no Offer Studio",
+      "(o navegador nunca escolhe o valor), confere o pagamento e, na página de",
+      "obrigado, entrega o link de acesso SÓ para quem pagou: quem descobrir o",
+      "endereço da página de obrigado não recebe nada.",
+      "",
+      "A HOSPEDAGEM PRECISA TER PHP 7.4 OU MAIS NOVO, COM cURL, E O SITE EM",
+      "HTTPS (o cadeado no endereço). Hostinger, HostGator e cPanel têm; ative",
+      "o SSL grátis no painel da hospedagem se o site ainda abrir com http://.",
+      "Em hospedagem só de arquivos (Netlify, Vercel, GitHub Pages, Cloudflare",
+      "Pages) o pagamento não funciona: NÃO suba lá o pagamento.php nem a pasta",
+      "pagamento-dados (a chave da Kyvo ficaria visível).",
+      "",
+      "Suba a pasta pagamento-dados inteira, com o .htaccess (arquivo oculto):",
+      "ela guarda a chave da Kyvo e o controle de abuso (limite de cobranças por",
+      "IP). Mudou o valor, o link de acesso ou a chave? Mude no Offer Studio,",
+      "gere o ZIP de novo e envie, substituindo os arquivos.",
+      "",
+      "Como conferir depois de subir:",
+      "  1. Abra meusite.com/pagamento.php — deve aparecer",
+      '     "pagamento.php do Offer Studio funcionando.", com "Chave da Kyvo:',
+      '     cadastrada" e "HTTPS: sim". Se aparecer um código começando com',
+      "     <?php, a hospedagem NÃO roda PHP: apague o pagamento.php e a pasta",
+      "     pagamento-dados de lá.",
+      "  2. Abra meusite.com/pagamento-dados/config.php — deve dar erro (página",
+      "     não encontrada ou acesso negado). NUNCA pode mostrar a chave.",
+      "  3. Faça uma compra de teste com um valor baixo: no Offer Studio, mude",
+      "     por um tempo o valor do produto para o mínimo (1,00), gere o ZIP e",
+      "     suba. Abra a página no celular, clique em comprar e pague de verdade.",
+      "     Confira que a janela confirma o pagamento, leva à página de obrigado",
+      "     e que o botão de acesso abre o seu produto. Depois volte o valor",
+      "     certo, gere o ZIP e suba de novo.",
+      "  4. A venda aparece no painel da Kyvo, na lista de transações (o pedido",
+      '     do Offer Studio começa com "os_"). Reembolsos são feitos lá.',
+      "",
+      "UTMify e pixels pelo servidor: conecte a UTMify e os pixels (Meta,",
+      "TikTok) no painel da Kyvo. A cada venda, a Kyvo manda o Purchase pelo",
+      "servidor e o pedido para a UTMify, com as UTMs e os dados do anúncio que",
+      "o pagamento.php envia (utm_*, src, fbc, fbp, ttclid, ttp, IP e",
+      "navegador). A janela de pagamento também manda o Purchase pelos pixels",
+      "do navegador com o mesmo ID do pedido: as plataformas juntam os dois,",
+      "sem contar duas vezes. Não use regra de Purchase “ao abrir” na página de",
+      "obrigado: ela contaria a venda de novo.",
+      "",
+      "Site atrás de um CDN (proxy) que não seja a Cloudflare? Troque",
+      "'trust_proxy' => false por 'trust_proxy' => true no",
+      "pagamento-dados/config.php para o limite por IP valer para cada comprador.",
       "",
     );
   }

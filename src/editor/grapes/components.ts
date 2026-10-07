@@ -22,6 +22,7 @@ import { esc } from "@/editor/blocks/shared";
 import { pinnedId } from "@/lib/css-keep";
 import { CCID_ATTR, cssAttrValue, DUP_ID_ATTR, EID_ATTR, NOT_DUP } from "@/lib/dup-ids";
 import { RULE_EVENTS, TRACKING_EVENT_LABEL } from "@/lib/tracking/schema";
+import { PRIZE_SHOW_ATTR } from "@/lib/wheel";
 import { withScheme } from "@/runtime/widgets/options";
 import { editorTimeout, isEditorClosed, watchEditor } from "./lifecycle";
 import { NEW_LINK_OPTION, newLinkOption } from "./new-link";
@@ -32,7 +33,12 @@ export interface EditorLinkOption {
   label: string;
   /** Endereço atual do link (mostrado em "Vai para"). */
   url?: string;
+  /** "Pagamento na página" com produto: resumo ("Curso · MX$ 297,00"); o botão abre a janela de pagamento. */
+  payment?: string | null;
 }
+
+/** Selo dos links de pagamento na página nas listas do editor. */
+export const PAYMENT_LINK_BADGE = "Pagamento na página";
 export interface EditorPageOption {
   id: string;
   name: string;
@@ -764,10 +770,15 @@ function syncDestination(
   let info: { text: string; hint: string } | null = null;
   if (key) {
     const link = links.find((l) => l.key === key);
-    info = {
-      text: link ? link.url?.trim() || "Este link ainda não tem endereço" : "Link da oferta excluído",
-      hint: "O endereço dos links da oferta muda em “Links e checkouts”, no topo.",
-    };
+    info = link?.payment
+      ? {
+          text: `${PAYMENT_LINK_BADGE}: ${link.payment}`,
+          hint: "Ao clicar, abre a janela de pagamento. O produto, o valor e as formas de pagamento mudam em “Links e checkouts”, no topo.",
+        }
+      : {
+          text: link ? link.url?.trim() || "Este link ainda não tem endereço" : "Link da oferta excluído",
+          hint: "O endereço dos links da oferta muda em “Links e checkouts”, no topo.",
+        };
   } else if (href.startsWith(PAGE_PREFIX)) {
     const page = pages.find((p) => p.id === href.slice(PAGE_PREFIX.length));
     let hint: string;
@@ -904,35 +915,76 @@ function clickEventTrait(current: string): Record<string, unknown> {
   };
 }
 
+/** Dentro de uma roleta de desconto (ou a própria)? */
+function inWheel(component: Component) {
+  for (let at: Component | undefined = component; at; at = at.parent()) {
+    if (at.getAttributes()["data-os-widget"] === "wheel") return true;
+  }
+  return false;
+}
+
+/**
+ * Visibilidade pela roleta de desconto (data-os-premio): "só para quem ganhou"
+ * (ex.: o preço com desconto) ou "só para quem não ganhou". "Sempre" tira o
+ * atributo. Na página, src/runtime/widgets/prize.ts liga a classe; sem
+ * JavaScript, "só para quem ganhou" fica escondido (CSS do render).
+ */
+const prizeShowTrait: Record<string, unknown> = {
+  type: "select",
+  name: PRIZE_SHOW_ATTR,
+  label: "Roleta de desconto: mostrar",
+  options: [
+    { id: "", label: "Sempre" },
+    { id: "ganhou", label: "Só para quem ganhou prêmio" },
+    { id: "nao", label: "Só para quem não ganhou prêmio" },
+  ],
+  setValue: ({ component, value }: { component: Component; value: unknown }) => {
+    const v = String(value ?? "");
+    if (v) component.addAttributes({ [PRIZE_SHOW_ATTR]: v });
+    else component.removeAttributes(PRIZE_SHOW_ATTR);
+  },
+};
+
 /**
  * Configurações extras conforme o elemento selecionado: link da oferta, página
- * do funil, destino de botões com data-os-href, evento ao clicar e delay de VSL.
+ * do funil, destino de botões com data-os-href, evento ao clicar, delay de VSL
+ * e, numa oferta com roleta de desconto, "Roleta de desconto: mostrar".
  *
  * Os nomes de páginas (vêm do <title> de sites clonados) e de links entram
  * escapados: o GrapesJS monta as opções com innerHTML no painel.
  */
 export function registerDynamicTraits(
   editor: Editor,
-  getOptions: () => { links: EditorLinkOption[]; pages: EditorPageOption[] },
+  getOptions: () => {
+    links: EditorLinkOption[];
+    pages: EditorPageOption[];
+    /** A oferta tem roleta de desconto (aparece "Roleta de desconto: mostrar"). */
+    wheel?: boolean;
+  },
 ) {
   // Sincronizando a lista "Página do funil" com o href (não é uma edição).
   let syncingPage = false;
 
   editor.on("component:selected", (component: Component) => {
     const attrs = component.getAttributes();
-    const { links, pages } = getOptions();
-    const isAnchor = component.get("tagName") === "a";
+    const { links, pages, wheel } = getOptions();
+    // Botão do bloco "Acesso ao produto": o destino vem do servidor (só para quem pagou).
+    const accessGo = "data-os-ac-go" in attrs;
+    const isAnchor = component.get("tagName") === "a" && !accessGo;
     const hasHref = "data-os-href" in attrs;
     const wanted: Record<string, unknown>[] = [];
 
-    if (isAnchor || hasHref || "data-os-link" in attrs) {
+    if (isAnchor || hasHref || ("data-os-link" in attrs && !accessGo)) {
       wanted.push({
         type: "select",
         name: "data-os-link",
         label: "Link da oferta",
         options: [
           { id: "", label: "— nenhum (usar o endereço) —" },
-          ...links.map((l) => ({ id: l.key, label: esc(l.label) })),
+          ...links.map((l) => ({
+            id: l.key,
+            label: l.payment ? `${esc(l.label)} · ${PAYMENT_LINK_BADGE}` : esc(l.label),
+          })),
           newLinkOption,
         ],
       });
@@ -962,6 +1014,9 @@ export function registerDynamicTraits(
     if ("data-os-delay" in attrs) {
       wanted.push({ type: "number", name: "data-os-delay", label: "Aparece depois de (segundos)", min: 0 });
     }
+    if ((wheel || PRIZE_SHOW_ATTR in attrs) && component !== editor.getWrapper() && !inWheel(component)) {
+      wanted.push(prizeShowTrait);
+    }
     const hidden = hiddenAddress.get(component);
     for (const trait of wanted) {
       const name = String(trait.name);
@@ -986,6 +1041,7 @@ export function registerDynamicTraits(
   editor.on("component:update:attributes", (component: Component) => {
     if (editor.getSelected() !== component) return;
     const attrs = component.getAttributes();
+    if ("data-os-ac-go" in attrs) return;
     if (component.get("tagName") !== "a" && !("data-os-link" in attrs) && !hiddenAddress.has(component)) return;
     syncDestination(component, getOptions());
   });

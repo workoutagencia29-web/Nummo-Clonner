@@ -4,7 +4,8 @@
  *   o elemento selecionado;
  * - elementos (texto, botão, contador…) entram logo abaixo do elemento selecionado;
  * - sem nada selecionado, e para itens fixos na tela (WhatsApp flutuante, popup,
- *   notificação), vão para o fim da página.
+ *   notificação), vão para o fim da página;
+ * - um quiz nunca entra dentro de outro (vai para depois do quiz selecionado).
  * O bloco novo fica selecionado e aparece na tela. Um ⌘Z desfaz.
  */
 import type { Block, Component, Editor } from "grapesjs";
@@ -38,6 +39,17 @@ function rootTagOf(block: Block) {
   if (first && typeof first === "object" && "tagName" in first) return String(first.tagName).toLowerCase();
   if (typeof first === "string") return /^\s*<([a-z0-9-]+)/i.exec(first)?.[1]?.toLowerCase() ?? "";
   return "";
+}
+
+/** O bloco é um quiz (data-os-widget="quiz")? */
+function isQuizBlock(block: Block) {
+  const content = block.get("content") as unknown;
+  const first = (Array.isArray(content) ? content[0] : content) as
+    | { attributes?: Record<string, unknown> }
+    | string
+    | undefined;
+  if (typeof first === "string") return /^\s*<[^>]*data-os-widget=["']?quiz\b/i.test(first);
+  return first?.attributes?.["data-os-widget"] === "quiz";
 }
 
 /** Seção que contém o componente (ou o filho direto da página). */
@@ -74,8 +86,19 @@ export function insertBlockOnClick(editor: Editor, block: Block) {
   let at: number | undefined;
   if (selected && selected !== wrapper && !FIXED_ON_SCREEN.has(String(block.getId()))) {
     let anchor = isSection ? sectionOf(selected, wrapper) : blockLevelOf(selected, wrapper);
-    // Não entra em componentes fechados (widgets, vídeos…): sobe até um que aceite.
-    while (anchor.parent() && anchor.parent() !== wrapper && anchor.parent()?.get("droppable") === false) {
+    // Quiz dentro da etapa de outro: um clique responderia os dois. Vai para depois dele.
+    if (isQuizBlock(block)) {
+      for (let at = anchor.parent(); at && at !== wrapper; at = at.parent()) {
+        if (at.getAttributes()["data-os-widget"] === "quiz") anchor = at;
+      }
+    }
+    // Não entra em componentes fechados (widgets, vídeos…) nem nos que só aceitam
+    // certos elementos (etapas e opções do quiz): sobe até um que aceite.
+    const closed = (c: Component | undefined) => {
+      const droppable = c?.get("droppable");
+      return droppable === false || typeof droppable === "string";
+    };
+    while (anchor.parent() && anchor.parent() !== wrapper && closed(anchor.parent())) {
       anchor = anchor.parent() as Component;
     }
     const anchorParent = anchor.parent();

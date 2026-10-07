@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Sem os argumentos das ações no terminal do "npm run dev": eles podem ter
+  // segredos (chave da API de pagamento, tokens dos pixels).
+  logging: { serverFunctions: false },
   experimental: {
     // HTML colado na clonagem pode ter até 10 MB (o ZIP usa uma rota própria).
     // A ação recebe o HTML dentro de um JSON: aspas, quebras de linha e acentos

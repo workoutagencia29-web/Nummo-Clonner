@@ -9,6 +9,8 @@
  */
 import type { RuntimePixel } from "@/lib/tracking/runtime-config";
 import { amountOf, type Cfg, type Ev, nameOf, type Vendor, versionOf } from "./config";
+import type { PurchaseEvent } from "./purchase";
+import type { QuizEvent } from "./quiz";
 import type { Detail, Report } from "./report";
 import { doc, type Loose, loadScript, win } from "./util";
 
@@ -234,20 +236,35 @@ export function createVendors(cfg: Cfg, report: Report) {
      * Manda o evento para todas as plataformas com o mesmo eventID e, no teste
      * A/B, a versão (os_versao: custom_data da Meta, properties do TikTok/Kwai,
      * parâmetro do GA4; a conversão do Google Ads vai só com o valor).
+     * Evento do quiz (./quiz.ts): personalizado na Meta (trackCustom) e no
+     * TikTok com `name`, no GA4 com `ga`; Kwai e Google Ads não recebem. A
+     * compra da janela de pagamento (./purchase.ts) é o evento padrão dela
+     * (Purchase) com o valor e a moeda do produto.
      */
-    send(ev: Ev, eventId: string) {
-      const amount = amountOf(cfg, ev);
-      const params = { ...amount, ...versionOf(cfg) };
+    send(input: Ev | QuizEvent | PurchaseEvent, eventId: string) {
+      const buy = (input as PurchaseEvent).std ? (input as PurchaseEvent) : null;
+      const ev: Ev | QuizEvent = buy ? buy.std : (input as Ev | QuizEvent);
+      const q = typeof ev === "string" ? null : ev;
+      const amount = q ? {} : buy ? buy.amount : amountOf(cfg, ev as Ev);
+      const params = { ...(q ? q.params : amount), ...versionOf(cfg) };
       const pv = ev === "PAGE_VIEW";
+      // GA4 e Google Ads identificam (e deduplicam) a compra por transaction_id, não por event_id.
+      const tx = buy ? { transaction_id: buy.id } : {};
       for (const p of cfg.pixels) {
         const vendor = p.vendor;
         const st = states[key(vendor, p.id)];
         if (!st || vendor === "UTMIFY") continue;
-        let name = nameOf(cfg, vendor, ev);
+        let name = q
+          ? vendor === "GA4"
+            ? q.ga
+            : /^(META|TIKTOK)$/.test(vendor)
+              ? q.name
+              : null
+          : nameOf(cfg, vendor, ev as Ev);
         let sendTo = "";
         if (vendor === "GOOGLE_ADS") {
-          // Só vira conversão o evento com rótulo (options.conversionLabels).
-          const label = String(((p.options.conversionLabels || {}) as Loose)[ev] || "").trim();
+          // Só vira conversão o evento com rótulo (options.conversionLabels); o do quiz não tem.
+          const label = String(((p.options.conversionLabels || {}) as Loose)[ev as Ev] || "").trim();
           if (!label) continue;
           name = name || "conversion";
           sendTo = `${p.id}/${label}`;
@@ -257,7 +274,7 @@ export function createVendors(cfg: Cfg, report: Report) {
         // O que de fato vai: no PageView só a Meta passa por aqui com parâmetros
         // (ttq.page()/kwaiq.page() não levam nenhum); a conversão do Google Ads leva só o valor.
         const sent = sendTo || (pv && vendor !== "META") ? amount : params;
-        const detail: Detail = { event: ev, eventId, pixel: p.id, sendTo, ...sent };
+        const detail: Detail = { event: q ? q.name : (ev as Ev), eventId, pixel: p.id, sendTo, ...sent };
         const first = p === pixels(vendor)[0];
         guard(vendor, n, () => {
           if (vendor === "META") {
@@ -269,10 +286,10 @@ export function createVendors(cfg: Cfg, report: Report) {
             if (!pv) w.kwaiq.instance(p.id).track(n, params);
             else if (first) w.kwaiq.page();
           } else if (sendTo) {
-            gtag("event", n, { send_to: sendTo, ...amount });
+            gtag("event", n, { send_to: sendTo, ...amount, ...tx });
           } else if (!pv) {
             // GA4: a visualização de página já sai no gtag("config").
-            gtag("event", n, { send_to: p.id, event_id: eventId, ...params });
+            gtag("event", n, { send_to: p.id, event_id: eventId, ...params, ...tx });
           }
           if (st.ok === null) st.wait.push([n, detail]);
           else result(vendor, n, st.ok, detail);

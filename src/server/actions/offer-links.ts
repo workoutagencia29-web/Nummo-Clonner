@@ -22,13 +22,14 @@ const url = z
     if (problem) ctx.addIssue({ code: "custom", message: problem });
   });
 const kind = z.enum(links.OFFER_LINK_KINDS);
+const target = z.enum(["URL", "PAYMENT"]);
 
 function refresh() {
   revalidatePath("/", "layout");
 }
 
 export const createOfferLinkAction = protectedAction(
-  z.object({ offerId: id, label, url: url.default(""), kind: kind.default("CHECKOUT") }),
+  z.object({ offerId: id, label, url: url.default(""), kind: kind.default("CHECKOUT"), target: target.default("URL") }),
   async ({ offerId, ...input }) => {
     const link = await links.createOfferLink(offerId, input);
     refresh();

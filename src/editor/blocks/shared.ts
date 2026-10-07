@@ -17,6 +17,7 @@ export const BLOCK_CATEGORIES = {
   basicos: "Básicos",
   estrutura: "Estrutura",
   conversao: "Conversão",
+  quiz: "Quiz e roleta",
   video: "Vídeo",
   prova: "Prova social",
   formularios: "Formulários",

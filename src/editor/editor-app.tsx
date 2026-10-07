@@ -93,7 +93,7 @@ import { STATE_LABELS } from "./grapes/i18n";
 import { applyLegacyRepair } from "./grapes/legacy-repair";
 import { enclosingClickable } from "./grapes/link-select";
 import { installNewLinkOption, type NewLinkRequest } from "./grapes/new-link";
-import { createEditor, DEVICES, type DeviceId, deviceWidthPx } from "./grapes/setup";
+import { createEditor, DEVICES, type DeviceId, deviceWidthPx, importPageHtml } from "./grapes/setup";
 import { skipPhoneValues } from "./grapes/style-cascade";
 import { configureVideoUpload } from "./grapes/video-upload";
 import { CodeDialog } from "./panels/code-dialog";
@@ -102,6 +102,7 @@ import { LinksDialog } from "./panels/links-dialog";
 import { NewLinkDialog } from "./panels/new-link-dialog";
 import { VersionsDialog } from "./panels/versions-dialog";
 import { setWidgetContext } from "./widgets";
+import { pageHasWheel } from "./widgets/wheel";
 
 type SaveState = "saved" | "dirty" | "saving" | "error" | "conflict";
 
@@ -145,6 +146,11 @@ const SETTINGS_FIRST_TYPES = new Set([
   "os-embed",
   "os-vturb",
   "os-video",
+  "os-quiz",
+  "os-quiz-question",
+  "os-quiz-loading",
+  "os-quiz-final",
+  "os-wheel",
 ]);
 
 const DEVICE_ICON: Record<DeviceId, typeof MonitorIcon> = {
@@ -1177,7 +1183,13 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
     if (payload.device === "DESKTOP" && payload.documents.some((d) => d.device === "MOBILE")) skipPhoneValues(ed);
     installTextFlushRedraw(ed);
     // payload.links é atualizado no lugar por "Links e checkouts" (links criados ali aparecem na hora).
-    const offerData = () => ({ links: payload.links, pages: payload.pages });
+    // Roleta de desconto em alguma página da oferta (ou posta agora nesta): os
+    // elementos ganham "Roleta de desconto: mostrar".
+    const offerData = () => ({
+      links: payload.links,
+      pages: payload.pages,
+      wheel: Boolean(payload.hasWheel) || pageHasWheel(ed),
+    });
     registerDynamicTraits(ed, offerData);
     setWidgetContext(ed, offerData);
     const disposeAssets = configureAssets(ed, payload.offer.id);
@@ -1210,7 +1222,7 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
         // Primeira abertura: importa o HTML. Páginas comuns são salvas na hora (o
         // original vira o "Original da clonagem" do Histórico); páginas "Preservar JS" só gravam
         // quando houver uma alteração de verdade.
-        ed.setComponents(payload.html, { asDocument: true } as never);
+        importPageHtml(ed, payload.html);
         ed.UndoManager.clear();
         if (!preserveJs) {
           changeCounter.current++;
@@ -1948,9 +1960,14 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
             request={newLink}
             onClose={() => setNewLink(null)}
             onBound={({ component }) => {
-              // Reabre as configurações do elemento com a lista de links atualizada.
-              editor.selectRemove(component);
-              editor.select(component);
+              // Reabre as configurações com a lista de links atualizada: as do elemento
+              // ou, se o pedido veio de quem o contém (ex.: o quiz, para o botão final), as dele.
+              const selected = editor.getSelected();
+              let at: Component | undefined = component;
+              while (at && at !== selected) at = at.parent();
+              const target = at ?? component;
+              editor.selectRemove(target);
+              editor.select(target);
             }}
           />
         </>

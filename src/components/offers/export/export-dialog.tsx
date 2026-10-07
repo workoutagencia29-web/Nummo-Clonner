@@ -250,7 +250,12 @@ export function ExportDialog({ c }: { c: ExportController }) {
           {c.stage === "progress" && <ProgressStage c={c} />}
           {c.stage === "done" && <DoneStage c={c} />}
           {c.stage === "failed" && <FailedStage c={c} />}
-          <HostingGuide open={c.guideOpen} onOpenChange={c.setGuideOpen} preserveJsPages={plan?.preserveJsPages} />
+          <HostingGuide
+            open={c.guideOpen}
+            onOpenChange={c.setGuideOpen}
+            preserveJsPages={plan?.preserveJsPages}
+            hasPayments={plan?.hasPayments ?? false}
+          />
           {(c.stage === "setup" || c.historyRows.length > 0) && (
             <ExportHistory
               rows={c.historyRows}

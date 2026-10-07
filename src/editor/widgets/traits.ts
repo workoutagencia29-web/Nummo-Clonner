@@ -6,6 +6,12 @@
  * - os-datetime: data e hora (contador com data fixa)
  * - os-check: liga/desliga que grava "1"/"0" e entende padrão ligado
  * - os-heading: título de grupo (só visual)
+ * - os-note: explicação curta (só visual; o texto vem do label)
+ * - os-color: cor (amostra + código). Não usa o campo de cor do GrapesJS, que
+ *   regrava o último valor ao selecionar outro elemento (o Desfazer se perdia e
+ *   entravam mudanças invisíveis na pilha) e transformava um nome que ele não
+ *   conhece ("vermelho") em preto: aqui cor não reconhecida não muda nada e o
+ *   campo avisa.
  * - select com `osOptions`: opções vindas da oferta (links, páginas do funil),
  *   atualizadas sempre que o elemento é selecionado.
  *
@@ -85,6 +91,71 @@ export function registerTraitTypes(editor: Editor) {
     },
   });
 
+  tm.addType<{ onChange(e: Event): void; setInputValue(): void }>("os-color", {
+    createInput({ trait }: { trait: Trait }) {
+      const box = document.createElement("div");
+      box.style.cssText = "padding:2px 4px;";
+      const row = document.createElement("div");
+      row.style.cssText = "display:flex;align-items:center;gap:6px;";
+      const swatch = document.createElement("input");
+      swatch.type = "color";
+      swatch.setAttribute("data-os-swatch", "");
+      swatch.setAttribute("aria-label", `${String(prop(trait, "label") ?? "Cor")}: escolher na paleta`);
+      swatch.style.cssText = "flex:none;width:28px;height:24px;padding:0;border:0;background:none;cursor:pointer;";
+      const text = document.createElement("input");
+      text.type = "text";
+      text.spellcheck = false;
+      text.placeholder = "#e11d48";
+      text.setAttribute("data-os-color", "");
+      text.setAttribute("aria-label", String(prop(trait, "label") ?? "Cor"));
+      text.style.cssText = `${FIELD_STYLE}flex:1;min-width:0;padding-left:2px;`;
+      const err = document.createElement("div");
+      err.setAttribute("data-os-color-err", "");
+      err.setAttribute("role", "alert");
+      err.style.cssText = "display:none;margin-top:4px;color:#dc2626;font-size:11px;line-height:1.35;";
+      row.append(swatch, text);
+      box.append(row, err);
+      return box;
+    },
+    // Os dois campos falam com o trait por aqui (o padrão leria .value do contêiner).
+    onChange(e: Event) {
+      const box = this.getInputElem() as HTMLElement;
+      const swatch = box.querySelector<HTMLInputElement>("[data-os-swatch]");
+      const text = box.querySelector<HTMLInputElement>("[data-os-color]");
+      if (!swatch || !text) return;
+      if (e.target === swatch) text.value = swatch.value;
+      const value = text.value.trim();
+      if (value && !colorOk(value)) {
+        showColorError(box, "Cor não reconhecida — use o código, ex.: #e11d48");
+        return;
+      }
+      showColorError(box, "");
+      const trait = this.model;
+      trait.setValue(value);
+      // O valor guardado no trait acompanha (assim Desfazer/Refazer redesenham o campo).
+      trait.set({ value: trait.getValue() }, { fromTarget: 1 });
+      paintColor(box, String(trait.getValue() ?? ""));
+    },
+    setInputValue() {
+      // o onUpdate redesenha os dois campos
+    },
+    onUpdate({ elInput, trait }: { elInput: HTMLElement; trait: Trait }) {
+      showColorError(elInput, "");
+      paintColor(elInput, String(trait.getValue() ?? ""));
+    },
+  });
+
+  tm.addType("os-note", {
+    noLabel: true,
+    templateInput: () => "",
+    createInput({ trait }: { trait: Trait }) {
+      const p = document.createElement("p");
+      p.textContent = String(prop(trait, "label") ?? "");
+      p.style.cssText = "margin:4px 0 8px;font-size:12px;line-height:1.45;opacity:.8;";
+      return p;
+    },
+  });
+
   tm.addType("os-heading", {
     noLabel: true,
     templateInput: () => "",
@@ -99,6 +170,61 @@ export function registerTraitTypes(editor: Editor) {
 
   // Listas que dependem da oferta (links e páginas) são refeitas a cada seleção.
   editor.on("component:selected", (component: Component) => refreshOptions(editor, component));
+
+  // Desfazer/Refazer: campos com leitura própria (cores, destino do quiz…) não
+  // ouvem o que mudou (CSS, outro elemento) e mostrariam o valor desfeito.
+  editor.on("undo redo", () => {
+    for (const trait of editor.getSelected()?.getTraits() ?? []) {
+      if (!prop(trait, "getValue")) continue;
+      trait.targetUpdated();
+      (trait.view as unknown as { postUpdate?: () => void } | undefined)?.postUpdate?.();
+    }
+  });
+}
+
+/** Cor que o navegador entende (#hex, rgb(), nome em inglês, var()…). */
+function colorOk(value: string): boolean {
+  try {
+    return CSS.supports("color", value);
+  } catch {
+    return /^#([0-9a-f]{3,4}|[0-9a-f]{6}|[0-9a-f]{8})$/i.test(value);
+  }
+}
+
+/** #rrggbb da cor (para a amostra), ou null. */
+function toHex(value: string): string | null {
+  if (/^#[0-9a-f]{6}$/i.test(value)) return value.toLowerCase();
+  const short = /^#([0-9a-f])([0-9a-f])([0-9a-f])$/i.exec(value);
+  if (short) return `#${short[1]}${short[1]}${short[2]}${short[2]}${short[3]}${short[3]}`.toLowerCase();
+  try {
+    const ctx = document.createElement("canvas").getContext("2d");
+    if (!ctx) return null;
+    ctx.fillStyle = "#010203";
+    ctx.fillStyle = value;
+    const out = String(ctx.fillStyle);
+    return /^#[0-9a-f]{6}$/i.test(out) && (out !== "#010203" || value === "#010203") ? out : null;
+  } catch {
+    return null;
+  }
+}
+
+function paintColor(box: HTMLElement, value: string) {
+  const swatch = box.querySelector<HTMLInputElement>("[data-os-swatch]");
+  const text = box.querySelector<HTMLInputElement>("[data-os-color]");
+  if (text) text.value = value;
+  const hex = toHex(value);
+  if (swatch && hex) swatch.value = hex;
+}
+
+function showColorError(box: HTMLElement, message: string) {
+  const text = box.querySelector<HTMLInputElement>("[data-os-color]");
+  const err = box.querySelector<HTMLElement>("[data-os-color-err]");
+  if (message) text?.setAttribute("aria-invalid", "true");
+  else text?.removeAttribute("aria-invalid");
+  if (err) {
+    err.textContent = message;
+    err.style.display = message ? "block" : "none";
+  }
 }
 
 export function refreshOptions(editor: Editor, component: Component) {
@@ -113,7 +239,10 @@ export function refreshOptions(editor: Editor, component: Component) {
     } else {
       const kind = source.split(":")[1];
       const links = kind ? ctx.links.filter((l) => l.kind === kind) : ctx.links;
-      options = links.map((l) => ({ id: l.key, label: esc(l.label) }));
+      options = links.map((l) => ({
+        id: l.key,
+        label: l.payment ? `${esc(l.label)} · Pagamento na página` : esc(l.label),
+      }));
       // Mantém visível uma chave que não existe mais (link apagado).
       const current = String(trait.getValue() ?? "");
       if (current && !options.some((o) => o.id === current))
@@ -175,7 +304,7 @@ export function partStyle(
   label: string,
   test: (c: Component) => boolean,
   prop: string,
-  type = "color",
+  type = "os-color",
 ): TraitDef {
   return {
     type,

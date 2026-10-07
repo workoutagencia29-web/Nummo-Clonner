@@ -82,7 +82,8 @@ function FirstOffer() {
               <ArrowRightIcon className="ml-auto size-4 text-muted-foreground transition-transform group-hover:translate-x-0.5" />
             </span>
             <span className="text-sm text-muted-foreground">
-              Página de vendas, VSL, captura, advertorial, upsell e obrigado, prontas para trocar textos e imagens.
+              Página de vendas, VSL, quiz, captura, advertorial, upsell e obrigado, prontas para trocar textos e
+              imagens.
             </span>
           </span>
         </button>

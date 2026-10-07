@@ -14,6 +14,7 @@ import path from "node:path";
 import { gzipSync } from "node:zlib";
 import sharp from "sharp";
 import { ZipFile } from "yazl";
+import { encryptSecret } from "@/lib/crypto";
 import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
 import { putContentAddressed, putObject, storagePath } from "@/lib/storage";
@@ -21,6 +22,9 @@ import type { BackupManifest } from "@/server/services/backup/format";
 import { prismaQueryable } from "@/server/services/backup/queue";
 import { backupTableNames, ident, loadSchema } from "@/server/services/backup/tables";
 import { createExportFixture, type ExportFixture, readZip } from "./export-fixture";
+
+/** Chave (de mentira) da Kyvo guardada nos dados de teste. */
+export const KYVO_KEY = "kyvo_live_backupTesteSoDeMentira0123456789";
 
 export const STORAGE_ROOT = path.join(env.dataDir, "storage");
 
@@ -124,6 +128,32 @@ export async function createRichData(): Promise<RichData> {
       url: "https://wa.me/5511999999999",
       kind: "WHATSAPP",
       position: 1,
+    },
+  });
+  // Pagamento na página: chave do gateway (criptografada) e um produto com métodos (lista de enum).
+  await prisma.paymentGateway.create({
+    data: { provider: "KYVO", apiKeyEnc: encryptSecret(KYVO_KEY), checkedAt: new Date(), checkStatus: "ok" },
+  });
+  await prisma.offerLink.create({
+    data: {
+      offerId: fx.offerId,
+      key: "pagamento",
+      label: "Pagamento na página",
+      url: "https://pay.hotmart.com/ANTIGO",
+      kind: "CHECKOUT",
+      target: "PAYMENT",
+      position: 2,
+      payment: {
+        create: {
+          name: "Curso “especial” — ç",
+          amountCents: 29_700,
+          currency: "EUR",
+          methods: ["CARD", "BIZUM", "MB_WAY"],
+          locale: "ES",
+          thankYouPageId: fx.upsellId,
+          accessUrl: "https://membros.exemplo.com/curso",
+        },
+      },
     },
   });
   const trash = await prisma.offer.create({
