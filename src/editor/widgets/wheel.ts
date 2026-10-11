@@ -16,6 +16,7 @@
  * - Clicar na roda (ou no ponteiro/centro) seleciona a roleta.
  */
 import type { Component, Editor } from "grapesjs";
+import { linkOptionLabel } from "@/editor/grapes/components";
 import { editorTimeout } from "@/editor/grapes/lifecycle";
 import { NEW_LINK_OPTION, newLinkOption, requestNewLink } from "@/editor/grapes/new-link";
 import {
@@ -136,21 +137,31 @@ const LOOKS_LIKE_PRIZE = /%|\boff\b|\d|gr[aá]tis|b[oô]nus|desconto|cupom/i;
 const LOSE_TEXT_WARN =
   "Quem cair aqui não ganha nada: use um texto como “Não foi dessa vez”, para não parecer que ganhou um desconto.";
 
-type SliceWarn = "" | "link" | "url" | "lose";
+type SliceWarn = "" | "link" | "url" | "lose" | "checkout" | "coupon";
+
+type SliceLink = { key: string; url?: string; payment?: string | null; checkout?: string | null };
 
 /** Aviso embaixo da fatia ("" = nenhum). */
-function sliceWarn(s: WheelSlice, links: { key: string; url?: string; payment?: string | null }[]): SliceWarn {
+export function sliceWarn(s: WheelSlice, links: SliceLink[]): SliceWarn {
   if (s.lose) return LOOKS_LIKE_PRIZE.test(s.text) ? "lose" : "";
+  const link = s.link ? links.find((l) => l.key === s.link) : undefined;
+  // Checkout do Offer Studio: o prêmio leva à página de checkout do link (o
+  // desconto é o valor do produto dele); ela não tem campo de cupom.
+  if (link && link.checkout != null) return !link.checkout ? "checkout" : s.coupon.trim() ? "coupon" : "";
   // Link de pagamento na página também é prêmio (o produto com o preço do desconto).
-  const linked = s.link && links.some((l) => l.key === s.link && (l.payment || l.url === undefined || l.url.trim()));
+  const linked = link && (link.payment || link.url === undefined || link.url.trim());
   if (linked) return "";
   return s.link ? "url" : "link";
 }
 
-const WARN_TEXT: Record<Exclude<SliceWarn, "">, string> = {
+export const WARN_TEXT: Record<Exclude<SliceWarn, "">, string> = {
   url: "Este link ainda está sem endereço: preencha em “Links e checkouts” da oferta.",
   link: "Escolha o checkout com este desconto (ou crie um link novo).",
   lose: LOSE_TEXT_WARN,
+  checkout:
+    "Este checkout do Offer Studio ainda não foi salvo: monte-o em “Links e checkouts” da oferta, com o valor já com o desconto.",
+  coupon:
+    "O checkout do Offer Studio não tem campo de cupom: quem ganhar paga o valor do produto deste link. Deixe o cupom em branco e ponha o valor com o desconto no checkout.",
 };
 
 /**
@@ -158,18 +169,14 @@ const WARN_TEXT: Record<Exclude<SliceWarn, "">, string> = {
  * prêmio, avisos, opções da lista de prêmio, aviso de chance). Mudou só um
  * valor (texto, cor, chance, cupom): a lista é atualizada no lugar.
  */
-function structureKey(
-  slices: WheelSlice[],
-  links: { key: string; label: string; url?: string; payment?: string | null }[],
-  notice: string,
-) {
+function structureKey(slices: WheelSlice[], links: (SliceLink & { label: string })[], notice: string) {
   return JSON.stringify([
     slices.map((s) => [
       s.lose ? 1 : 0,
       sliceWarn(s, links),
       s.link && !links.some((l) => l.key === s.link) ? s.link : "",
     ]),
-    links.map((l) => [l.key, l.label, l.payment ? 1 : 0]),
+    links.map((l) => [l.key, l.label, l.payment ? 1 : 0, l.checkout == null ? 0 : l.checkout ? 2 : 1]),
     notice,
   ]);
 }
@@ -304,7 +311,7 @@ function renderSlices(editor: Editor, box: HTMLElement, wheel: Component, notice
       prize.appendChild(o);
     };
     option("", "— escolha o link do desconto —");
-    for (const l of links) option(l.key, l.payment ? `🎁 ${l.label} · Pagamento na página` : `🎁 ${l.label}`);
+    for (const l of links) option(l.key, `🎁 ${linkOptionLabel(l)}`);
     if (s.link && !links.some((l) => l.key === s.link)) option(s.link, `${s.link} (removido)`);
     option(LOSE_OPTION, "Sem prêmio (“Não foi dessa vez”)");
     option(NEW_LINK_OPTION, newLinkOption.label);

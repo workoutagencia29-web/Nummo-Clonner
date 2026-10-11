@@ -63,6 +63,28 @@ export function instrumentPagamento(code: string, apiBase: string, limits: Recor
 }
 
 /**
+ * pagamento.php apontando para os gateways falsos do checkout (FlevoPay e
+ * BlackCat de tests/unit/pix-fakes.ts e a Kyvo de kyvo-fake.ts), com outros
+ * limites se pedido.
+ */
+export function instrumentCheckout(
+  code: string,
+  bases: { kyvo: string; flevopay: string; blackcat: string },
+  limits: Record<string, number> = {},
+): string {
+  let out = instrumentPagamento(code, bases.kyvo, limits);
+  for (const [name, base] of [
+    ["OS_FLEVOPAY_API", bases.flevopay],
+    ["OS_BLACKCAT_API", bases.blackcat],
+  ] as const) {
+    const next = out.replace(new RegExp(`const ${name} = '[^']*';`), `const ${name} = '${base}';`);
+    if (next === out) throw new Error(`${name} não encontrado no pagamento.php`);
+    out = next;
+  }
+  return out;
+}
+
+/**
  * Roteador do `php -S` só dos testes: o IP da conexão (REMOTE_ADDR) vem do
  * cabeçalho X-Test-Remote, para simular compradores (e ataques) de vários IPs.
  */

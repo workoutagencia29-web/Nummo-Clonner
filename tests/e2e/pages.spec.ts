@@ -48,7 +48,7 @@ test.describe("Páginas do funil", () => {
     await dialog.getByLabel("Nome", { exact: true }).fill("Outra página");
     await dialog.getByLabel("Endereço da página").fill("upsell-1-kit");
     await dialog.getByRole("button", { name: "Criar página" }).click();
-    await expect(dialog.getByText("Já existe uma página com esse endereço (slug) nesta oferta.")).toBeVisible();
+    await expect(dialog.getByText("Já existe uma página com esse endereço nesta oferta.")).toBeVisible();
     await expect(dialog.getByLabel("Endereço da página")).toHaveAttribute("aria-invalid", "true");
 
     // Endereço reservado pelo sistema.
@@ -91,7 +91,7 @@ test.describe("Páginas do funil", () => {
     // Não pode usar o endereço de outra página da oferta.
     await dialog.getByLabel("Endereço da página").fill("principal");
     await dialog.getByRole("button", { name: "Salvar" }).click();
-    await expect(dialog.getByText("Já existe uma página com esse endereço (slug) nesta oferta.")).toBeVisible();
+    await expect(dialog.getByText("Já existe uma página com esse endereço nesta oferta.")).toBeVisible();
 
     await dialog.getByLabel("Endereço da página").fill("quiz");
     await dialog.getByRole("button", { name: "Salvar" }).click();

@@ -726,7 +726,8 @@ describe("LEIA-ME", () => {
     expect(text).toContain("meusite.com/eventos-dados/config.php — deve dar erro");
     expect(text).not.toMatch(/^\s*\.htaccess/m);
     expect(text).toContain("as fontes podem aparecer diferentes");
-    expect(text).toContain('"Preservar JS" só funcionam depois');
+    expect(text).toContain('"Com scripts" só funcionam depois');
+    expect(text).not.toContain("Preservar JS");
     expect(text).toContain("“Obrigado” (obrigado/upsell) saem fora do Google");
   });
 });

@@ -21,6 +21,7 @@ import { putContentAddressed, putObject, storagePath } from "@/lib/storage";
 import type { BackupManifest } from "@/server/services/backup/format";
 import { prismaQueryable } from "@/server/services/backup/queue";
 import { backupTableNames, ident, loadSchema } from "@/server/services/backup/tables";
+import { rememberOfferCurrency } from "@/server/services/preferences";
 import { createExportFixture, type ExportFixture, readZip } from "./export-fixture";
 
 /** Chave (de mentira) da Kyvo guardada nos dados de teste. */
@@ -130,9 +131,15 @@ export async function createRichData(): Promise<RichData> {
       position: 1,
     },
   });
-  // Pagamento na página: chave do gateway (criptografada) e um produto com métodos (lista de enum).
+  // Pagamento na página: chave do gateway DA OFERTA (criptografada) e um produto com métodos (lista de enum).
   await prisma.paymentGateway.create({
-    data: { provider: "KYVO", apiKeyEnc: encryptSecret(KYVO_KEY), checkedAt: new Date(), checkStatus: "ok" },
+    data: {
+      offerId: fx.offerId,
+      provider: "KYVO",
+      apiKeyEnc: encryptSecret(KYVO_KEY),
+      checkedAt: new Date(),
+      checkStatus: "ok",
+    },
   });
   await prisma.offerLink.create({
     data: {
@@ -152,6 +159,55 @@ export async function createRichData(): Promise<RichData> {
           locale: "ES",
           thankYouPageId: fx.upsellId,
           accessUrl: "https://membros.exemplo.com/curso",
+        },
+      },
+    },
+  });
+  // Checkout do Offer Studio: chave da FlevoPay (criptografada) e um produto com a configuração em JSON.
+  await prisma.paymentGateway.create({
+    data: {
+      offerId: fx.offerId,
+      provider: "FLEVOPAY",
+      apiKeyEnc: encryptSecret("flevopay_sk_chaveDoBackup0123456789"),
+      checkedAt: new Date(),
+      checkStatus: "ok",
+    },
+  });
+  await prisma.offerLink.create({
+    data: {
+      offerId: fx.offerId,
+      key: "checkout-proprio",
+      label: "Checkout do Offer Studio",
+      url: "",
+      kind: "UPSELL",
+      target: "CHECKOUT",
+      position: 3,
+      checkout: {
+        create: {
+          provider: "FLEVOPAY",
+          name: "Bolo “de pote” — ç",
+          amountCents: 9_700,
+          currency: "BRL",
+          methods: ["PIX"],
+          locale: "PT",
+          thankYouPageId: fx.upsellId,
+          accessUrl: "https://membros.exemplo.com/bolo",
+          config: {
+            description: TRICKY_TEXT,
+            address: true,
+            shipping: [{ id: "frete001", name: "Correios", eta: "5 dias", priceCents: 1_990 }],
+            bumps: [
+              {
+                id: "bump0001",
+                title: "Apostila",
+                priceCents: 2_700,
+                compareAtCents: null,
+                imageKey: null,
+                accessUrl: "https://drive.exemplo.com/apostila",
+              },
+            ],
+            texts: { payButton: "Quero agora" },
+          },
         },
       },
     },
@@ -323,6 +379,9 @@ export async function createRichData(): Promise<RichData> {
 
   // Configurações (as deste Mac ficam de fora), estado local e passageiro.
   await prisma.appSetting.create({ data: { key: "preferencias", value: { tema: "escuro", lista: [1, 2, 3] } } });
+  // Moeda da oferta (nas configurações dela) e a última moeda escolhida na "Nova oferta".
+  await prisma.$executeRaw`update "Offer" set settings = settings || '{"currency":"MXN"}'::jsonb where id = ${fx.offerId}`;
+  await rememberOfferCurrency("EUR");
   await prisma.appSetting.create({
     data: { key: "backup", value: { folder: "documents", auto: false, hour: 5, keep: 3 } },
   });

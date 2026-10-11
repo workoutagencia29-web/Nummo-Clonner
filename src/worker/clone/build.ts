@@ -27,6 +27,7 @@ import { restoreDoctype } from "@/lib/doctype";
 import { PRESERVE_JS_META, stripEditorMarkers } from "@/lib/editor-html";
 import { env } from "@/lib/env";
 import { putContentAddressed, putFileContentAddressed, putObject } from "@/lib/storage";
+import { cleanClonedSvg } from "@/server/services/assets";
 import type { LogFn, VirtualSite } from "./capture";
 import { decodeText, fixMetaCharset } from "./charset";
 import { convertJsNavigation, detectCheckouts, markCheckouts } from "./checkouts";
@@ -228,13 +229,26 @@ class AssetStore {
         if (refKind === "media" || VIDEO_EXT.test(url)) return await this.video(url);
         const got = await this.fetchBytes(url, optional);
         if (!got) return null;
-        const ext = extensionFor(url, got.contentType);
-        const stored = await putContentAddressed(got.body, ext);
+        let ext = extensionFor(url, got.contentType);
+        let body = got.body;
+        let mime = got.contentType.split(";")[0] || "application/octet-stream";
+        // No ZIP o SVG vai para o domínio do usuário: sem os scripts do dono da página copiada.
+        // O que não é um SVG de verdade (outra raiz, ilegível) não vai como .svg — servido como
+        // SVG, rodaria os scripts dele; como imagem já não aparecia.
+        if (ext === "svg") {
+          const svg = cleanClonedSvg(got.body);
+          if (svg) body = svg;
+          else {
+            ext = "bin";
+            mime = "application/octet-stream";
+          }
+        }
+        const stored = await putContentAddressed(body, ext);
         this.record({
           key: stored.key,
           sha256: stored.sha256,
           kind: kindFor(ext, refKind),
-          mime: got.contentType.split(";")[0] || "application/octet-stream",
+          mime,
           bytes: stored.bytes,
           sourceUrl: url,
         });
@@ -1040,7 +1054,7 @@ export async function buildClone(opts: BuildOptions): Promise<CloneResult> {
   if (originRefs.length) {
     warnings.push({
       code: "PRESERVE_JS_ORIGIN",
-      message: `Na versão “Preservar JS”, os scripts da página ainda buscam ${originRefs.length} endereço(s) no site original (dados ou arquivos que não vieram na cópia). Se o site original mudar ou sair do ar, essa parte pode parar de funcionar.`,
+      message: `No modo “Com scripts”, os scripts da página ainda buscam ${originRefs.length} endereço(s) no site original (dados ou arquivos que não vieram na cópia). Se o site original mudar ou sair do ar, essa parte pode parar de funcionar.`,
       url: originRefs[0],
     });
   }
@@ -1070,7 +1084,7 @@ export async function buildClone(opts: BuildOptions): Promise<CloneResult> {
     warnings.push({
       code: "APP_PAGE",
       message:
-        "Esta página parece um quiz ou aplicativo montado por JavaScript. Recomendamos o modo “Preservar JS”, que mantém o funcionamento original.",
+        "Esta página parece um quiz ou aplicativo montado por JavaScript. Recomendamos o modo “Com scripts”, que mantém o funcionamento original.",
     });
   }
 

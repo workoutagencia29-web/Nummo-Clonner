@@ -3,6 +3,7 @@
 import { ShieldCheckIcon } from "lucide-react";
 import { useId, useState } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import {
@@ -26,6 +27,8 @@ import {
   CONSENT_THEME_LABEL,
   CONSENT_THEMES,
   type ConsentModeId,
+  type ConsentPresetLang,
+  consentPreset,
   consentTextFor,
   POLICY_NONE,
   type TrackingSettings,
@@ -52,13 +55,22 @@ const MODE_HELP: Record<ConsentModeId, string> = {
   OFF: "Nenhum aviso. Os pixels carregam direto, para todos (até para quem recusou quando a oferta pedia permissão).",
 };
 
-/** Consentimento LGPD: modo, textos, aparência e página da política, com prévia ao vivo. */
+const PRESET_BUTTONS: [ConsentPresetLang, string][] = [
+  ["es", "Usar textos em espanhol"],
+  ["en", "Usar textos em inglês"],
+];
+
+/**
+ * Consentimento LGPD: modo, textos (com os prontos em espanhol/inglês, que só
+ * preenchem o formulário), aparência e página da política, com prévia ao vivo.
+ */
 export function ConsentSection({
   offerId,
   consent,
   pages,
   pixelCount,
   forwarding,
+  languageHint = null,
 }: {
   offerId: string;
   consent: Consent;
@@ -67,6 +79,11 @@ export function ConsentSection({
   pixelCount: number;
   /** Repasse salvo: decide quem chega de um anúncio e vê o aviso sem pixels (optInArrivalClause). */
   forwarding: TrackingSettings["forwarding"];
+  /**
+   * Oferta para fora do Brasil (consentLanguageHint): os botões de textos prontos
+   * ficam em destaque ("both" = os dois). null = discretos.
+   */
+  languageHint?: ConsentPresetLang | "both" | null;
 }) {
   const { draft, patch, dirty, reset, commit } = useDraft(consent);
   const [errors, setErrors] = useState<Partial<Record<ConsentField, string>>>({});
@@ -90,6 +107,20 @@ export function ConsentSection({
   function change(changes: Partial<Consent>, field?: ConsentField) {
     patch(changes);
     if (field) setErrors((e) => ({ ...e, [field]: undefined, form: undefined }));
+  }
+
+  /** Preenche o rascunho com os textos prontos do idioma (nada é salvo: o SaveBar decide). */
+  function applyPreset(lang: ConsentPresetLang) {
+    patch(consentPreset(lang, draft.mode));
+    setErrors((e) => ({
+      ...e,
+      text: undefined,
+      acceptLabel: undefined,
+      rejectLabel: undefined,
+      noticeLabel: undefined,
+      policyLabel: undefined,
+      form: undefined,
+    }));
   }
 
   function submit(e: React.FormEvent) {
@@ -191,6 +222,34 @@ export function ConsentSection({
             <div className="@container">
               <div className="grid gap-6 @3xl:grid-cols-[minmax(0,1fr)_minmax(0,22rem)]">
                 <div className="flex flex-col gap-5">
+                  <div
+                    data-testid="consent-presets"
+                    className={cn(
+                      "flex flex-col gap-2 rounded-lg border p-3",
+                      languageHint ? "border-primary/40 bg-primary/5" : "border-dashed",
+                    )}
+                  >
+                    <p className="text-sm text-muted-foreground">
+                      {languageHint
+                        ? "Esta oferta é para fora do Brasil: o aviso precisa estar no idioma de quem visita. "
+                        : "Visitantes de fora do Brasil? "}
+                      Os botões preenchem os textos abaixo; confira e clique em “Salvar aviso”.
+                    </p>
+                    <div className="flex flex-wrap gap-2">
+                      {PRESET_BUTTONS.map(([lang, label]) => (
+                        <Button
+                          key={lang}
+                          type="button"
+                          size="sm"
+                          variant={languageHint === lang || languageHint === "both" ? "default" : "outline"}
+                          onClick={() => applyPreset(lang)}
+                        >
+                          {label}
+                        </Button>
+                      ))}
+                    </div>
+                  </div>
+
                   <Field data-invalid={Boolean(errors.text)}>
                     <div className="flex items-center justify-between gap-2">
                       <FieldLabel htmlFor={`${ids}-text`}>Texto do aviso</FieldLabel>

@@ -39,6 +39,7 @@ import {
   type StorageIndexLine,
   shaFromStorageKey,
   type TableEntry,
+  unreadableFilesWarning,
 } from "./format";
 import { openBackup } from "./reader";
 import { resolveStorageFiles, StorageRefs } from "./refs";
@@ -508,7 +509,7 @@ export async function createBackupArchive(opts: CreateBackupOptions): Promise<Cr
     report(30, BACKUP_STEP.files, true);
 
     // Arquivos usados pelas ofertas.
-    const { files, missing } = await guarded(resolveStorageFiles(refs, storageRoot));
+    const { files, missing, unreadable } = await guarded(resolveStorageFiles(refs, storageRoot));
     poke();
     const storageBytes = files.reduce((sum, f) => sum + f.bytes, 0);
     const free = await guarded((opts.freeBytes ?? freeBytesOf)(folder));
@@ -529,6 +530,8 @@ export async function createBackupArchive(opts: CreateBackupOptions): Promise<Cr
     const lost: string[] = [];
     /** Arquivos deste Mac que não conferem com o próprio hash (estragados no disco). */
     const corrupt: string[] = [];
+    /** Arquivos que existem mas não abriram (sem permissão): ficam de fora, com aviso. */
+    const denied: string[] = [];
     for (const file of files) {
       zip.addReadStreamLazy(
         `${STORAGE_DIR}${file.key}`,
@@ -561,9 +564,17 @@ export async function createBackupArchive(opts: CreateBackupOptions): Promise<Cr
             cb(null, hasher);
           });
           source.on("error", (err) => {
+            const code = (err as NodeJS.ErrnoException).code;
             // Sumiu do disco depois de listado (limpeza automática): entra vazio e fora do índice.
-            if (!started && (err as NodeJS.ErrnoException).code === "ENOENT") {
+            if (!started && code === "ENOENT") {
               lost.push(file.key);
+              cb(null, Readable.from([], { objectMode: false }));
+              return;
+            }
+            // Sem permissão para ler: o mesmo (o backup não falha por um arquivo), com aviso próprio.
+            if (!started && (code === "EACCES" || code === "EPERM")) {
+              console.warn(`[backup] arquivo sem permissão de leitura: ${file.key}`);
+              denied.push(file.key);
               cb(null, Readable.from([], { objectMode: false }));
               return;
             }
@@ -600,6 +611,10 @@ export async function createBackupArchive(opts: CreateBackupOptions): Promise<Cr
         );
       }
       if (corrupt.length) warnings.push(corruptFilesWarning(corrupt.length));
+      const unreadableFiles = unreadable.files.length + denied.length;
+      if (unreadableFiles || unreadable.folders.length) {
+        warnings.push(unreadableFilesWarning(unreadableFiles, unreadable.folders.length, unreadable.denied));
+      }
       const value: BackupManifest = {
         app: BACKUP_APP,
         format: BACKUP_FORMAT,
@@ -614,7 +629,7 @@ export async function createBackupArchive(opts: CreateBackupOptions): Promise<Cr
           files: index.length,
           bytes: index.reduce((sum, l) => sum + l.bytes, 0),
           index: indexInfo,
-          missing: [...missing, ...lost, ...corrupt],
+          missing: [...missing, ...lost, ...corrupt, ...denied, ...unreadable.files, ...unreadable.folders],
         },
         secrets: { file: SECRETS_ENTRY, sha256: createHash("sha256").update(secrets).digest("hex") },
         summary: {
@@ -637,7 +652,7 @@ export async function createBackupArchive(opts: CreateBackupOptions): Promise<Cr
     // Confere o arquivo gravado antes de dar o nome final.
     const check = await openBackup(tmp, { stallMs: stallMs > 0 ? stallMs : undefined });
     check.close();
-    const expected = tables.length + index.length + lost.length + corrupt.length + 3;
+    const expected = tables.length + index.length + lost.length + corrupt.length + denied.length + 3;
     if (check.entries.size !== expected)
       throw new Error(`ZIP com ${check.entries.size} entradas, esperado ${expected}`);
 

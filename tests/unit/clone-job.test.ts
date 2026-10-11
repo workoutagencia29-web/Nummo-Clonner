@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { prisma } from "@/lib/db";
 import { injectRuntime } from "@/lib/runtime-bundle";
 import { getObject, mimeFromKey } from "@/lib/storage";
+import { sniffImageFormat } from "@/server/services/assets";
 import { saveClone } from "@/server/services/clone";
 import { runCloneJob } from "@/worker/clone/job";
 import type { CloneModeValue, CloneResult, Device } from "@/worker/clone/types";
@@ -117,6 +118,39 @@ async function renderOffline(html: string) {
   return { external, broken, fontsLoaded, text, hiddenRoots };
 }
 
+/** Print da primeira tela (computador) da cópia aberta offline, depois de tudo carregar. */
+async function firstScreen(html: string): Promise<Buffer> {
+  const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+  try {
+    await page.route("**/*", async (route) => {
+      const url = new URL(route.request().url());
+      if (url.protocol === "data:" || url.protocol === "blob:") return route.continue();
+      if (url.host !== "preview.test") return route.abort();
+      if (url.pathname === "/") return route.fulfill({ body: html, contentType: "text/html; charset=utf-8" });
+      const file = url.pathname.slice("/os-assets/".length);
+      const key = `a/${file.slice(0, 2)}/${file}`;
+      try {
+        return route.fulfill({ body: await getObject(key), contentType: mimeFromKey(key) });
+      } catch {
+        return route.fulfill({ status: 404, body: "" });
+      }
+    });
+    await page.goto("http://preview.test/", { waitUntil: "networkidle" });
+    await page.evaluate(async () => {
+      await document.fonts.ready;
+      await Promise.all(
+        Array.from(document.images)
+          .filter((img) => img.getBoundingClientRect().top < window.innerHeight)
+          .map((img) => img.decode().catch(() => undefined)),
+      );
+    });
+    await page.waitForTimeout(500);
+    return await page.screenshot({ animations: "disabled" });
+  } finally {
+    await page.close();
+  }
+}
+
 describe("clonagem de ponta a ponta (sites de teste offline)", () => {
   it("vendas: baixa tudo, acha os checkouts e o funil, e a cópia abre sem o site original", async () => {
     const exp = await expected<{ checkouts: { url: string; ocorrencias: number }[] }>("vendas");
@@ -151,6 +185,13 @@ describe("clonagem de ponta a ponta (sites de teste offline)", () => {
     expect(view.broken).toEqual([]);
     expect(view.fontsLoaded).toBeGreaterThan(0);
     expect(srv.requests).toEqual([]);
+
+    // Os bônus vinham do plugin de lazy load: só carregam perto de aparecer, como no
+    // site original. A primeira tela fica igual à da cópia sem esse atributo.
+    const lazyImgs = html.match(/<img\b[^>]*\bloading="lazy"[^>]*>/g) ?? [];
+    expect(lazyImgs.length).toBeGreaterThanOrEqual(3);
+    const withoutLazy = html.replace(/<img\b[^>]*>/g, (tag) => tag.replace(/\sloading="lazy"/, ""));
+    expect(await firstScreen(html)).toEqual(await firstScreen(withoutLazy));
   }, 180_000);
 
   it("rastreadores: remove pixels, tags e chats e mantém os scripts legítimos", async () => {
@@ -233,6 +274,49 @@ describe("clonagem de ponta a ponta (sites de teste offline)", () => {
     expect(view.text).toContain(exp.textoNoShadow);
     // CSS-in-JS serializado: sem ele, .sc-raiz ficaria escondido.
     expect(view.hiddenRoots).toBe(0);
+  }, 180_000);
+
+  it("SVG com script: a cópia guarda o arquivo sem nada que rode código e desenha igual", async () => {
+    const job = await cloneUrl(srv.url("svg"), ["desktop"]);
+    expect(job.status, job.errorMessage ?? "").toBe("REVIEW");
+    const r = resultOf(job);
+    const assetOf = (name: string) => r.assets.find((a) => new URL(a.sourceUrl).pathname === name);
+    const selo = assetOf("/img/selo.svg");
+    const icone = assetOf("/img/icone.svg");
+    if (!selo || !icone) throw new Error("SVGs não baixados");
+
+    // O selo (usado como <img> e como fundo no CSS) foi limpo uma vez só.
+    const stored = await getObject(selo.key);
+    const text = stored.toString("utf8");
+    expect(text).not.toMatch(/<script|\son[a-z]+=|javascript:|<set\b/i);
+    expect(text).toContain("<foreignObject");
+    expect(sniffImageFormat(stored)).toBe("svg");
+    expect(r.assets.filter((a) => new URL(a.sourceUrl).pathname === "/img/selo.svg")).toHaveLength(1);
+    // O ícone comum fica byte a byte igual.
+    const original = await readFile(path.join(SITES_DIR, "svg", "img", "icone.svg"));
+    expect((await getObject(icone.key)).equals(original)).toBe(true);
+    // ".svg" que não é SVG (raiz <html> com script): não é guardado como .svg — servido como
+    // SVG no domínio do usuário, o script rodaria; como imagem ele já não aparecia.
+    const falso = assetOf("/img/falso.svg");
+    expect(falso?.key).toMatch(/\.bin$/);
+    expect(falso?.mime).toBe("application/octet-stream");
+
+    // Como imagem, o selo limpo desenha igual ao original.
+    const page = await browser.newPage({ viewport: { width: 200, height: 100 } });
+    const shot = async (data: Buffer) => {
+      await page.setContent(`<img src="data:image/svg+xml;base64,${data.toString("base64")}" width="160" height="80">`);
+      await page.locator("img").evaluate((img: HTMLImageElement) => img.decode());
+      return page.locator("img").screenshot();
+    };
+    const before = await shot(await readFile(path.join(SITES_DIR, "svg", "img", "selo.svg")));
+    const after = await shot(stored);
+    await page.close();
+    expect(after.equals(before)).toBe(true);
+
+    const html = await outputHtml(r, "desktop", "EDITABLE");
+    expect(html).toContain(`${selo.sha256}.svg`);
+    const view = await renderOffline(html);
+    expect(view.broken).toEqual([]);
   }, 180_000);
 
   it("página protegida: falha com mensagem clara (sem tentar contornar)", async () => {

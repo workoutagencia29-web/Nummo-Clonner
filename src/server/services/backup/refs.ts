@@ -11,6 +11,9 @@
  *
  * Ficam de fora o que dá para gerar de novo ou não tem mais uso: ZIPs do
  * "Baixar ZIP" (exports/), envios de clonagens (uploads/) e temporários.
+ *
+ * Pasta ou arquivo que existe mas não dá para ler (sem permissão, erro do
+ * disco) não some calado: entra em `unreadable` e o backup avisa.
  */
 import { createReadStream } from "node:fs";
 import { readdir, readFile, stat } from "node:fs/promises";
@@ -52,21 +55,52 @@ export class StorageRefs {
   }
 }
 
-async function listDir(dir: string) {
+/** O que existe no disco mas não pôde ser lido (fica de fora do backup, com aviso). */
+export interface UnreadableStorage {
+  /** Arquivos (chaves do storage). */
+  files: string[];
+  /** Pastas (chaves terminadas em "/"), cujo conteúdo ficou de fora. */
+  folders: string[];
+  /** Todos por falta de permissão (o aviso diz isso). */
+  denied: boolean;
+}
+
+/** Pasta ou arquivo que não existe (ou sumiu): não é erro de leitura. */
+function isGone(err: unknown) {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  return code === "ENOENT" || code === "ENOTDIR";
+}
+
+function isDenied(err: unknown) {
+  const code = (err as NodeJS.ErrnoException | null)?.code;
+  return code === "EACCES" || code === "EPERM";
+}
+
+function newUnreadable(): UnreadableStorage {
+  return { files: [], folders: [], denied: true };
+}
+
+/** Conteúdo de uma pasta; pasta que existe e não abre fica registrada em `unreadable`. */
+async function listDir(dir: string, key: string, unreadable: UnreadableStorage) {
   try {
     return await readdir(dir, { withFileTypes: true });
-  } catch {
+  } catch (err) {
+    if (!isGone(err)) {
+      console.warn(`[backup] pasta que não pôde ser lida (${(err as NodeJS.ErrnoException).code ?? "erro"}): ${key}`);
+      unreadable.folders.push(key);
+      if (!isDenied(err)) unreadable.denied = false;
+    }
     return [];
   }
 }
 
 /** Índice dos arquivos endereçados por hash: sha256 → nomes ("<sha>.png", "<sha>.webp"…). */
-async function contentIndex(storageRoot: string): Promise<Map<string, string[]>> {
+async function contentIndex(storageRoot: string, unreadable: UnreadableStorage): Promise<Map<string, string[]>> {
   const index = new Map<string, string[]>();
   const root = path.join(storageRoot, "a");
-  for (const prefix of await listDir(root)) {
+  for (const prefix of await listDir(root, "a/", unreadable)) {
     if (!prefix.isDirectory() || !/^[0-9a-f]{2}$/.test(prefix.name)) continue;
-    for (const file of await listDir(path.join(root, prefix.name))) {
+    for (const file of await listDir(path.join(root, prefix.name), `a/${prefix.name}/`, unreadable)) {
       const m = CONTENT_FILE_RE.exec(file.name);
       if (!file.isFile() || !m || m[1].slice(0, 2) !== prefix.name) continue;
       const list = index.get(m[1]) ?? [];
@@ -98,9 +132,33 @@ async function scanFile(full: string, refs: StorageRefs, gz = false) {
 export async function resolveStorageFiles(
   refs: StorageRefs,
   storageRoot: string,
-): Promise<{ files: StorageFile[]; missing: string[] }> {
+): Promise<{ files: StorageFile[]; missing: string[]; unreadable: UnreadableStorage }> {
   const files = new Map<string, StorageFile>();
   const missing: string[] = [];
+  const unreadable = newUnreadable();
+  /**
+   * Lê um arquivo atrás de outras referências. Sem permissão para ler: sai da
+   * lista (o backup também não conseguiria copiar) e entra nos ilegíveis.
+   * Devolve false nesse caso.
+   */
+  const scan = async (file: StorageFile, into: StorageRefs, gz = false): Promise<boolean> => {
+    try {
+      await scanFile(file.full, into, gz);
+      return true;
+    } catch (err) {
+      // Sumiu depois de listado: a cópia do backup registra como "sumiu durante o backup".
+      if (isGone(err)) return true;
+      if (isDenied(err)) {
+        console.warn(`[backup] arquivo sem permissão de leitura: ${file.key}`);
+        files.delete(file.key);
+        if (!unreadable.files.includes(file.key)) unreadable.files.push(file.key);
+        return false;
+      }
+      // Outro erro (disco): a cópia tenta ler de novo e, se falhar, o backup avisa.
+      console.warn(`[backup] não foi possível procurar referências em ${file.key}:`, err);
+      return true;
+    }
+  };
   const add = async (key: string): Promise<StorageFile | null> => {
     const existing = files.get(key);
     if (existing) return existing;
@@ -119,21 +177,21 @@ export async function resolveStorageFiles(
       missing.push(key);
       continue;
     }
-    await scanFile(file.full, refs, true).catch(() => undefined);
+    await scan(file, refs, true);
   }
 
   // Saídas de clonagens em revisão (HTML das duas saídas e prints do original).
   for (const jobId of [...refs.cloneJobs].sort()) {
     const dir = path.join(storageRoot, "clones", jobId);
-    for (const entry of await listDir(dir)) {
+    for (const entry of await listDir(dir, `clones/${jobId}/`, unreadable)) {
       if (!entry.isFile() || entry.name.endsWith(".tmp")) continue;
       const file = await add(`clones/${jobId}/${entry.name}`);
-      if (file && /\.html?$/i.test(entry.name)) await scanFile(file.full, refs).catch(() => undefined);
+      if (file && /\.html?$/i.test(entry.name)) await scan(file, refs);
     }
   }
 
   // Arquivos por hash, seguindo as referências dentro dos arquivos de texto.
-  const index = await contentIndex(storageRoot);
+  const index = await contentIndex(storageRoot, unreadable);
   const queue = [...refs.shas];
   const seen = new Set<string>();
   while (queue.length) {
@@ -146,7 +204,7 @@ export async function resolveStorageFiles(
       const ext = name.slice(name.lastIndexOf(".") + 1);
       if (!TEXT_EXT.has(ext) || file.bytes > MAX_SCAN_BYTES) continue;
       const inner = new StorageRefs();
-      await scanFile(file.full, inner).catch(() => undefined);
+      if (!(await scan(file, inner))) continue;
       for (const s of inner.shas) {
         refs.shas.add(s);
         if (!seen.has(s)) queue.push(s);
@@ -154,5 +212,9 @@ export async function resolveStorageFiles(
     }
   }
 
-  return { files: [...files.values()].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)), missing };
+  return {
+    files: [...files.values()].sort((a, b) => (a.key < b.key ? -1 : a.key > b.key ? 1 : 0)),
+    missing,
+    unreadable,
+  };
 }

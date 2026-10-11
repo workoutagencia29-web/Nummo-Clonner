@@ -20,7 +20,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { toast } from "sonner";
+import { type ExternalToast, toast } from "sonner";
+import { offerLinkHref } from "@/components/offers/offer-link-href";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -30,6 +31,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Spinner } from "@/components/ui/spinner";
 import { Switch } from "@/components/ui/switch";
 import { useAction } from "@/hooks/use-action";
+import { CHECKOUT_UNSAVED_NOTE } from "@/lib/checkout/rules";
 import {
   applyLinkOpInEditor,
   collectLinkGroups,
@@ -47,7 +49,9 @@ import { createOfferLinkAction, updateOfferLinkAction } from "@/server/actions/o
 import type { LinkClassification } from "@/server/services/bulk-replace";
 import type { EditorPayload } from "@/server/services/documents";
 import type { EditorDialogProps } from "../editor-app";
-import { PAYMENT_LINK_BADGE } from "../grapes/components";
+import { CHECKOUT_LINK_BADGE, PAYMENT_LINK_BADGE } from "../grapes/components";
+import { type NewLinkTarget, suggestedTarget } from "../grapes/new-link";
+import { CHECKOUT_KINDS, OWN_CHECKOUT_TODO, TARGET_LABEL } from "./new-link-dialog";
 
 type OfferLink = EditorPayload["links"][number];
 type Kind = "CHECKOUT" | "UPSELL" | "DOWNSELL" | "WHATSAPP" | "OTHER";
@@ -186,7 +190,7 @@ export function LinksDialog({ editor, payload, open, onOpenChange, saveNow, navi
   }
 
   /** Aplica na página aberta (dá para desfazer) e, se pedido, nas outras páginas. */
-  async function apply(group: LinkGroup, op: LinkOp, message: (count: number) => string) {
+  async function apply(group: LinkGroup, op: LinkOp, message: (count: number) => string, notice?: ExternalToast) {
     setBusy(group.id);
     // Botões sem link valem só para esta página: nas outras (upsell, downsell…)
     // o checkout costuma ser outro.
@@ -215,7 +219,7 @@ export function LinksDialog({ editor, payload, open, onOpenChange, saveNow, navi
           ? ` Também em ${plural(otherPages, "outra página", "outras páginas")}.`
           : " Nas outras páginas não havia esse destino."
         : "";
-      toast.success(`${message(count)}${extra}`);
+      toast.success(`${message(count)}${extra}`, notice);
       await settle();
       await saveNow();
       return true;
@@ -253,18 +257,40 @@ export function LinksDialog({ editor, payload, open, onOpenChange, saveNow, navi
     );
   }
 
-  async function createAndBind(group: LinkGroup, label: string, kind: Kind, url?: string) {
+  async function createAndBind(group: LinkGroup, label: string, kind: Kind, url?: string, target?: NewLinkTarget) {
+    const ownCheckout = target === "CHECKOUT" && CHECKOUT_KINDS.includes(kind);
     setBusy(group.id);
-    const res = await createLink.run({
-      offerId: payload.offer.id,
-      label: label.trim(),
-      url: completeUrl(url ?? urlOf(group)),
-      kind,
-    });
+    const res = await createLink.run(
+      ownCheckout
+        ? { offerId: payload.offer.id, label: label.trim(), url: "", kind, target: "CHECKOUT" as const }
+        : { offerId: payload.offer.id, label: label.trim(), url: completeUrl(url ?? urlOf(group)), kind },
+    );
     setBusy(null);
     if (!res.ok) return;
-    updateLinks([...links, res.data]);
-    await bind(group, res.data.key, res.data.label);
+    if (!ownCheckout) {
+      updateLinks([...links, res.data]);
+      await bind(group, res.data.key, res.data.label);
+      return;
+    }
+    // Como o getEditorPayload: link "Checkout do Offer Studio" sem produto salvo = checkout "" (sem endereço).
+    updateLinks([...links, { ...res.data, url: "", checkout: "" }]);
+    const href = offerLinkHref(payload.offer.id, res.data.id);
+    await apply(
+      group,
+      { type: "bind", key: res.data.key },
+      (n) =>
+        `${plural(n, "elemento ligado", "elementos ligados")} a “${res.data.label}”. Agora monte o checkout dele em “Links e checkouts”.`,
+      {
+        description: OWN_CHECKOUT_TODO,
+        action: {
+          label: "Montar o checkout",
+          onClick: () => {
+            onOpenChange(false);
+            navigate(href);
+          },
+        },
+      },
+    );
   }
 
   async function editLinkUrl(group: LinkGroup, raw: string) {
@@ -352,7 +378,7 @@ export function LinksDialog({ editor, payload, open, onOpenChange, saveNow, navi
                 onBind={(key) => void bind(group, key)}
                 onSetUrl={(url) => setUrl(group, url)}
                 onUnbind={() => unbind(group)}
-                onCreate={(label, kind, url) => void createAndBind(group, label, kind, url)}
+                onCreate={(label, kind, url, target) => void createAndBind(group, label, kind, url, target)}
                 onEditLinkUrl={(url) => void editLinkUrl(group, url)}
               />
             ))}
@@ -379,7 +405,7 @@ interface GroupCardProps {
   onBind: (key: string) => void;
   onSetUrl: (url: string) => void;
   onUnbind: () => void;
-  onCreate: (label: string, kind: Kind, url?: string) => void;
+  onCreate: (label: string, kind: Kind, url?: string, target?: NewLinkTarget) => void;
   onEditLinkUrl: (url: string) => void;
 }
 
@@ -471,6 +497,9 @@ function GroupCard(props: GroupCardProps) {
             <p className="truncate text-sm font-medium">{groupTitle(props)}</p>
             {isLink && link && <Badge variant="secondary">Link da oferta</Badge>}
             {isLink && link?.payment && <Badge variant="outline">{PAYMENT_LINK_BADGE}</Badge>}
+            {isLink && link && !link.payment && link.checkout != null && (
+              <Badge variant="outline">{CHECKOUT_LINK_BADGE}</Badge>
+            )}
             {isLink && link && platform && <Badge variant="outline">{platform}</Badge>}
             {!isLink && classification?.kind === "checkout" && <Badge variant="outline">Sem link da oferta</Badge>}
             <Badge variant="outline" className="text-muted-foreground">
@@ -482,6 +511,17 @@ function GroupCard(props: GroupCardProps) {
               <CreditCardIcon className="size-3 shrink-0" aria-hidden="true" />
               <span className="truncate">Abre a janela de pagamento: {link.payment}</span>
             </p>
+          ) : isLink && link && link.checkout != null ? (
+            link.checkout ? (
+              <p className="flex min-w-0 items-center gap-1 text-xs text-muted-foreground">
+                <CreditCardIcon className="size-3 shrink-0" aria-hidden="true" />
+                <span className="truncate">
+                  {CHECKOUT_LINK_BADGE}: {link.checkout}
+                </span>
+              </p>
+            ) : (
+              <p className="text-xs text-warning">{CHECKOUT_UNSAVED_NOTE}</p>
+            )
           ) : effectiveUrl ? (
             <p className="flex min-w-0 items-center gap-1 font-mono text-xs text-muted-foreground" title={effectiveUrl}>
               <span className="truncate">{effectiveUrl}</span>
@@ -529,7 +569,7 @@ function GroupCard(props: GroupCardProps) {
       <div className="mt-2 flex flex-wrap gap-1.5 pl-11">
         {isLink ? (
           <>
-            {link && !link.payment && (
+            {link && !link.payment && link.checkout == null && (
               <ActionButton active={editing === "link-url"} onClick={() => setEditing("link-url")} disabled={disabled}>
                 <PencilIcon />
                 Editar endereço do link
@@ -651,6 +691,11 @@ function GroupCard(props: GroupCardProps) {
           }
           url={group.url}
           askUrl={unlinked}
+          // "Botão de checkout" solto sem checkout do Offer Studio na oferta: o
+          // link novo já começa nesse destino (como no "＋ Criar link da oferta…").
+          initialTarget={
+            unlinked && group.items.some((i) => suggestedTarget(i.component) === "CHECKOUT") ? "CHECKOUT" : "URL"
+          }
           busy={busy}
           onCancel={() => setEditing(null)}
           onSubmit={props.onCreate}
@@ -740,7 +785,11 @@ function BindForm({
             <SelectItem key={l.key} value={l.key}>
               <span className="font-medium">{l.label}</span>
               <span className="max-w-56 truncate text-xs text-muted-foreground">
-                {l.payment ? PAYMENT_LINK_BADGE : (displayUrl(l.url) ?? "sem endereço")}
+                {l.payment
+                  ? PAYMENT_LINK_BADGE
+                  : l.checkout != null
+                    ? CHECKOUT_LINK_BADGE
+                    : (displayUrl(l.url) ?? "sem endereço")}
               </span>
             </SelectItem>
           ))}
@@ -830,6 +879,7 @@ function CreateForm({
   initialKind,
   url,
   askUrl,
+  initialTarget = "URL",
   busy,
   onSubmit,
   onCancel,
@@ -837,26 +887,42 @@ function CreateForm({
   initialLabel: string;
   initialKind: Kind;
   url: string;
-  /** Botões sem endereço: o endereço do link novo é digitado aqui (pode ficar em branco). */
+  /**
+   * Botões sem endereço: o endereço do link novo é digitado aqui (pode ficar em
+   * branco) ou, nos tipos de compra, o destino é o "Checkout do Offer Studio".
+   */
   askUrl?: boolean;
+  /** Destino inicial (só com askUrl). */
+  initialTarget?: NewLinkTarget;
   busy: boolean;
-  onSubmit: (label: string, kind: Kind, url?: string) => void;
+  onSubmit: (label: string, kind: Kind, url?: string, target?: NewLinkTarget) => void;
   onCancel: () => void;
 }) {
   const [label, setLabel] = useState(initialLabel);
   const [kind, setKind] = useState<Kind>(initialKind);
   const [newUrl, setNewUrl] = useState("");
+  const [target, setTarget] = useState<NewLinkTarget>(initialTarget);
+  const chooseTarget = !!askUrl && CHECKOUT_KINDS.includes(kind);
+  const ownCheckout = chooseTarget && target === "CHECKOUT";
   return (
     <InlineForm
       busy={busy}
       onCancel={onCancel}
-      onSubmit={() => (askUrl ? onSubmit(label, kind, newUrl) : onSubmit(label, kind))}
+      onSubmit={() =>
+        ownCheckout
+          ? onSubmit(label, kind, undefined, "CHECKOUT")
+          : askUrl
+            ? onSubmit(label, kind, newUrl)
+            : onSubmit(label, kind)
+      }
       submitLabel="Criar e ligar"
       canSubmit={!!label.trim()}
       hint={
-        askUrl
-          ? "Estes botões já ficam ligados ao link novo. O endereço pode ficar em branco e ser preenchido depois."
-          : `O link da oferta nasce com o endereço ${url} e estes elementos já ficam ligados a ele.`
+        ownCheckout
+          ? "Estes botões já ficam ligados ao link novo. Depois, monte o checkout dele em “Links e checkouts” da oferta: produto, valor, dados pedidos, frete, order bumps e aparência."
+          : askUrl
+            ? "Estes botões já ficam ligados ao link novo. O endereço pode ficar em branco e ser preenchido depois."
+            : `O link da oferta nasce com o endereço ${url} e estes elementos já ficam ligados a ele.`
       }
     >
       <Input
@@ -880,7 +946,21 @@ function CreateForm({
           ))}
         </SelectContent>
       </Select>
-      {askUrl && (
+      {chooseTarget && (
+        <Select value={target} onValueChange={(v) => setTarget(v as NewLinkTarget)}>
+          <SelectTrigger size="sm" className="w-full" aria-label="Destino">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {(Object.keys(TARGET_LABEL) as NewLinkTarget[]).map((t) => (
+              <SelectItem key={t} value={t}>
+                {TARGET_LABEL[t]}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      )}
+      {askUrl && !ownCheckout && (
         <Input
           value={newUrl}
           onChange={(e) => setNewUrl(e.target.value)}

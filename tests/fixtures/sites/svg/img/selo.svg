@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="160" height="80" viewBox="0 0 160 80" onload="alert('svg')">
+  <style>.fundo { fill: #0a7d4f; } .texto { font: bold 20px sans-serif; fill: #fff; }</style>
+  <script>alert("script do dono da página")</script>
+  <rect class="fundo" width="160" height="80" rx="12"/>
+  <a xlink:href="javascript:alert('link')"><text class="texto" x="20" y="48">GARANTIA</text></a>
+  <foreignObject x="0" y="60" width="160" height="20"><div xmlns="http://www.w3.org/1999/xhtml" onclick="alert('html')" style="font-size:10px;color:#fff">7 dias</div></foreignObject>
+  <a href="#"><set attributeName="href" to="javascript:alert('set')"/></a>
+</svg>

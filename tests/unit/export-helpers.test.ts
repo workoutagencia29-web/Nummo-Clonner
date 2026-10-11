@@ -839,6 +839,11 @@ describe("LEIA-ME e nome do arquivo", () => {
       "oferta-de-verao-2026-2026-09-29-2350.zip",
     );
     expect(exportFileName("???", new Date(2026, 0, 2))).toBe("oferta-2026-01-02-0000.zip");
-    expect(ExportOptionsSchema.parse({})).toEqual({ splitter: true, serverEvents: false, optimizeHtml: true });
+    expect(ExportOptionsSchema.parse({})).toEqual({
+      splitter: true,
+      serverEvents: false,
+      optimizeHtml: true,
+      lighterImages: true,
+    });
   });
 });

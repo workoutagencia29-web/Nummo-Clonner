@@ -6,17 +6,25 @@
  * página, data-os-pay), a roleta de desconto leva o mapa de prêmios (e marca
  * os botões de checkout), os produtos de pagamento vão no #os-pagamento, o SEO (título, descrição,
  * favicon, imagem de compartilhamento, noindex, idioma) entra no <head>, os
+ * textos do script no idioma da página (#os-textos: espanhol/inglês e telefone
+ * de fora do Brasil, src/lib/page-texts.ts) entram no <head>, os
  * códigos livres (da oferta e da página: head / início e fim do body) entram,
- * o script do Offer Studio vai antes do </body> e, com rastreamento, a
- * configuração e o script de pixels vão para o começo do <head>.
+ * o script do Offer Studio vai antes do </body> (e, nas páginas de produto, o
+ * da galeria e da barra de compra) e, com rastreamento, a configuração e o
+ * script de pixels vão para o começo do <head>.
  */
+import { withCheckoutVersion } from "@/lib/checkout/contract";
+import { afterLeadingDoctype } from "@/lib/doctype";
+import { scriptString } from "@/lib/export/head";
 import { INTERNAL_LINK_PREFIX } from "@/lib/internal-links";
 import { applyOfferLinks, type OfferLinkValue } from "@/lib/offer-links";
 import { type Company, fillCompanyPlaceholders } from "@/lib/offer-settings";
 import { injectPageCode, PAGE_CODE_FIELDS, type PageCustomCode, unclosedCodePart } from "@/lib/page-code";
+import { htmlLang, PAGE_TEXTS_ID, pageTexts } from "@/lib/page-texts";
 import { injectOrderStrip, injectPaymentConfig, type PaymentRender } from "@/lib/payments/render";
-import { injectRuntime } from "@/lib/runtime-bundle";
+import { injectProductScript, injectRuntime } from "@/lib/runtime-bundle";
 import { applySeo, type SeoRender } from "@/lib/seo-render";
+import type { StoreCurrency } from "@/lib/store";
 import { resolveCodeCategoryFull } from "@/lib/tracking/code-trackers-server";
 import { gateCode, injectTracking } from "@/lib/tracking/inject";
 import type { TrackingRuntimeConfig } from "@/lib/tracking/runtime-config";
@@ -46,6 +54,13 @@ export interface RenderOptions {
   /** Tag do script do Offer Studio (externo na prévia, embutido no ZIP). */
   runtimeTag: string;
   /**
+   * Tag do script da página do produto (galeria, barra de compra do celular,
+   * "Voltar para a loja"): prévia PRODUCT_SCRIPT_TAG, ZIP
+   * assets/os-produto-<hash>.js; sem ela, embutido. Só entra nas páginas que
+   * têm esses blocos (injectProductScript).
+   */
+  productScriptTag?: string | null;
+  /**
    * Códigos livres da página (Page.customCode, ver parsePageCode; `category` via
    * explicitPageCodeCategory: null = automática, ver resolveCodeCategoryFull). Opcional.
    */
@@ -62,6 +77,13 @@ export interface RenderOptions {
   company?: Company | null;
   /** SEO da página (effectiveSeo + idioma, ver seoRenderFrom). Campos vazios mantêm o da página. */
   seo?: SeoRender | null;
+  /**
+   * Moeda da oferta (Offer.settings.currency). Fora do real, o formulário de
+   * captura aceita telefone de outro país e o documento da empresa reconhece o
+   * NIF de 9 dígitos (Portugal). Sem ela: como em real (textos e telefone só
+   * pelo idioma escolhido em "Idioma das páginas", ver injectPageTexts).
+   */
+  currency?: StoreCurrency | null;
   /**
    * Roleta de desconto da oferta (wheelRenderData): mapa de prêmios e botões de
    * checkout marcados, para a página de vendas usar o prêmio ganho. A
@@ -125,19 +147,70 @@ function gatesCode(tracking: TrackingRenderOptions | null): boolean {
   return tracking.config.mode !== "live" || tracking.config.consent.mode === "OPT_IN";
 }
 
+/**
+ * Embute o JSON #os-textos no fim do <head> (página em espanhol/inglês ou com
+ * telefone de fora do Brasil, ver pageTexts em src/lib/page-texts.ts), lido
+ * pelo script das páginas (src/runtime/widgets/texts.ts). Idempotente; sem
+ * nada a embutir (português de oferta em real), devolve o HTML como veio.
+ *
+ * Qual idioma vale: fora do real, o <html lang> final da página; em real (ou
+ * sem moeda), só o escolhido em "Idioma das páginas" (`chosenLang`). Numa
+ * oferta em real, o lang que veio da página clonada (sites feitos no Lovable,
+ * no Framer… trazem lang="en") não troca os textos nem o telefone sem a pessoa
+ * escolher: a página fica em português, pedindo o DDD, como sempre foi.
+ */
+export function injectPageTexts(html: string, currency?: StoreCurrency | null, chosenLang?: string | null): string {
+  if (html.includes(`id="${PAGE_TEXTS_ID}"`)) return html;
+  const foreign = Boolean(currency && currency !== "BRL");
+  const texts = pageTexts(foreign ? htmlLang(html) : (chosenLang?.trim() ?? ""), currency);
+  if (!texts) return html;
+  const tag = `<script type="application/json" id="${PAGE_TEXTS_ID}">${scriptString(texts)}</script>`;
+  const head = html.search(/<\/head>/i);
+  // Sem <head>: logo depois do doctype (antes dele, a página cairia no modo quirks).
+  const at = head >= 0 ? head : afterLeadingDoctype(html);
+  return `${html.slice(0, at)}${tag}${html.slice(at)}`;
+}
+
+/**
+ * Teste A/B: a página de checkout do Offer Studio fica sabendo qual versão da
+ * página a pessoa viu (?os_versao=B nos botões e nos prêmios da roleta que
+ * levam a ela): os eventos e a metadata da cobrança de lá levam a versão,
+ * como os checkouts de fora recebem a marca "versao-b" (markVersion).
+ */
+function withVersion(
+  links: OfferLinkValue[],
+  wheel: WheelRender | null | undefined,
+  version: string | null | undefined,
+): { links: OfferLinkValue[]; wheel: WheelRender | null | undefined } {
+  if (!version) return { links, wheel };
+  const versioned = links.map((l) =>
+    l.checkout === true && l.url ? { ...l, url: withCheckoutVersion(l.url, version) } : l,
+  );
+  if (!wheel) return { links: versioned, wheel };
+  const prizes: WheelRender["prizes"] = {};
+  for (const [id, prize] of Object.entries(wheel.prizes)) {
+    prizes[id] = prize.o && prize.u ? { ...prize, u: withCheckoutVersion(prize.u, version) } : prize;
+  }
+  return { links: versioned, wheel: { ...wheel, prizes } };
+}
+
 export function renderPageHtml(html: string, opts: RenderOptions) {
-  let out = opts.company ? fillCompanyPlaceholders(html, opts.company) : html;
+  let out = opts.company ? fillCompanyPlaceholders(html, opts.company, opts.currency) : html;
   out = out.replace(PAGE_LINK_RE, (_, id: string) => opts.pageHref(id));
-  out = applyOfferLinks(out, opts.links);
-  out = applyWheelPrizes(out, opts.wheel);
+  const { links, wheel } = withVersion(opts.links, opts.wheel, opts.tracking?.config.variant?.name);
+  out = applyOfferLinks(out, links);
+  out = applyWheelPrizes(out, wheel);
   out = injectPaymentConfig(out, opts.payments);
   out = applySeo(out, opts.seo);
+  // Depois do SEO: vale o idioma que a página vai ter de fato (em real, só o escolhido).
+  out = injectPageTexts(out, opts.currency, opts.seo?.lang);
   const tracking = opts.tracking ?? null;
   const gate = gatesCode(tracking);
   const pageCode = usableCode(opts.customCode, gate);
   const offerCode = tracking ? usableCode(tracking.offerCode, gate) : { parts: {}, waits: false };
   out = injectPageCode(out, mergeCode(offerCode.parts, pageCode.parts));
   out = injectRuntime(out, opts.runtimeTag);
+  out = injectProductScript(out, opts.productScriptTag);
   if (tracking) {
     // Código de marketing sem pixels também pede o aviso de cookies.
     const marketingCode = tracking.config.marketingCode || offerCode.waits || pageCode.waits;

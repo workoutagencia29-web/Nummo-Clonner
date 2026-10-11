@@ -1,10 +1,11 @@
 /**
  * Dados da oferta que os widgets usam dentro do editor: links da oferta
- * (checkout, WhatsApp…) e páginas do funil. O editor informa com
- * setWidgetContext logo depois de criar o GrapesJS; sem isso, as listas ficam
- * vazias e nada quebra.
+ * (checkout, WhatsApp…), páginas do funil e a moeda da oferta. O editor
+ * informa com setWidgetContext logo depois de criar o GrapesJS; sem isso, as
+ * listas ficam vazias, a moeda é o real e nada quebra.
  */
 import type { Editor } from "grapesjs";
+import type { StoreCurrency } from "@/lib/store";
 
 export interface WidgetLink {
   key: string;
@@ -15,7 +16,9 @@ export interface WidgetLink {
   url?: string;
   /** "Pagamento na página" com produto (resumo): o link tem destino mesmo sem endereço. */
   payment?: string | null;
-  /** Idioma do produto de pagamento (es/en/pt): o bloco "Acesso ao produto" nasce nele. */
+  /** "Checkout do Offer Studio" (resumo do produto; "" = sem produto salvo). Na fase 1 ainda não leva a lugar nenhum. */
+  checkout?: string | null;
+  /** Idioma do produto (pagamento na página ou checkout do Offer Studio: es/en/pt): o bloco "Acesso ao produto" nasce nele. */
   paymentLocale?: string | null;
 }
 
@@ -30,6 +33,11 @@ export interface WidgetPage {
 export interface WidgetContext {
   links: WidgetLink[];
   pages: WidgetPage[];
+  /**
+   * Moeda da oferta (src/lib/offer-currency.ts): blocos com preço soltos na
+   * página (vitrines, caixa de compra) nascem nela. Sem ela: real.
+   */
+  currency?: StoreCurrency;
 }
 
 const contexts = new WeakMap<Editor, () => WidgetContext>();

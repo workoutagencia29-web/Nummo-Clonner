@@ -3,6 +3,7 @@
  * (Hostinger, HostGator, cPanel, Netlify…), como funciona o teste A/B, o que o
  * eventos.php e o pagamento.php precisam e como testar.
  */
+import { PAGAMENTO_ORDER_KEEP_DAYS, PAGAMENTO_UNPAID_KEEP_DAYS } from "./checkout-php";
 
 export interface ReadmeSplit {
   /** Nome da página ("Página principal"). */
@@ -26,7 +27,11 @@ export interface ReadmeInput {
   serverEvents: string[];
   /** Produtos do pagamento na página (vazio = sem pagamento.php). */
   payments?: { name: string; price: string; methods: string[] }[];
-  /** Páginas "Preservar JS". */
+  /** Páginas de checkout do Offer Studio (pasta no ZIP, preço do produto e gateway). */
+  checkouts?: { name: string; dir: string; price: string; gateway: string }[];
+  /** Gateways dos checkouts ("FlevoPay", "BlackCat", "Kyvo"). */
+  checkoutGateways?: string[];
+  /** Páginas "Com scripts" (modo PRESERVE_JS da clonagem). */
   preserveJs: string[];
   /** Páginas de obrigado/upsell que saíram fora do Google (noindex) por padrão. */
   hiddenFromSearch?: string[];
@@ -50,6 +55,10 @@ export function leiaMe(input: ReadmeInput): string {
   const push = (...lines: string[]) => out.push(...lines);
   const splitAt = new Map(input.splits.map((s) => [s.dir, s]));
   const payments = input.payments ?? [];
+  const checkouts = input.checkouts ?? [];
+  const gateways = input.checkoutGateways ?? [];
+  const pixGateways = gateways.filter((g) => g !== "Kyvo");
+  const withPagamento = payments.length > 0 || checkouts.length > 0;
 
   push(
     LINE,
@@ -86,11 +95,19 @@ export function leiaMe(input: ReadmeInput): string {
           "  eventos-dados/.htaccess  →  bloqueia a pasta dos tokens (arquivo oculto no Mac/Windows)",
         ]
       : []),
-    ...(payments.length
+    ...checkouts.map((c) => `  ${c.dir}index.html  →  página de checkout de ${c.name}`),
+    ...(payments.length && !checkouts.length
       ? [
           "  pagamento.php  →  pagamento na página (cobranças da Kyvo e acesso só de quem pagou)",
           "  pagamento-dados/config.php  →  chave da Kyvo e produtos (NÃO compartilhe)",
           "  pagamento-dados/.htaccess  →  bloqueia a pasta da chave (arquivo oculto no Mac/Windows)",
+        ]
+      : []),
+    ...(checkouts.length
+      ? [
+          `  pagamento.php  →  ${payments.length ? "pagamento na página e " : ""}checkout do Offer Studio (cobranças e acesso só de quem pagou)`,
+          `  pagamento-dados/config.php  →  chaves (${listPt(payments.length && !gateways.includes("Kyvo") ? ["Kyvo", ...gateways] : gateways)}) e produtos (NÃO compartilhe)`,
+          "  pagamento-dados/.htaccess  →  bloqueia a pasta das chaves e dos pedidos (arquivo oculto no Mac/Windows)",
         ]
       : []),
     "  LEIA-ME.txt  →  este arquivo (não precisa subir para a hospedagem)",
@@ -126,8 +143,16 @@ export function leiaMe(input: ReadmeInput): string {
     "  junto o 404.html: sem ele, a Cloudflare Pages mostra a página inicial em",
     "  qualquer endereço errado.",
     ...(input.serverEvents.length ? ["  ATENÇÃO: nesses serviços o eventos.php NÃO funciona. Veja abaixo."] : []),
-    ...(payments.length
-      ? ["  ATENÇÃO: nesses serviços o pagamento na página (pagamento.php) NÃO funciona. Veja abaixo."]
+    ...(withPagamento
+      ? [
+          `  ATENÇÃO: nesses serviços ${
+            checkouts.length && payments.length
+              ? "o checkout e o pagamento na página (pagamento.php) NÃO funcionam"
+              : checkouts.length
+                ? "o checkout do Offer Studio (pagamento.php) NÃO funciona"
+                : "o pagamento na página (pagamento.php) NÃO funciona"
+          }. Veja abaixo.`,
+        ]
       : []),
     "",
     "FTP (FileZilla): descompacte o ZIP no computador e envie todo o conteúdo",
@@ -325,11 +350,108 @@ export function leiaMe(input: ReadmeInput): string {
     );
   }
 
+  if (checkouts.length) {
+    const site = "meusite.com";
+    push(
+      "",
+      "CHECKOUT DO OFFER STUDIO (pagamento.php)",
+      "----------------------------------------",
+      "",
+      `Páginas de checkout: ${checkouts.map((c) => `${c.name} (${c.dir} · ${c.price} · ${c.gateway})`).join("; ")}.`,
+      "",
+      "Os botões ligados a um link “Checkout do Offer Studio” levam à página de",
+      "checkout dele (com as UTMs do anúncio). Lá a pessoa preenche os dados e",
+      `paga ${[
+        ...(pixGateways.length ? [`com PIX (${listPt(pixGateways)})`] : []),
+        ...(gateways.includes("Kyvo") ? ["pela Kyvo (SPEI, cartão, Bizum ou MB WAY)"] : []),
+      ].join(" ou ")}.`,
+      "",
+      "O pagamento.php cria a cobrança com os preços salvos no Offer Studio",
+      "(produto + order bumps + frete: o navegador só diz o que foi marcado,",
+      "nunca o valor), confere o pagamento na API do gateway com a sua chave",
+      "e, na página de obrigado, entrega o acesso do produto e dos order bumps",
+      "comprados SÓ para quem pagou.",
+      "",
+      ...(payments.length
+        ? ["Requisitos da hospedagem (PHP, cURL, HTTPS): os mesmos do pagamento na página, acima."]
+        : [
+            "A HOSPEDAGEM PRECISA TER PHP 7.4 OU MAIS NOVO, COM cURL, E O SITE EM",
+            "HTTPS (o cadeado no endereço). Hostinger, HostGator e cPanel têm; ative",
+            "o SSL grátis no painel da hospedagem se o site ainda abrir com http://.",
+            "Em hospedagem só de arquivos (Netlify, Vercel, GitHub Pages, Cloudflare",
+            "Pages) o checkout não cobra: NÃO suba lá o pagamento.php nem a pasta",
+            "pagamento-dados (as chaves ficariam visíveis).",
+          ]),
+      "",
+      "Suba a pasta pagamento-dados inteira, com o .htaccess (arquivo oculto).",
+      "Ela guarda as chaves, o controle de abuso (limite de cobranças por IP) e",
+      "os pedidos do checkout, em pagamento-dados/pedidos/: só o status, o valor,",
+      "os itens e o número da cobrança no gateway — nada de nome, e-mail,",
+      "telefone, CPF ou endereço (esses dados ficam só no painel do gateway).",
+      "Os pedidos são apagados aos poucos, a cada cobrança nova: os não pagos",
+      `depois de ${PAGAMENTO_UNPAID_KEEP_DAYS} dias; os pagos, depois de ${PAGAMENTO_ORDER_KEEP_DAYS} (o acesso da página de`,
+      "obrigado vale esse tempo). A pasta precisa aceitar gravação (em geral já",
+      "aceita; se o pagamento.php mostrar “Pedidos do checkout: NÃO”, peça à",
+      "hospedagem permissão de escrita nela).",
+      "Mudou o valor, um order bump, o frete, o link de acesso ou a chave? Mude",
+      "no Offer Studio, gere o ZIP de novo e envie, substituindo os arquivos.",
+      "",
+    );
+    if (pixGateways.length) {
+      push(
+        "Webhook (aviso de pagamento do gateway): você NÃO precisa cadastrar",
+        "nada. Com o site em HTTPS, o pagamento.php manda o endereço do webhook",
+        "em cada cobrança, e a página de checkout também confere o pagamento",
+        "sozinha. Se o painel do gateway pedir um endereço de webhook (postback),",
+        "use (troque meusite.com pelo seu domínio; numa subpasta,",
+        `${site}/oferta/pagamento.php?…):`,
+        ...pixGateways.map((g) => `  ${g}:  https://${site}/pagamento.php?webhook=${g.toLowerCase()}`),
+        "O pagamento.php nunca confia só no aviso: ele confere o status na API",
+        "do gateway, com a sua chave, antes de dar o pedido como pago.",
+        "",
+      );
+    }
+    push(
+      "Como conferir depois de subir:",
+      `  1. Abra ${site}/pagamento.php — deve aparecer`,
+      `     ${listPt(gateways.map((g) => `"Chave da ${g}: cadastrada"`))},`,
+      '     "Pedidos do checkout: gravando…" e "HTTPS: sim".',
+      `  2. Abra ${site}/pagamento-dados/config.php — deve dar erro (página`,
+      "     não encontrada ou acesso negado). NUNCA pode mostrar as chaves.",
+      "  3. Faça uma compra de teste com valor baixo: no Offer Studio, mude por",
+      "     um tempo o valor do produto para o mínimo, gere o ZIP e suba. Abra",
+      `     ${site}/${checkouts[0].dir} no celular, pague e confira que a página`,
+      "     confirma o pagamento sozinha, leva à página de obrigado e que os",
+      "     botões de acesso abrem o produto (e os order bumps comprados).",
+      "     Depois volte o valor certo, gere o ZIP e suba de novo.",
+      "  4. A venda aparece no painel do gateway (o pedido do Offer Studio",
+      '     começa com "os_"). Reembolsos são feitos lá.',
+      "",
+      "Pixels: a página de checkout manda InitiateCheckout ao abrir,",
+      "AddPaymentInfo ao gerar o pagamento e Purchase quando ele é aprovado,",
+      "com o número do pedido (recarregar a página não conta de novo). Não use",
+      "regra de Purchase “ao abrir” na página de obrigado: ela contaria a venda",
+      "de novo.",
+      "",
+      // Com pagamento na página, o mesmo aviso já está na seção de cima.
+      ...(payments.length
+        ? []
+        : [
+            "Site atrás de um CDN (proxy) que não seja a Cloudflare? Troque",
+            "'trust_proxy' => false por 'trust_proxy' => true no",
+            "pagamento-dados/config.php para o limite por IP valer para cada comprador",
+            "(senão, todos parecem vir do mesmo endereço e quem chega para comprar",
+            "pode ser barrado).",
+            "",
+          ]),
+    );
+  }
+
   if (input.preserveJs.length) {
     push(
       "",
-      'PÁGINAS "PRESERVAR JS"',
-      "----------------------",
+      'PÁGINAS "COM SCRIPTS"',
+      "---------------------",
       "",
       `Páginas: ${input.preserveJs.join(", ")}.`,
       "",
@@ -352,7 +474,7 @@ export function leiaMe(input: ReadmeInput): string {
     "    chegam ao checkout.",
     "  • Para uma olhada rápida antes de subir, descompacte o ZIP e abra o",
     "    index.html. Aberto do computador, as fontes podem aparecer diferentes,",
-    '    os pixels não funcionam e as páginas "Preservar JS" só funcionam depois',
+    '    os pixels não funcionam e as páginas "Com scripts" só funcionam depois',
     "    de subir na hospedagem.",
     "  • Mudou algo no Offer Studio? Gere um ZIP novo e envie de novo,",
     '    substituindo os arquivos (no FileZilla, escolha "Sobrescrever", e não',

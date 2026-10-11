@@ -3,10 +3,17 @@
  * mensagem, flutuante no canto da tela ou no meio da página. Funciona sem
  * script. Se o botão estiver ligado a um link da oferta do tipo WhatsApp
  * (data-os-link), o endereço desse link vale na prévia e no ZIP.
+ *
+ * Número: com "+" (ou "00") na frente, fica como foi digitado; sem isso, DDD +
+ * número ganha o 55 do Brasil só em oferta em real. Fora do real, o campo pede
+ * o número com o código do país. Abaixo do campo aparece o número final
+ * ("Abre a conversa com +34 612345678"), para conferir.
  */
 import type { Component, Editor } from "grapesjs";
 import { type Def, el, onMobile, PROP_AUTO_LINK, type Style } from "@/editor/blocks/shared";
+import { editorTimeout } from "@/editor/grapes/lifecycle";
 import { normalizePhone, whatsappUrl } from "@/runtime/widgets/options";
+import { widgetContext } from "./context";
 import { attr } from "./dom";
 import { type TraitDef, textAttr } from "./traits";
 
@@ -17,12 +24,18 @@ export const WHATSAPP_ICON =
 const PHONE = "5511999999999";
 const MESSAGE = "Olá! Vim pela página e quero saber mais.";
 
-function relink(component: Component, phone: string, message: string) {
-  const number = normalizePhone(phone);
+/** Moeda da oferta (sem ela: real). */
+const currencyOf = (editor: Editor | undefined) => widgetContext(editor).currency ?? "BRL";
+/** Oferta em real (ou sem moeda): DDD + número sem "+" ganha o 55. */
+const inBrazil = (editor: Editor | undefined) => currencyOf(editor) === "BRL";
+
+/** `number`: já no formato internacional (normalizePhone), só dígitos. */
+function relink(component: Component, number: string, message: string) {
   component.addAttributes({
     "data-os-phone": number,
     "data-os-message": message,
-    href: whatsappUrl(phone, message),
+    // Número já com o código do país: nada a acrescentar.
+    href: whatsappUrl(number, message, false),
   });
   // Número/mensagem digitados agora valem mais que o link de WhatsApp da oferta
   // ligado antes (inclusive o ligado sozinho ao soltar o bloco): senão a prévia
@@ -32,14 +45,59 @@ function relink(component: Component, phone: string, message: string) {
   if (usable && "data-os-link" in component.getAttributes()) component.removeAttributes("data-os-link");
 }
 
+/** Códigos de país com 2 algarismos (os de 1 são o 1 e o 7; o resto tem 3). */
+const TWO_DIGIT_CODES = new Set(
+  "20 27 30 31 32 33 34 36 39 40 41 43 44 45 46 47 48 49 51 52 53 54 55 56 57 58 60 61 62 63 64 65 66 81 82 84 86 90 91 92 93 94 95 98".split(
+    " ",
+  ),
+);
+
+/** "+34 612345678", "+55 11 91234-5678" — o número final, para conferir. */
+export function phoneDisplay(number: string): string {
+  const size = /^[17]/.test(number) ? 1 : TWO_DIGIT_CODES.has(number.slice(0, 2)) ? 2 : 3;
+  const code = number.slice(0, size);
+  const rest = number.slice(size);
+  if (code === "55" && (rest.length === 10 || rest.length === 11))
+    return `+55 ${rest.slice(0, 2)} ${rest.slice(2, -4)}-${rest.slice(-4)}`;
+  return `+${code} ${rest}`;
+}
+
+/** Frase abaixo do campo do número. */
+export function phoneNote(number: string): string {
+  if (!number) return "";
+  if (!/^\d{10,15}$/.test(number))
+    return `Confira o número (${number}): com o código do país, ele tem de 10 a 15 algarismos.`;
+  return `Abre a conversa com ${phoneDisplay(number)}${number === PHONE ? " (número de exemplo: troque pelo seu)" : ""}.`;
+}
+
+const PHONE_FIELD = { label: "Número com DDD", placeholder: "(11) 91234-5678" };
+/** Fora do real: o número com o código do país (exemplo do país da moeda). */
+const WORLD_EXAMPLE: Record<string, string> = {
+  MXN: "+52 55 1234 5678",
+  EUR: "+34 612 345 678",
+  USD: "+1 305 555 1234",
+};
+
 const TRAITS: TraitDef[] = [
   {
     type: "text",
     name: "os-wa-phone",
-    label: "Número com DDD",
-    placeholder: "(11) 91234-5678",
-    getValue: ({ component }) => attr(component, "data-os-phone"),
-    setValue: ({ component, value }) => relink(component, String(value ?? ""), attr(component, "data-os-message")),
+    ...PHONE_FIELD,
+    // O número gravado já tem o código do país: aparece com "+" na frente, e assim
+    // corrigir um algarismo não faz ele ganhar o 55 de novo (numa oferta em real,
+    // "+1 305…" editado viraria "55 1 305…").
+    getValue: ({ component }) => {
+      const number = attr(component, "data-os-phone");
+      return /^\d+$/.test(number) ? `+${number}` : number;
+    },
+    setValue: ({ editor, component, value }) =>
+      relink(component, normalizePhone(String(value ?? ""), inBrazil(editor)), attr(component, "data-os-message")),
+  },
+  {
+    type: "os-note",
+    name: "os-wa-final",
+    label: "",
+    osHidden: (component) => !attr(component, "data-os-phone"),
   },
   {
     type: "os-textarea",
@@ -60,10 +118,43 @@ const TRAITS: TraitDef[] = [
   textAttr("aria-label", "Texto para leitores de tela", "Falar no WhatsApp"),
 ];
 
+/**
+ * Campo do número conforme a moeda da oferta e a frase do número final
+ * (refeita quando o número muda).
+ */
+function paintPhoneFields(editor: Editor, component: Component) {
+  const field = component.getTrait("os-wa-phone");
+  const currency = currencyOf(editor);
+  const want =
+    currency === "BRL"
+      ? PHONE_FIELD
+      : { label: "Número com código do país", placeholder: WORLD_EXAMPLE[currency] ?? WORLD_EXAMPLE.MXN };
+  if (field && (field.get("label") !== want.label || field.get("placeholder") !== want.placeholder)) field.set(want);
+  const note = component.getTrait("os-wa-final");
+  if (!note) return;
+  // O rótulo da nota é o texto dela (os-note); o GrapesJS guarda o elemento já
+  // desenhado, então o texto da linha muda direto nele.
+  // Ligado a um link de WhatsApp da oferta: o endereço do link vale no lugar do número.
+  const text = attr(component, "data-os-link")
+    ? "Este botão usa o link de WhatsApp da oferta escolhido abaixo (o número acima não vale)."
+    : phoneNote(attr(component, "data-os-phone"));
+  if (note.get("label") !== text) note.set("label", text);
+  const el = (note.view as unknown as { getInputElem?: () => unknown } | undefined)?.getInputElem?.();
+  if (el instanceof HTMLElement && el.textContent !== text) el.textContent = text;
+}
+
 export function registerWhatsappType(editor: Editor) {
   editor.DomComponents.addType("os-whatsapp", {
     isComponent: (node) => node.tagName === "A" && node.getAttribute?.("data-os-widget") === "whatsapp",
     model: { defaults: { tagName: "a", name: "Botão de WhatsApp", droppable: false, traits: TRAITS } },
+  });
+  const isWhatsapp = (c: Component | undefined) => c?.get("type") === "os-whatsapp";
+  editor.on("component:selected", (c: Component) => {
+    if (isWhatsapp(c)) paintPhoneFields(editor, c);
+  });
+  editor.on("component:update:attributes", (c: Component) => {
+    // Depois do campo terminar de gravar (a nota redesenhada não tira o foco do campo).
+    if (isWhatsapp(c) && editor.getSelected() === c) editorTimeout(editor, () => paintPhoneFields(editor, c));
   });
 }
 

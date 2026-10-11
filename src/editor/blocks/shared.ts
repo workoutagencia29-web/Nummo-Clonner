@@ -11,6 +11,8 @@ export interface OsBlock {
   select?: boolean;
   /** Dispara a ação do elemento ao soltar (ex.: imagem abre os arquivos). */
   activate?: boolean;
+  /** Dica ao passar o mouse no bloco (o que ele faz, quando o nome não basta). */
+  hint?: string;
 }
 
 export const BLOCK_CATEGORIES = {
@@ -18,6 +20,7 @@ export const BLOCK_CATEGORIES = {
   estrutura: "Estrutura",
   conversao: "Conversão",
   quiz: "Quiz e roleta",
+  loja: "Loja",
   video: "Vídeo",
   prova: "Prova social",
   formularios: "Formulários",
@@ -56,7 +59,18 @@ export const MOBILE_MEDIA = "(max-width: 480px)";
  */
 export const PROP_MOBILE = "osMobile";
 export const PROP_AUTO_LINK = "osAutoLink";
+/**
+ * Valor de `osAutoLink` do "Botão de checkout": liga ao primeiro link
+ * "Checkout do Offer Studio" da oferta (o de produto salvo primeiro), não ao
+ * primeiro link do tipo checkout.
+ */
+export const AUTO_LINK_OWN_CHECKOUT = "OWN_CHECKOUT";
 export const PROP_LEGAL = "osLegal";
+/**
+ * Elemento com preço sem moeda escolhida (vitrine, caixa de compra): nasce na
+ * moeda da oferta (contexto dos widgets; data-os-currency).
+ */
+export const PROP_OFFER_CURRENCY = "osOfferCurrency";
 
 /** Elemento com estilo próprio (vira regra editável no painel Estilo). */
 export function el(tagName: string, name: string, style: Style, components?: Def["components"], extra: Def = {}): Def {

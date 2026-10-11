@@ -11,6 +11,7 @@ import {
   isVirtualCloneUrl,
   isVirtualTitle,
 } from "@/server/services/clone";
+import { lastOfferCurrency } from "@/server/services/preferences";
 import { requireSession } from "@/server/session";
 import type { CloneResult, Device, ProtectionReport } from "@/worker/clone/types";
 import { CloneFailed } from "./clone-failed";
@@ -103,10 +104,11 @@ export default async function CloneJobPage({ params }: PageProps<"/clonar/[jobId
       PRESERVE_JS: previewUrl(await createPreviewToken({ kind: "clone", jobId: job.id, device, mode: "PRESERVE_JS" })),
     };
   }
-  const [status, sidebar, frozenTimer] = await Promise.all([
+  const [status, sidebar, frozenTimer, currency] = await Promise.all([
     getCloneStatus(job.id),
     getSidebarData(),
     editableHasFrozenTimer(review),
+    lastOfferCurrency(),
   ]);
 
   // Links de um ZIP/HTML colado apontam para um endereço interno: não são páginas clonáveis.
@@ -133,6 +135,7 @@ export default async function CloneJobPage({ params }: PageProps<"/clonar/[jobId
       capturedDevices={capturedDevices}
       offerDeleted={job.status === "SAVED" && !job.offerId}
       frozenTimer={frozenTimer}
+      defaultCurrency={currency}
     />
   );
 }

@@ -1,6 +1,7 @@
 /**
  * Worker do Offer Studio: processo separado do painel que executa o trabalho
- * pesado. Três filas, cada uma fazendo uma coisa por vez:
+ * pesado. Três filas, cada uma fazendo uma coisa por vez — as filas são as
+ * próprias tabelas do banco, lidas aqui a cada segundo:
  * - clonagens (tabela CloneJob) e, com a fila vazia, a limpeza automática dos
  *   arquivos de clonagens antigas (ao iniciar e a cada 6 horas);
  * - ZIPs do "Baixar ZIP" (tabela Export), com a limpeza dos ZIPs antigos;
@@ -11,7 +12,6 @@
 import "dotenv/config";
 import { prisma } from "@/lib/db";
 import { backupLoop, failInterruptedBackups, isBackingUp } from "@/worker/backup";
-import { getBoss } from "@/worker/boss";
 import { createCleanupSchedule } from "@/worker/cleanup-schedule";
 import { claimNextJob, deferJobFailure, failInterruptedJobs, runCloneJob, settlePendingJobs } from "@/worker/clone/job";
 import { exportLoop, failInterruptedExports, isExporting } from "@/worker/export";
@@ -96,7 +96,6 @@ async function main() {
     stopping: () => stopping,
   });
   if (!lock) return;
-  const boss = await getBoss();
   await failInterruptedJobs();
   await failInterruptedExports();
   await failInterruptedBackups();
@@ -114,7 +113,6 @@ async function main() {
   const stop = async () => {
     stopping = true;
     clearInterval(timer);
-    await boss.stop({ graceful: true, timeout: 5000 }).catch(() => {});
     await lock.release();
     await prisma.$disconnect();
     process.exit(0);

@@ -249,6 +249,7 @@ export function optionsSummary(options: Partial<ExportOptions> | null | undefine
   if (hasVariants && o.splitter) out.push("Divisor A/B");
   if (o.serverEvents) out.push(EVENTS_FILE);
   if (o.optimizeHtml) out.push("HTML otimizado");
+  // "Imagens mais leves" fica de fora: os ZIPs de antes dela aparecem com ela ligada (o padrão).
   return out;
 }
 

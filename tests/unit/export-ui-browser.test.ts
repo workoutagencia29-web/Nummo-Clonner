@@ -18,6 +18,7 @@ import { type Browser, chromium, type Download, type Page, type Route } from "pl
 import postcss from "postcss";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import type { ExportOptions, ExportPlan, ExportView } from "@/lib/export/options";
+import { clonedCheckoutWarning, deadLegalLinksWarning } from "@/lib/export/warnings";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const ORIGIN = "http://painel.test";
@@ -164,7 +165,7 @@ interface Session {
   seq: number;
 }
 
-const DEFAULTS: ExportOptions = { splitter: true, serverEvents: false, optimizeHtml: true };
+const DEFAULTS: ExportOptions = { splitter: true, serverEvents: false, optimizeHtml: true, lighterImages: true };
 const FILE = "oferta-teste-2026-09-29.zip";
 
 function view(over: Partial<ExportView> & { id: string }): ExportView {
@@ -454,9 +455,11 @@ describe("Baixar ZIP — diálogo", () => {
     const splitter = d.getByRole("switch", { name: "Divisor A/B" });
     const events = d.getByRole("switch", { name: "API de Conversões (Meta)", exact: true });
     const optimize = d.getByRole("switch", { name: "HTML otimizado" });
+    const images = d.getByRole("switch", { name: "Imagens mais leves" });
     expect(await splitter.getAttribute("aria-checked")).toBe("true");
     expect(await events.getAttribute("aria-checked")).toBe("false");
     expect(await optimize.getAttribute("aria-checked")).toBe("true");
+    expect(await images.getAttribute("aria-checked")).toBe("true");
     expect(await d.getByText("Só ligue se a sua hospedagem tiver PHP").count()).toBe(0);
 
     // eventos.php: aviso do PHP e os arquivos entram na árvore (antes do LEIA-ME).
@@ -617,8 +620,8 @@ describe("Baixar ZIP — diálogo", () => {
     await download;
     const starts = callsOf(s, "startExportAction").map((c) => c.input);
     expect(starts).toEqual([
-      { offerId: "o1", options: { ...DEFAULTS, optimizeHtml: false } },
-      { offerId: "o1", options: { ...DEFAULTS, optimizeHtml: false } },
+      { offerId: "o1", options: { ...DEFAULTS, optimizeHtml: false, lighterImages: true } },
+      { offerId: "o1", options: { ...DEFAULTS, optimizeHtml: false, lighterImages: true } },
     ]);
     await d.getByText("ZIP pronto! O download começou.").waitFor();
     // Já existe um ZIP anterior (o que falhou): a lista mostra o selo.
@@ -728,7 +731,7 @@ describe("Baixar ZIP — diálogo", () => {
           progress: 100,
           bytes: 850 * 1024,
           createdAt: day(28),
-          options: { splitter: false, serverEvents: true, optimizeHtml: true },
+          options: { splitter: false, serverEvents: true, optimizeHtml: true, lighterImages: true },
         }),
         view({ id: "e2", status: "FAILED", progress: 40, createdAt: day(27), errorMessage: "A página X está vazia." }),
         view({ id: "e1", status: "DONE", progress: 100, bytes: 3 * 1024 * 1024, createdAt: day(26) }),
@@ -772,7 +775,7 @@ describe("Baixar ZIP — diálogo", () => {
     await waitFor(() => callsOf(s, "startExportAction").length === 1, "Gerar ZIP");
     expect(callsOf(s, "startExportAction")[0].input).toEqual({
       offerId: "o1",
-      options: { splitter: false, serverEvents: true, optimizeHtml: true },
+      options: { splitter: false, serverEvents: true, optimizeHtml: true, lighterImages: true },
     });
   });
 
@@ -943,7 +946,7 @@ describe("Baixar ZIP — diálogo", () => {
     expect(s.downloads).toEqual([]);
   });
 
-  it("sem versões e sem token: só 'HTML otimizado', e o eventos.php nunca é pedido", async () => {
+  it("sem versões e sem token: só 'HTML otimizado' e 'Imagens mais leves', e o eventos.php nunca é pedido", async () => {
     const s = await open({
       plan: {
         hasVariants: false,
@@ -960,14 +963,15 @@ describe("Baixar ZIP — diálogo", () => {
           id: "e1",
           status: "DONE",
           progress: 100,
-          options: { splitter: true, serverEvents: true, optimizeHtml: true },
+          options: { splitter: true, serverEvents: true, optimizeHtml: true, lighterImages: true },
         }),
       ],
     });
     const d = await openDialog(s);
     await poll(() => treePaths(s)).toEqual(["index.html", "obrigado/", "assets/"]);
-    expect(await d.getByRole("switch").count()).toBe(1);
+    expect(await d.getByRole("switch").count()).toBe(2);
     expect(await d.getByRole("switch", { name: "HTML otimizado" }).count()).toBe(1);
+    expect(await d.getByRole("switch", { name: "Imagens mais leves" }).count()).toBe(1);
     // O resumo do ZIP anterior não fala em divisor (a oferta não tem versões).
     const row = d.getByRole("list", { name: "ZIPs anteriores" }).getByRole("listitem");
     expect(await row.textContent()).not.toContain("Divisor A/B");
@@ -1001,6 +1005,47 @@ describe("Baixar ZIP — diálogo", () => {
     expect(await d.getByText("Endereços relativos").count()).toBe(0);
     await d.getByRole("button", { name: "Como subir na hospedagem" }).click();
     await d.getByText(/só funciona na raiz do domínio/).waitFor();
+  });
+
+  it("“Imagens mais leves” desligada vai no pedido do ZIP", async () => {
+    const s = await open({ plan: { hasVariants: false, hasServerEventTokens: false, serverEventVendors: [] } });
+    const d = await openDialog(s);
+    await treePaths(s);
+    const images = d.getByRole("switch", { name: "Imagens mais leves" });
+    await d.getByText(/só carregam quando o visitante chega perto delas/).waitFor();
+    await images.click();
+    expect(await images.getAttribute("aria-checked")).toBe("false");
+    await d.getByRole("button", { name: "Gerar ZIP" }).click();
+    await waitFor(() => callsOf(s, "startExportAction").length === 1, "Gerar ZIP");
+    expect(callsOf(s, "startExportAction")[0].input).toEqual({
+      offerId: "o1",
+      options: { ...DEFAULTS, lighterImages: false },
+    });
+  });
+
+  it("checkout da página clonada e links de Política/Termos sem destino: “Abrir o link” e “Abrir no editor”", async () => {
+    const cloned = clonedCheckoutWarning(["Checkout Hotmart"]) as string;
+    const legal = deadLegalLinksWarning([{ name: "Vendas", links: ["Política de privacidade", "Termos de uso"] }]);
+    const s = await open({
+      plan: {
+        warnings: [cloned, legal as string],
+        clonedCheckoutLinks: [{ linkId: "l1", label: "Checkout Hotmart" }],
+        legalLinkPages: [{ name: "Vendas", documentId: "d1" }],
+      },
+    });
+    const d = await openDialog(s);
+    await d.getByText("Antes de subir").waitFor();
+    expect(await d.getByText(/ainda leva ao checkout da página que você clonou/).isVisible()).toBe(true);
+    const openLink = d.getByRole("link", { name: "Abrir o link “Checkout Hotmart”" });
+    expect(await openLink.getAttribute("href")).toBe("/ofertas/o1?aba=links&link=l1");
+    const editor = d.getByRole("link", { name: "Abrir “Vendas” no editor" });
+    expect(await editor.getAttribute("href")).toBe("/editor/d1");
+    // Abrir o link fecha o diálogo (a aba "Links e checkouts" rola até ele).
+    await openLink.click();
+    await poll(() => dialog(s).isVisible()).toBe(false);
+    expect(await s.page.evaluate(() => (window as unknown as { __navs?: string[] }).__navs)).toEqual([
+      "/ofertas/o1?aba=links&link=l1",
+    ]);
   });
 
   it("erros: plano que não carrega (Tentar de novo), não conseguiu começar, ZIP apagado no meio", async () => {
@@ -1047,7 +1092,7 @@ describe("Baixar ZIP — diálogo", () => {
           id: "e1",
           status: "DONE",
           progress: 100,
-          options: { splitter: true, serverEvents: true, optimizeHtml: true },
+          options: { splitter: true, serverEvents: true, optimizeHtml: true, lighterImages: true },
         }),
       ],
     });
@@ -1066,7 +1111,7 @@ describe("Baixar ZIP — diálogo", () => {
     // Com o plano (há token), as opções do último ZIP vão como estavam, com o eventos.php.
     await poll(() => callsOf(s, "startExportAction")[0]?.input).toEqual({
       offerId: "o1",
-      options: { splitter: true, serverEvents: true, optimizeHtml: true },
+      options: { splitter: true, serverEvents: true, optimizeHtml: true, lighterImages: true },
     });
   });
 

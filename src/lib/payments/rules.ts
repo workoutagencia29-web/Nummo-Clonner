@@ -17,8 +17,23 @@ export type PaymentMethodId = (typeof PAYMENT_METHODS)[number];
 export const PAYMENT_LOCALES = ["ES", "EN", "PT"] as const;
 export type PaymentLocaleId = (typeof PAYMENT_LOCALES)[number];
 
-export const PAYMENT_PROVIDERS = ["KYVO"] as const;
+/**
+ * Gateways com chave por oferta (cartão da conta na aba "Links e checkouts"):
+ * a Kyvo (pagamento na página e checkout em peso, euro e dólar) e os de PIX do
+ * checkout do Offer Studio (FlevoPay e BlackCat, em real).
+ */
+export const PAYMENT_PROVIDERS = ["KYVO", "FLEVOPAY", "BLACKCAT"] as const;
 export type PaymentProviderId = (typeof PAYMENT_PROVIDERS)[number];
+
+/** Moeda da Kyvo? (no banco, a moeda também pode ser o real do checkout com PIX). */
+export function isPaymentCurrency(v: unknown): v is PaymentCurrencyId {
+  return typeof v === "string" && (PAYMENT_CURRENCIES as readonly string[]).includes(v);
+}
+
+/** Moeda de um produto do pagamento na página (sempre da Kyvo; o real nunca é salvo nele). */
+export function windowCurrency(v: string): PaymentCurrencyId {
+  return isPaymentCurrency(v) ? v : "MXN";
+}
 
 /** Moedas aceitas por método (Kyvo: SPEI só MXN; Bizum e MB WAY só EUR; cartão em todas). */
 export const METHOD_CURRENCIES: Record<PaymentMethodId, readonly PaymentCurrencyId[]> = {
@@ -68,7 +83,11 @@ export const LOCALE_LABEL: Record<PaymentLocaleId, string> = {
   PT: "Português",
 };
 
-export const PROVIDER_LABEL: Record<PaymentProviderId, string> = { KYVO: "Kyvo" };
+export const PROVIDER_LABEL: Record<PaymentProviderId, string> = {
+  KYVO: "Kyvo",
+  FLEVOPAY: "FlevoPay",
+  BLACKCAT: "BlackCat",
+};
 
 /** O método aceita a moeda? */
 export function methodAllows(method: PaymentMethodId, currency: PaymentCurrencyId): boolean {
@@ -151,8 +170,11 @@ export function amountInput(cents: number): string {
   return `${int},${String(n % 100).padStart(2, "0")}`;
 }
 
-/** Valor com a moeda, no idioma pedido ("MX$ 297,00" em pt-BR). */
-export function formatAmount(cents: number, currency: PaymentCurrencyId, locale = "pt-BR"): string {
+/**
+ * Valor com a moeda, no idioma pedido ("MX$ 297,00" em pt-BR). Aceita também
+ * o real (o "Valor da oferta" dos pixels, no painel).
+ */
+export function formatAmount(cents: number, currency: PaymentCurrencyId | "BRL", locale = "pt-BR"): string {
   try {
     return new Intl.NumberFormat(locale, { style: "currency", currency }).format(cents / 100);
   } catch {
@@ -220,6 +242,67 @@ export function amountRange(methods: readonly PaymentMethodId[]): { min: number;
 }
 
 /**
+ * O valor (centavos) não serve para as formas de pagamento marcadas juntas
+ * (texto pronto, como o formulário mostra no campo Valor); null = serve ou
+ * nenhuma forma marcada. A Kyvo recusa a cobrança fora da faixa.
+ */
+export function amountProblem(
+  cents: number,
+  currency: PaymentCurrencyId,
+  methods: readonly PaymentMethodId[],
+): string | null {
+  const range = amountRange(methods);
+  if (!range) return null;
+  if (cents < range.min) return `O valor mínimo é ${formatAmount(range.min, currency)}.`;
+  if (cents <= range.max) return null;
+  const spei = methods.includes("SPEI") && METHOD_LIMITS.SPEI.max === range.max;
+  return spei
+    ? `Com SPEI, o valor máximo é ${formatAmount(range.max, currency)} por compra.`
+    : `O valor máximo é ${formatAmount(range.max, currency)}.`;
+}
+
+/** Moeda, formas de pagamento e idioma da janela de um produto de pagamento. */
+export interface PaymentCurrencySetup {
+  currency: PaymentCurrencyId;
+  methods: PaymentMethodId[];
+  locale: PaymentLocaleId;
+}
+
+/**
+ * O produto de pagamento numa moeda nova (o campo Moeda do formulário e a
+ * troca da moeda da oferta):
+ *
+ * - ficam as formas marcadas que a moeda nova aceita;
+ * - entram as formas do produto novo nessa moeda que a moeda de antes não
+ *   aceitava (a pessoa não tinha como marcar: o SPEI de quem chega ao peso
+ *   mexicano vindo do euro ou do dólar; o Bizum e o MB WAY de quem chega ao
+ *   euro), quando o valor (`amountCents`; sem ele, sempre) cabe na faixa delas;
+ * - nenhuma: as do produto novo nessa moeda (defaultMethods — a faixa de valor
+ *   aparece como problema do produto);
+ * - o idioma da janela acompanha a moeda quando estava no padrão da moeda
+ *   antiga (escolhido à parte, fica). O valor não muda.
+ */
+export function switchPaymentCurrency(
+  p: PaymentCurrencySetup,
+  currency: PaymentCurrencyId,
+  amountCents?: number | null,
+): PaymentCurrencySetup {
+  if (p.currency === currency) return { currency, methods: [...p.methods], locale: p.locale };
+  const fits = (m: PaymentMethodId) =>
+    amountCents === undefined ||
+    amountCents === null ||
+    (amountCents >= METHOD_LIMITS[m].min && amountCents <= METHOD_LIMITS[m].max);
+  const chosen = PAYMENT_METHODS.filter(
+    (m) => methodAllows(m, currency) && (p.methods.includes(m) || (!methodAllows(m, p.currency) && fits(m))),
+  );
+  return {
+    currency,
+    methods: chosen.length ? chosen : defaultMethods(currency),
+    locale: p.locale === defaultLocale(p.currency) ? defaultLocale(currency) : p.locale,
+  };
+}
+
+/**
  * Problemas do produto, por campo (vazio = pode salvar). Página de obrigado e
  * link de acesso podem ficar para depois (o "Próximos passos" e o ZIP avisam);
  * o resto é obrigatório.
@@ -247,15 +330,8 @@ export function paymentProductProblems(input: PaymentProductInput): Partial<Reco
   else if (cents === null && AMBIGUOUS_COMMA_RE.test(input.amount.trim())) out.amount = AMBIGUOUS_COMMA_MESSAGE;
   else if (cents === null) out.amount = "Valor inválido. Digite só o número, como 297,00 ou 1.297,90.";
   else if (!out.currency && !out.methods) {
-    const range = amountRange(methods);
-    if (range && cents < range.min) {
-      out.amount = `O valor mínimo é ${formatAmount(range.min, input.currency)}.`;
-    } else if (range && cents > range.max) {
-      const spei = methods.includes("SPEI") && METHOD_LIMITS.SPEI.max === range.max;
-      out.amount = spei
-        ? `Com SPEI, o valor máximo é ${formatAmount(range.max, input.currency)} por compra.`
-        : `O valor máximo é ${formatAmount(range.max, input.currency)}.`;
-    }
+    const problem = amountProblem(cents, input.currency, methods);
+    if (problem) out.amount = problem;
   }
 
   const access = accessUrlProblem(normalizeAccessUrl(input.accessUrl));
@@ -263,7 +339,9 @@ export function paymentProductProblems(input: PaymentProductInput): Partial<Reco
   return out;
 }
 
-/** Resultado do "Testar conexão" explicado no painel (mesmos códigos de ConnectionStatus). */
+type ConnectionCode = "ok" | "invalid_key" | "missing_scope" | "offline" | "unavailable" | "unexpected";
+
+/** Resultado do "Testar conexão" da Kyvo explicado no painel (mesmos códigos de ConnectionStatus). */
 export const CONNECTION_MESSAGE: Record<
   "ok" | "invalid_key" | "missing_scope" | "offline" | "unavailable" | "unexpected",
   string
@@ -278,3 +356,26 @@ export const CONNECTION_MESSAGE: Record<
   unexpected:
     "A Kyvo respondeu de um jeito inesperado. Tente de novo em alguns minutos; se continuar, confira a chave.",
 };
+
+/** Resultado do "Testar conexão" dos gateways de PIX (consulta o vendedor dono da chave). */
+function pixConnectionMessages(label: string, keyPlace: string): Record<ConnectionCode, string> {
+  return {
+    ok: `A chave é válida: a ${label} reconheceu a sua conta de vendedor.`,
+    invalid_key: `A ${label} recusou a chave (inválida, apagada ou copiada pela metade). Copie a chave de novo ${keyPlace} e cole aqui em “Trocar chave”.`,
+    missing_scope: `A chave é válida, mas a ${label} não liberou a conta para vender (conta ainda em análise ou sem permissão). Confira no painel da ${label}.`,
+    offline: `Não foi possível falar com a ${label}. Confira a internet deste Mac e tente de novo.`,
+    unavailable: `A ${label} está fora do ar ou instável agora. Tente de novo em alguns minutos.`,
+    unexpected: `A ${label} respondeu de um jeito inesperado. Tente de novo em alguns minutos; se continuar, confira a chave.`,
+  };
+}
+
+const CONNECTION_MESSAGES: Record<PaymentProviderId, Record<ConnectionCode, string>> = {
+  KYVO: CONNECTION_MESSAGE,
+  FLEVOPAY: pixConnectionMessages("FlevoPay", "no painel da FlevoPay"),
+  BLACKCAT: pixConnectionMessages("BlackCat", "no painel da BlackCat"),
+};
+
+/** Resultado do "Testar conexão" explicado no painel, para o gateway. */
+export function connectionMessage(provider: PaymentProviderId, status: ConnectionCode): string {
+  return CONNECTION_MESSAGES[provider][status];
+}

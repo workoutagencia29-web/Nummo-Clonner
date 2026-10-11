@@ -255,6 +255,7 @@ export function ExportDialog({ c }: { c: ExportController }) {
             onOpenChange={c.setGuideOpen}
             preserveJsPages={plan?.preserveJsPages}
             hasPayments={plan?.hasPayments ?? false}
+            paymentGateways={plan?.paymentGateways}
           />
           {(c.stage === "setup" || c.historyRows.length > 0) && (
             <ExportHistory

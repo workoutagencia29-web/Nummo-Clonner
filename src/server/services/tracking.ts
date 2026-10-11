@@ -13,6 +13,8 @@ import type { EventTrigger, Prisma, TrackingEvent } from "@/generated/prisma/cli
 import { encryptSecret, maskSecret, SECRET_UNREADABLE_MESSAGE, tryDecryptSecret } from "@/lib/crypto";
 import { prisma } from "@/lib/db";
 import { UserError, uniqueViolationFields } from "@/lib/errors";
+import { offerCurrencyOf } from "@/lib/offer-currency";
+import { parseOfferSettings } from "@/lib/offer-settings";
 import { isRecord, PAGE_CODE_FIELDS, unclosedCodePart } from "@/lib/page-code";
 import { detectHtmlTrackers } from "@/lib/tracking/code-trackers";
 import {
@@ -24,6 +26,8 @@ import { checkConversionLabel, checkPixelId } from "@/lib/tracking/ids";
 import {
   CODE_CATEGORIES,
   type CodeCategoryId,
+  type ConsentPresetLang,
+  consentLanguageHint,
   EventRuleInputSchema,
   type EventTriggerId,
   explicitPageCodeCategory,
@@ -59,7 +63,7 @@ export const OFFER_CODE_MAX_BYTES = 200 * 1024;
 async function offerOrThrow(offerId: string) {
   const offer = await prisma.offer.findFirst({
     where: { id: offerId, deletedAt: null },
-    select: { id: true, name: true, tracking: true },
+    select: { id: true, name: true, tracking: true, settings: true },
   });
   if (!offer) throw new UserError("Oferta não encontrada. Ela pode ter sido excluída.");
   return offer;
@@ -386,7 +390,7 @@ export interface TrackingSettingsPatch {
 
 export async function getTrackingSettings(offerId: string): Promise<TrackingSettings> {
   const offer = await offerOrThrow(offerId);
-  return parseTrackingSettings(offer.tracking);
+  return parseTrackingSettings(offer.tracking, offerCurrencyOf(offer.settings));
 }
 
 /** Mensagens claras para os limites do esquema (o resto usa a mensagem do zod em pt-BR). */
@@ -474,7 +478,7 @@ function mergeEventNames(
 /** Junta as mudanças com o que está salvo, valida tudo e grava. Devolve o resultado. */
 export async function saveTrackingSettings(offerId: string, patch: TrackingSettingsPatch): Promise<TrackingSettings> {
   const offer = await offerOrThrow(offerId);
-  const current = parseTrackingSettings(offer.tracking);
+  const current = parseTrackingSettings(offer.tracking, offerCurrencyOf(offer.settings));
   const merged = {
     consent: { ...current.consent, ...(patch.consent ?? {}) },
     forwarding: { ...current.forwarding, ...(patch.forwarding ?? {}) },
@@ -897,6 +901,11 @@ export interface TrackingPanel {
   pixelsNeedingToken: number;
   /** Pixels/tags achados no código livre da oferta. */
   offerCodeTrackers: string[];
+  /**
+   * Oferta para fora do Brasil (idioma das páginas ou moeda): os botões de textos
+   * prontos do aviso em espanhol/inglês ficam em destaque (consentLanguageHint).
+   */
+  consentLanguage?: ConsentPresetLang | "both" | null;
 }
 
 /** Tudo o que a tela de pixels/eventos precisa. null = oferta inexistente ou na lixeira. */
@@ -907,6 +916,7 @@ export async function getTrackingPanel(offerId: string): Promise<TrackingPanel |
       id: true,
       name: true,
       tracking: true,
+      settings: true,
       pages: {
         orderBy: [{ position: "asc" }, { createdAt: "asc" }],
         select: { id: true, name: true, slug: true, type: true, isHome: true, customCode: true },
@@ -963,9 +973,11 @@ export async function getTrackingPanel(offerId: string): Promise<TrackingPanel |
       htmlTrackers,
     };
   });
-  const settings = parseTrackingSettings(offer.tracking);
+  const settings = parseTrackingSettings(offer.tracking, offerCurrencyOf(offer.settings));
+  const offerSettings = parseOfferSettings(offer.settings);
   return {
     offer: { id: offer.id, name: offer.name },
+    consentLanguage: consentLanguageHint(offerSettings.language, offerSettings.currency),
     pixels,
     settings,
     rules,

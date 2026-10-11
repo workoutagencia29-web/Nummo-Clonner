@@ -10,6 +10,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { Spinner } from "@/components/ui/spinner";
 import { dateTime } from "@/lib/format";
+import { currencyVersionLabel, currencyVersionTarget, OFFER_CURRENCY_NAME } from "@/lib/offer-currency";
+import type { StoreCurrency } from "@/lib/store";
 import type { EditorDialogProps } from "../editor-app";
 
 interface VersionRow {
@@ -27,7 +29,7 @@ const KIND_LABEL: Record<VersionRow["kind"], string> = {
   IMPORT: "Página original",
   RESTORE: "Antes de restaurar",
   BULK_REPLACE: "Antes de substituir",
-  EXPORT: "Download",
+  EXPORT: "Ao gerar o ZIP",
 };
 
 /**
@@ -40,12 +42,43 @@ const LEGACY_LABELS: Record<string, string | null> = {
   "Versão salva": "Ponto salvo",
 };
 
+/** Moeda para a qual a troca da moeda da oferta ia quando gravou o ponto (null = não é um ponto da troca). */
+function currencyTarget(row: Pick<VersionRow, "kind" | "label">) {
+  return row.kind === "BULK_REPLACE" ? currencyVersionTarget(row.label) : null;
+}
+
 /** Nome mostrado na lista do Histórico. */
 export function historyLabel(row: Pick<VersionRow, "kind" | "label">): string {
   const label = row.label?.trim();
   if (!label) return KIND_LABEL[row.kind];
   if (label in LEGACY_LABELS) return LEGACY_LABELS[label] ?? KIND_LABEL[row.kind];
+  // Pontos da troca gravados com o nome antigo ("Antes de trocar a moeda para …"): o nome curto de hoje.
+  const currency = currencyTarget(row);
+  if (currency) return currencyVersionLabel(currency);
   return label;
+}
+
+/** Selo do tipo do ponto ("Troca de moeda" nos pontos da troca da moeda da oferta). */
+export function historyBadge(row: Pick<VersionRow, "kind" | "label">): string {
+  return currencyTarget(row) ? "Troca de moeda" : KIND_LABEL[row.kind];
+}
+
+/**
+ * Confirmação de "Restaurar": num ponto de antes da troca da moeda, avisa que
+ * só esta página volta para a moeda de antes (a oferta, o pagamento na página
+ * e as outras páginas continuam na de agora).
+ */
+export function restoreDescription(
+  row: Pick<VersionRow, "kind" | "label"> | null,
+  offerCurrency: StoreCurrency | undefined,
+): string {
+  const base =
+    "A página volta a ficar como estava nesse ponto do histórico. A situação atual é guardada antes, então dá para desfazer pelo próprio Histórico.";
+  if (!row || !currencyTarget(row)) return base;
+  const rest = offerCurrency
+    ? `a oferta, o pagamento na página e as outras páginas continuam em ${OFFER_CURRENCY_NAME[offerCurrency]}`
+    : "a oferta, o pagamento na página e as outras páginas continuam na moeda de agora";
+  return `Este ponto é de antes de a moeda da oferta mudar. Restaurar volta só esta página, com as vitrines e caixas de compra na moeda de antes: ${rest}. Para desfazer a troca na oferta inteira, troque a moeda de volta no cartão “Moeda da oferta” (aba “Moeda, empresa e SEO”).`;
 }
 
 /**
@@ -156,11 +189,14 @@ export function VersionsDialog({ payload, open, onOpenChange, saveNow, reloadDis
               {versions.map((v) => (
                 <li key={v.id} className="flex items-center gap-3 px-3 py-2.5">
                   <div className="min-w-0 flex-1">
-                    <p className="truncate text-sm font-medium">{historyLabel(v)}</p>
+                    {/* O nome pode quebrar a linha (nomes longos não somem no "…"). */}
+                    <p className="line-clamp-2 break-words text-sm font-medium" title={historyLabel(v)}>
+                      {historyLabel(v)}
+                    </p>
                     <p className="text-xs text-muted-foreground">{dateTime(v.createdAt)}</p>
                   </div>
-                  {historyLabel(v) !== KIND_LABEL[v.kind] && (
-                    <Badge variant={v.kind === "MANUAL" ? "secondary" : "outline"}>{KIND_LABEL[v.kind]}</Badge>
+                  {historyLabel(v) !== historyBadge(v) && (
+                    <Badge variant={v.kind === "MANUAL" ? "secondary" : "outline"}>{historyBadge(v)}</Badge>
                   )}
                   <Button
                     variant="ghost"
@@ -182,7 +218,7 @@ export function VersionsDialog({ payload, open, onOpenChange, saveNow, reloadDis
         open={restoring !== null}
         onOpenChange={(o) => !o && setRestoring(null)}
         title="Voltar para este ponto?"
-        description="A página volta a ficar como estava nesse ponto do histórico. A situação atual é guardada antes, então dá para desfazer pelo próprio Histórico."
+        description={restoreDescription(restoring, payload.offer.currency)}
         confirmLabel="Restaurar"
         pending={busy}
         onConfirm={() => restoring && void restore(restoring)}

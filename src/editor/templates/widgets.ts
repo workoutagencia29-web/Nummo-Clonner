@@ -160,6 +160,8 @@ export function salesNotification(opts: { action: string; product?: string }) {
 /**
  * Rodapé com links para as páginas legais (escolhidas no editor), o link
  * "Preferências de cookies" (reabre o aviso de cookies; ver src/runtime/tracking) e aviso.
+ * data-os-ft-logo="0": é o tipo "Rodapé" do editor, com o logo desligado (ligar
+ * põe o logo no começo da .os-container: src/editor/widgets/footer.ts).
  */
 export function footer(opts: { disclaimer?: string; links?: boolean } = {}) {
   const links =
@@ -168,7 +170,7 @@ export function footer(opts: { disclaimer?: string; links?: boolean } = {}) {
       : `<ul class="os-footer-links"><li><a href="#">Política de privacidade</a></li><li><a href="#">Termos de uso</a></li><li><a href="#">Contato</a></li><li><a href="#" data-os-consent-open>Preferências de cookies</a></li></ul>`;
   const disclaimer = opts.disclaimer ? `<p class="os-disclaimer">${opts.disclaimer}</p>` : "";
   return (
-    `<footer class="os-footer"><div class="os-container">` +
+    `<footer class="os-footer" data-os-ft-logo="0"><div class="os-container">` +
     links +
     `<p>© ${YEAR_MARKER} <span class="os-ph">{{EMPRESA}}</span> · CNPJ <span class="os-ph">{{CNPJ}}</span> · Todos os direitos reservados.</p>` +
     disclaimer +

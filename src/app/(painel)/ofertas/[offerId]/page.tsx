@@ -7,6 +7,7 @@ import { UnsavedChangesGuard } from "@/components/app/unsaved-changes-guard";
 import { EXPORT_QUERY_PARAM } from "@/components/offers/export/logic";
 import { OfferExportActions } from "@/components/offers/export/offer-export-actions";
 import { OfferDetailsForm } from "@/components/offers/offer-details-form";
+import { OfferHeader } from "@/components/offers/offer-header";
 import { OfferLinks } from "@/components/offers/offer-links";
 import { OfferTabs } from "@/components/offers/offer-tabs";
 import { OfferThumbnail } from "@/components/offers/offer-thumbnail";
@@ -23,12 +24,12 @@ import { TrackingTab } from "@/components/offers/tracking/tracking-tab";
 import { Button } from "@/components/ui/button";
 import { TabsContent } from "@/components/ui/tabs";
 import { dateTime, plural } from "@/lib/format";
-import { gatewayKeyState } from "@/lib/payments/checks";
+import { chosenOfferCurrency, offerCurrencyOf } from "@/lib/offer-currency";
 import { getOfferDetail, getSidebarData } from "@/server/queries";
 import { existingFunnel } from "@/server/services/funnel";
 import { linkUsageDetail, listOfferLinks } from "@/server/services/offer-links";
 import { listTags } from "@/server/services/organize";
-import { listPaymentGateways } from "@/server/services/payments/gateways";
+import { offerPaymentAccounts, paymentKeySources } from "@/server/services/payments/gateways";
 import { getOfferReadiness } from "@/server/services/readiness";
 import { requireSession } from "@/server/session";
 
@@ -60,12 +61,16 @@ export default async function OfferPage({ params, searchParams }: PageProps<"/of
   const query = await searchParams;
   const [offer, tags, sidebar] = await Promise.all([getOfferDetail(offerId), listTags(), getSidebarData()]);
   if (!offer) notFound();
-  const [links, usage, funnel, gateways] = await Promise.all([
-    listOfferLinks(offer.id),
-    linkUsageDetail(offer.id),
-    existingFunnel(offer.id),
-    listPaymentGateways(),
-  ]);
+  const [links, usage, funnel, [paymentAccount, ...checkoutAccounts], keySources, flevoSources, blackcatSources] =
+    await Promise.all([
+      listOfferLinks(offer.id),
+      linkUsageDetail(offer.id),
+      existingFunnel(offer.id),
+      offerPaymentAccounts(offer.id),
+      paymentKeySources(offer.id, "KYVO"),
+      paymentKeySources(offer.id, "FLEVOPAY"),
+      paymentKeySources(offer.id, "BLACKCAT"),
+    ]);
   const readiness = await getOfferReadiness({ id: offer.id, liveUrl: offer.liveUrl, links });
 
   const folders = sidebar.folders.map(({ id, name }) => ({ id, name }));
@@ -89,60 +94,56 @@ export default async function OfferPage({ params, searchParams }: PageProps<"/of
         <span className="truncate text-foreground">{offer.name}</span>
       </nav>
 
-      <header className="flex items-start gap-4">
-        <div className="aspect-[16/10] w-24 shrink-0 overflow-hidden rounded-lg border bg-muted sm:w-44">
-          <OfferThumbnail name={offer.name} thumbnailKey={offer.thumbnailKey} />
+      <OfferHeader
+        thumbnail={<OfferThumbnail name={offer.name} thumbnailKey={offer.thumbnailKey} />}
+        title={offer.name}
+        actions={
+          <OfferExportActions
+            offerId={offer.id}
+            autoOpen={wantsExport(query[EXPORT_QUERY_PARAM])}
+            menu={{
+              offer: {
+                id: offer.id,
+                name: offer.name,
+                status: offer.status,
+                folderId: offer.folderId,
+                tagIds: offer.tags.map((t) => t.tag.id),
+                liveUrl: offer.liveUrl,
+              },
+              autoRename: query[RENAME_QUERY_PARAM] === "1",
+              folders,
+              allTags,
+              afterTrashHref: "/ofertas",
+              trigger: (
+                <Button variant="outline" size="sm">
+                  <MoreHorizontalIcon />
+                  Ações
+                </Button>
+              ),
+            }}
+          />
+        }
+      >
+        {/* Sem "·" entre os itens: ao quebrar a linha no celular, nenhum separador fica solto. */}
+        <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-muted-foreground">
+          <StatusBadge status={offer.status} />
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+            <FileStackIcon className="size-3.5" aria-hidden="true" />
+            {plural(offer.pages.length, "página", "páginas")}
+          </span>
+          <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+            <CalendarIcon className="size-3.5" aria-hidden="true" />
+            Criada em {dateTime(offer.createdAt)}
+          </span>
         </div>
-        <div className="min-w-0 flex-1">
-          {/* No celular, os botões descem para baixo do título (senão o nome quebra no meio da palavra). */}
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <h1 className="min-w-0 text-xl font-semibold tracking-tight break-words sm:text-2xl">{offer.name}</h1>
-            <OfferExportActions
-              offerId={offer.id}
-              autoOpen={wantsExport(query[EXPORT_QUERY_PARAM])}
-              menu={{
-                offer: {
-                  id: offer.id,
-                  name: offer.name,
-                  status: offer.status,
-                  folderId: offer.folderId,
-                  tagIds: offer.tags.map((t) => t.tag.id),
-                  liveUrl: offer.liveUrl,
-                },
-                autoRename: query[RENAME_QUERY_PARAM] === "1",
-                folders,
-                allTags,
-                afterTrashHref: "/ofertas",
-                trigger: (
-                  <Button variant="outline" size="sm">
-                    <MoreHorizontalIcon />
-                    Ações
-                  </Button>
-                ),
-              }}
-            />
+        {offer.tags.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {offer.tags.map(({ tag }) => (
+              <TagChip key={tag.id} name={tag.name} color={tag.color} />
+            ))}
           </div>
-          {/* Sem "·" entre os itens: ao quebrar a linha no celular, nenhum separador fica solto. */}
-          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-sm text-muted-foreground">
-            <StatusBadge status={offer.status} />
-            <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-              <FileStackIcon className="size-3.5" aria-hidden="true" />
-              {plural(offer.pages.length, "página", "páginas")}
-            </span>
-            <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-              <CalendarIcon className="size-3.5" aria-hidden="true" />
-              Criada em {dateTime(offer.createdAt)}
-            </span>
-          </div>
-          {offer.tags.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-1.5">
-              {offer.tags.map(({ tag }) => (
-                <TagChip key={tag.id} name={tag.name} color={tag.color} />
-              ))}
-            </div>
-          )}
-        </div>
-      </header>
+        )}
+      </OfferHeader>
 
       <ReadinessCard offerId={offer.id} readiness={readiness} />
 
@@ -160,6 +161,7 @@ export default async function OfferPage({ params, searchParams }: PageProps<"/of
               ...documentsOf(p.variants[0]?.documents ?? []),
             }))}
             existingFunnel={funnel}
+            offerCurrency={offerCurrencyOf(offer.settings)}
           />
         </TabsContent>
         <TabsContent value="links" keepMounted className="mt-4">
@@ -171,9 +173,12 @@ export default async function OfferPage({ params, searchParams }: PageProps<"/of
               prizes: usage.prizes.get(l.key) ?? 0,
             }))}
             pages={offer.pages.map((p) => ({ id: p.id, name: p.name, type: p.type }))}
-            paymentsKey={gatewayKeyState(
-              gateways.find((g) => g.configured) ?? { configured: false, keyUnreadable: false, checkStatus: null },
-            )}
+            offerCurrency={chosenOfferCurrency(offer.settings)}
+            checkoutCurrency={offerCurrencyOf(offer.settings)}
+            paymentAccount={paymentAccount}
+            paymentKeySources={keySources}
+            checkoutAccounts={checkoutAccounts}
+            checkoutKeySources={{ FLEVOPAY: flevoSources, BLACKCAT: blackcatSources }}
           />
         </TabsContent>
         <TabsContent value="rastreamento" keepMounted className="mt-4">
@@ -187,7 +192,9 @@ export default async function OfferPage({ params, searchParams }: PageProps<"/of
           </Suspense>
         </TabsContent>
         <TabsContent value="detalhes" keepMounted className="mt-4">
-          <OfferDetailsForm offer={offer} />
+          <OfferDetailsForm
+            offer={{ id: offer.id, notes: offer.notes, liveUrl: offer.liveUrl, sourceUrl: offer.sourceUrl }}
+          />
         </TabsContent>
       </OfferTabs>
       {/* Abas abertas continuam montadas (keepMounted): o não salvo fica lá na volta; sair pergunta antes. */}

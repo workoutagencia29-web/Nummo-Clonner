@@ -132,9 +132,10 @@ test.describe("Baixar ZIP", () => {
     await expect(dialog).toBeVisible();
     await expect.poll(() => treePaths(dialog)).toEqual(expect.arrayContaining(["index.html", "obrigado/", "assets/"]));
     await expect(dialog.getByText("Nenhum ZIP gerado ainda.")).toBeVisible();
-    // Oferta sem versões A/B e sem token: só a opção do HTML.
-    await expect(dialog.getByRole("switch")).toHaveCount(1);
+    // Oferta sem versões A/B e sem token: só as opções do HTML e das imagens.
+    await expect(dialog.getByRole("switch")).toHaveCount(2);
     await expect(dialog.getByRole("switch", { name: "HTML otimizado" })).toBeChecked();
+    await expect(dialog.getByRole("switch", { name: "Imagens mais leves" })).toBeChecked();
 
     // 2º clique: gerar. O download começa sozinho.
     const download = await generateAndDownload(page, dialog);

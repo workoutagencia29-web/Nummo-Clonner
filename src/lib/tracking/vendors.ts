@@ -17,6 +17,7 @@ export const VENDOR_EVENT_NAMES: Record<PixelVendorId, Record<TrackingEventId, s
     CONTACT: "Contact",
     ADD_TO_CART: "AddToCart",
     PURCHASE: "Purchase",
+    ADD_PAYMENT_INFO: "AddPaymentInfo",
   },
   // Nomes atuais da documentação do TikTok (Lead/Purchase substituem SubmitForm/CompletePayment).
   TIKTOK: {
@@ -28,6 +29,7 @@ export const VENDOR_EVENT_NAMES: Record<PixelVendorId, Record<TrackingEventId, s
     CONTACT: "Contact",
     ADD_TO_CART: "AddToCart",
     PURCHASE: "Purchase",
+    ADD_PAYMENT_INFO: "AddPaymentInfo",
   },
   // Pixel web do Kwai: kwaiq.instance(id).track("<nome>") com os nomes em camelCase
   // (os EVENT_* são da API de servidor do Kwai). O PageView sai por kwaiq.page().
@@ -40,6 +42,7 @@ export const VENDOR_EVENT_NAMES: Record<PixelVendorId, Record<TrackingEventId, s
     CONTACT: "contact",
     ADD_TO_CART: "addToCart",
     PURCHASE: "purchase",
+    ADD_PAYMENT_INFO: "addPaymentInfo",
   },
   GA4: {
     PAGE_VIEW: "page_view",
@@ -50,6 +53,7 @@ export const VENDOR_EVENT_NAMES: Record<PixelVendorId, Record<TrackingEventId, s
     CONTACT: "contact",
     ADD_TO_CART: "add_to_cart",
     PURCHASE: "purchase",
+    ADD_PAYMENT_INFO: "add_payment_info",
   },
   // Google Ads só registra conversões dos eventos que têm rótulo (options.conversionLabels).
   GOOGLE_ADS: {
@@ -61,6 +65,7 @@ export const VENDOR_EVENT_NAMES: Record<PixelVendorId, Record<TrackingEventId, s
     CONTACT: "conversion",
     ADD_TO_CART: "conversion",
     PURCHASE: "conversion",
+    ADD_PAYMENT_INFO: "conversion",
   },
   // O pixel da UTMify repassa os eventos padrão da Meta.
   UTMIFY: {
@@ -72,6 +77,7 @@ export const VENDOR_EVENT_NAMES: Record<PixelVendorId, Record<TrackingEventId, s
     CONTACT: "Contact",
     ADD_TO_CART: "AddToCart",
     PURCHASE: "Purchase",
+    ADD_PAYMENT_INFO: "AddPaymentInfo",
   },
 };
 

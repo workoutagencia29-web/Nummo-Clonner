@@ -31,7 +31,70 @@ function svg(content: string, bg = "#ffffff") {
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${W} ${H}" width="${W}" height="${H}">${rect(0, 0, W, H, bg)}${content}</svg>`;
 }
 
+/** Faixa de aviso, cabeçalho de loja amarelo e linha de categorias (modelos da loja). */
+function storeHeader() {
+  return (
+    rect(0, 0, W, 7, "#08793c") +
+    rect(0, 7, W, 28, "#ffe94d") +
+    rect(10, 13, 40, 15, "#ffffff", 4, ' stroke="#9aa3b2" stroke-dasharray="3 2"') +
+    rect(60, 13, 196, 15, "#ffffff", 3) +
+    rect(64, 18.5, 70, 4, "#cbd5e1", 2) +
+    `<g fill="none" stroke="#333" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M276 15.5h3l3 10h10l2-7h-13"/><circle cx="284" cy="28" r="1.2"/><circle cx="291" cy="28" r="1.2"/></g>` +
+    rect(0, 35, W, 12, "#ffe94d") +
+    [0, 1, 2, 3, 4].map((i) => rect(12 + i * 46, 39, 34, 4, "#7a6f1c", 2)).join("")
+  );
+}
+
+/** Cartão de produto em miniatura (foto, nome, preço). */
+function miniCard(x: number, y: number, w: number, h: number, fill = "#ffffff") {
+  const photo = Math.min(w - 8, h * 0.5);
+  return (
+    rect(x, y, w, h, fill, 3) +
+    rect(x + (w - photo) / 2, y + 4, photo, photo, "#e8ebf2", 2) +
+    rect(x + 4, y + photo + 8, w - 10, 3, "#94a3b8", 1.5) +
+    rect(x + 4, y + photo + 14, w * 0.5, 5, "#333333", 2) +
+    rect(x + 4, y + photo + 22, w * 0.4, 3, "#00863f", 1.5)
+  );
+}
+
 export const THUMBNAILS: Record<string, string> = {
+  loja: svg(
+    storeHeader() +
+      rect(10, 53, 300, 40, "#dbe4ff", 5) +
+      imageIcon(160, 73, "#4f46e5") +
+      rect(10, 99, 86, 78, "#ffffff", 4) +
+      rect(16, 105, 40, 5, "#1f2937", 2) +
+      miniCard(16, 115, 74, 58, "#ffffff") +
+      rect(102, 99, 208, 78, "#ffffff", 4) +
+      rect(108, 105, 30, 5, "#1f2937", 2) +
+      rect(142, 105.5, 50, 4, "#1f63d6", 2) +
+      [0, 1, 2, 3].map((i) => miniCard(108 + i * 49, 115, 44, 58)).join("") +
+      `<circle cx="304" cy="135" r="7" fill="#ffffff" stroke="#d1d5db"/><path d="M302.5 132l3 3-3 3" fill="none" stroke="#1f63d6" stroke-width="1.4"/>` +
+      rect(0, 184, W, 50, "#1462d6") +
+      rect(10, 189, 90, 5, "#ffffff", 2.5) +
+      [0, 1, 2, 3, 4, 5].map((i) => miniCard(10 + i * 51, 198, 46, 34, "#ffffff")).join(""),
+    "#ededed",
+  ),
+  produto: svg(
+    storeHeader() +
+      rect(8, 52, 304, 188, "#ffffff", 5) +
+      rect(16, 58, 54, 4, "#1f63d6", 2) +
+      [0, 1, 2].map((i) => rect(16, 68 + i * 20, 16, 16, "#ffffff", 2, ' stroke="#d1d5db"')).join("") +
+      rect(38, 68, 116, 116, "#e8ebf2", 4) +
+      imageIcon(96, 126, "#a3abbd") +
+      rect(162, 68, 142, 128, "#ffffff", 4, ' stroke="#e5e7eb"') +
+      linesLeft(170, 76, [120, 92], "#1f2937", 6, 10) +
+      `<text x="170" y="104" font-family="Arial,sans-serif" font-size="9" fill="#f5a623">★★★★★</text>` +
+      rect(170, 110, 44, 4, "#94a3b8", 2) +
+      rect(170, 118, 62, 12, "#333333", 3) +
+      rect(236, 120, 22, 6, "#00863f", 3) +
+      rect(170, 136, 80, 4, "#00863f", 2) +
+      rect(170, 146, 126, 16, "#1f63d6", 3) +
+      linesLeft(176, 170, [90, 104, 80], "#94a3b8", 3, 8) +
+      rect(16, 204, 60, 6, "#1f2937", 3) +
+      linesLeft(16, 216, [288, 260, 200], "#cbd5e1", 4, 8),
+    "#ededed",
+  ),
   "vendas-longa": svg(
     rect(0, 0, W, 12, "#f59e0b") +
       rect(0, 12, W, 140, "#0b1220") +

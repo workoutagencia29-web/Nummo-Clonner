@@ -6,9 +6,11 @@ import { prisma } from "@/lib/db";
 import { UserError } from "@/lib/errors";
 import { remapInternalLinks } from "@/lib/internal-links";
 import { transformPackedProject } from "@/lib/project-data";
+import type { StoreCurrency } from "@/lib/store";
 import { copyName, normalizeText } from "@/lib/text";
 import { removeVersionFiles } from "@/server/services/documents";
 import { pageStart, templateThumbnailKey } from "@/server/services/page-templates";
+import { rememberOfferCurrency } from "@/server/services/preferences";
 
 export const OFFER_STATUS_VALUES = ["DRAFT", "LIVE", "ARCHIVED"] as const;
 export type OfferStatusValue = (typeof OFFER_STATUS_VALUES)[number];
@@ -99,41 +101,53 @@ export interface CreateOfferInput {
   notes?: string | null;
   /** Modelo da primeira página (src/editor/templates); sem modelo, ela começa em branco. */
   templateId?: string | null;
+  /**
+   * Moeda em que a oferta vai rodar ("Em qual moeda essa oferta vai rodar?"):
+   * fica nas configurações, os modelos da loja nascem nela e ela vem marcada
+   * na próxima "Nova oferta". Sem ela: real (e a última escolhida não muda).
+   */
+  currency?: StoreCurrency;
 }
 
 /** Cria uma oferta com a página inicial (variação A), em branco ou a partir de um modelo. */
 export async function createOffer(input: CreateOfferInput) {
   await assertFolder(input.folderId);
   await assertTags(input.tagIds ?? []);
-  const start = pageStart(input.templateId, input.name);
+  const start = pageStart(input.templateId, input.name, input.currency);
   // Oferta de modelo: a capa é o esboço do modelo (as clonadas ganham o print da página).
   const thumbnailKey = await templateThumbnailKey(input.templateId);
-  return prisma.offer.create({
-    data: {
-      name: input.name,
-      thumbnailKey,
-      notes: input.notes || null,
-      folderId: input.folderId || null,
-      tags: { create: [...new Set(input.tagIds ?? [])].map((tagId) => ({ tagId })) },
-      pages: {
-        create: {
-          name: "Página principal",
-          slug: "principal",
-          type: start.type,
-          isHome: true,
-          position: 0,
-          variants: {
-            create: {
-              name: "A",
-              isControl: true,
-              weight: 100,
-              documents: { create: { device: "ALL", html: start.html } },
-            },
+  const data = {
+    name: input.name,
+    thumbnailKey,
+    notes: input.notes || null,
+    folderId: input.folderId || null,
+    ...(input.currency ? { settings: { currency: input.currency } } : {}),
+    tags: { create: [...new Set(input.tagIds ?? [])].map((tagId) => ({ tagId })) },
+    pages: {
+      create: {
+        name: "Página principal",
+        slug: "principal",
+        type: start.type,
+        isHome: true,
+        position: 0,
+        variants: {
+          create: {
+            name: "A",
+            isControl: true,
+            weight: 100,
+            documents: { create: { device: "ALL" as const, html: start.html } },
           },
         },
       },
     },
-    select: { id: true },
+  } satisfies Prisma.OfferUncheckedCreateInput;
+  const currency = input.currency;
+  if (!currency) return prisma.offer.create({ data, select: { id: true } });
+  // A moeda escolhida vem marcada na próxima "Nova oferta" (junto com a oferta criada).
+  return prisma.$transaction(async (tx) => {
+    const offer = await tx.offer.create({ data, select: { id: true } });
+    await rememberOfferCurrency(currency, tx);
+    return offer;
   });
 }
 
@@ -193,7 +207,8 @@ export async function duplicateOffer(offerId: string) {
       pixels: true,
       eventRules: true,
       assets: true,
-      links: { include: { payment: true } },
+      links: { include: { payment: true, checkout: true } },
+      paymentGateways: true,
     },
   });
   if (!source) throw new UserError("Oferta não encontrada.");
@@ -315,16 +330,18 @@ export async function duplicateOffer(offerId: string) {
       if (source.links.length) {
         // Os botões guardam a chave do link, então a cópia funciona sem remapear.
         await tx.offerLink.createMany({
-          data: source.links.map(({ id: _id, offerId: _o, createdAt: _c, updatedAt: _u, payment: _p, ...rest }) => ({
-            ...rest,
-            offerId: copy.id,
-          })),
+          data: source.links.map(
+            ({ id: _id, offerId: _o, createdAt: _c, updatedAt: _u, payment: _p, checkout: _k, ...rest }) => ({
+              ...rest,
+              offerId: copy.id,
+            }),
+          ),
         });
-        // Produtos de pagamento: no link novo (pela chave), com a página de obrigado da cópia.
+        // Produtos de pagamento e do checkout: no link novo (pela chave), com a página de obrigado da cópia.
+        const copied = await tx.offerLink.findMany({ where: { offerId: copy.id }, select: { id: true, key: true } });
+        const linkIdByKey = new Map(copied.map((l) => [l.key, l.id]));
         const withPayment = source.links.filter((l) => l.payment);
         if (withPayment.length) {
-          const copied = await tx.offerLink.findMany({ where: { offerId: copy.id }, select: { id: true, key: true } });
-          const linkIdByKey = new Map(copied.map((l) => [l.key, l.id]));
           await tx.paymentProduct.createMany({
             data: withPayment.flatMap((l) => {
               const linkId = linkIdByKey.get(l.key);
@@ -336,6 +353,34 @@ export async function duplicateOffer(offerId: string) {
             }),
           });
         }
+        // Checkout do Offer Studio: a configuração inteira (as imagens são da biblioteca, copiada abaixo).
+        const withCheckout = source.links.filter((l) => l.checkout);
+        if (withCheckout.length) {
+          await tx.checkoutProduct.createMany({
+            data: withCheckout.flatMap((l) => {
+              const linkId = linkIdByKey.get(l.key);
+              if (!l.checkout || !linkId) return [];
+              const { id: _id, linkId: _l, createdAt: _c, updatedAt: _u, thankYouPageId, config, ...rest } = l.checkout;
+              return [
+                {
+                  ...rest,
+                  linkId,
+                  config: config ?? {},
+                  thankYouPageId: thankYouPageId ? (pageIdMap.get(thankYouPageId) ?? null) : null,
+                },
+              ];
+            }),
+          });
+        }
+      }
+      if (source.paymentGateways.length) {
+        // Conta do gateway da oferta: a mesma chave (criptografada) e o último teste (é a mesma chave).
+        await tx.paymentGateway.createMany({
+          data: source.paymentGateways.map(({ offerId: _o, createdAt: _c, updatedAt: _u, ...rest }) => ({
+            ...rest,
+            offerId: copy.id,
+          })),
+        });
       }
       if (source.assets.length) {
         // Os arquivos são endereçados por hash: basta referenciar a mesma chave.

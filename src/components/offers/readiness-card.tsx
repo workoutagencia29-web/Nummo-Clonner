@@ -4,7 +4,7 @@ import { CheckIcon, ChevronDownIcon } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { OPEN_EXPORT_EVENT } from "@/components/offers/export/logic";
-import { offerLinkHref } from "@/components/offers/offer-link-href";
+import { offerLinkHref, offerPaymentAccountHref, offerSettingHref } from "@/components/offers/offer-link-href";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Progress } from "@/components/ui/progress";
@@ -50,10 +50,10 @@ function ItemAction({ offerId, item }: { offerId: string; item: ReadinessItem })
       </Button>
     );
   }
-  if ("settings" in item.target) {
+  if ("paymentAccount" in item.target) {
     return (
       <Button size="sm" variant={variant} asChild>
-        <Link href={`/configuracoes#${item.target.settings}`} aria-label={aria}>
+        <Link href={offerPaymentAccountHref(offerId, item.target.provider)} scroll={false} aria-label={aria}>
           {item.cta}
         </Link>
       </Button>
@@ -63,6 +63,15 @@ function ItemAction({ offerId, item }: { offerId: string; item: ReadinessItem })
     return (
       <Button size="sm" variant={variant} asChild>
         <Link href={offerLinkHref(offerId, item.target.link)} scroll={false} aria-label={aria}>
+          {item.cta}
+        </Link>
+      </Button>
+    );
+  }
+  if ("setting" in item.target) {
+    return (
+      <Button size="sm" variant={variant} asChild>
+        <Link href={offerSettingHref(offerId, item.target.setting)} scroll={false} aria-label={aria}>
           {item.cta}
         </Link>
       </Button>

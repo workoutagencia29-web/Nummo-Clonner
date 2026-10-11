@@ -25,6 +25,8 @@ vi.mock("@/server/actions/tracking", () => ({
 }));
 vi.mock("@/server/actions/offer-settings", () => ({
   saveOfferSettingsAction: vi.fn(),
+  getCurrencySwitchPlanAction: vi.fn(),
+  switchOfferCurrencyAction: vi.fn(),
   getPageSeoAction: vi.fn(),
   savePageSeoAction: vi.fn(),
 }));
@@ -241,6 +243,7 @@ describe("Empresa e SEO (primeira pintura)", () => {
     return {
       offer: { id: "oferta1", name: "Oferta", liveUrl: null },
       settings,
+      currencyMismatch: null,
       faviconSrc: null,
       ogImageSrc: null,
       pages: [

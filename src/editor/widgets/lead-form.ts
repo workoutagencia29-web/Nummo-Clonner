@@ -4,6 +4,10 @@
  * valida, manda para o webhook e/ou vai para o endereço escolhido
  * (src/runtime/widgets/lead-form.ts). O destino fica no atributo action: URL,
  * página do funil (os-page:<id>) ou link da oferta (data-os-link).
+ *
+ * Cada caixa de texto do formulário ganha, ao ser selecionada, o campo "Texto
+ * dentro do campo", que grava o placeholder e o nome lido pelo leitor de tela
+ * (aria-label) juntos.
  */
 import type { Component, Editor } from "grapesjs";
 import { type Def, el, onMobile, text } from "@/editor/blocks/shared";
@@ -186,7 +190,41 @@ const TRAITS: TraitDef[] = [
   textAttr("data-os-success", "Mensagem de sucesso (sem redirecionar)", "Pronto! Recebemos seus dados."),
 ];
 
+/** Campo "Texto dentro do campo" das caixas de texto do formulário. */
+export const LEAD_INPUT_TEXT_TRAIT = "os-lf-input-text";
+
+/** Caixa de texto (não caixa de marcar) de um formulário de captura. */
+function isLeadInput(c: Component): boolean {
+  if (String(c.get("tagName") ?? "").toLowerCase() !== "input") return false;
+  if (/^(checkbox|radio|hidden|submit|button|image|reset)$/i.test(attr(c, "type"))) return false;
+  for (let at = c.parent(); at; at = at.parent()) if (attr(at, "data-os-widget") === "lead-form") return true;
+  return false;
+}
+
+const leadInputTextTrait: TraitDef = {
+  type: "text",
+  name: LEAD_INPUT_TEXT_TRAIT,
+  label: "Texto dentro do campo",
+  getValue: ({ component }) => attr(component, "placeholder"),
+  setValue: ({ component, value }) => {
+    const text = String(value ?? "")
+      .replace(/\s+/g, " ")
+      .trim();
+    // Vazio: volta o texto com que o campo nasceu (o campo nunca fica sem nome para o leitor de tela).
+    const key = attr(component.parent() ?? component, "data-os-field") as LeadFieldKey;
+    const def = FIELDS[key]?.attrs;
+    const placeholder = text || String(def?.placeholder ?? "");
+    const label = text ? text.replace(/[\s.…:]+$/, "") : String(def?.["aria-label"] ?? "");
+    if (!placeholder && !label) return;
+    component.addAttributes({ placeholder, "aria-label": label || placeholder });
+  },
+};
+
 export function registerLeadFormType(editor: Editor) {
+  // Caixa de texto do formulário: o texto de dentro e o nome do leitor de tela, juntos.
+  editor.on("component:selected", (c: Component) => {
+    if (isLeadInput(c) && !c.getTrait(LEAD_INPUT_TEXT_TRAIT)) c.addTrait(leadInputTextTrait as never, { at: 0 });
+  });
   editor.DomComponents.addType("os-lead-form", {
     isComponent: (node) => node.tagName === "FORM" && node.getAttribute?.("data-os-widget") === "lead-form",
     model: { defaults: { tagName: "form", name: "Formulário de captura", traits: TRAITS } },

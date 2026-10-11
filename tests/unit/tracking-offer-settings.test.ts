@@ -49,6 +49,8 @@ describe("configurações da oferta", () => {
       company: { name: "ACME Ltda", document: "", email: "contato@acme.com.br", phone: "", address: "" },
       seo: { title: "Curso X", description: "", faviconKey: KEY, ogImageKey: null, noindex: true },
       language: "es",
+      // Oferta sem moeda nas configurações (como as de antes): real.
+      currency: "BRL",
     });
     const row = await prisma.offer.findUniqueOrThrow({ where: { id: offerId } });
     expect(row.settings).toMatchObject({ futuro: { x: 1 }, language: "es" });
@@ -219,5 +221,44 @@ describe("páginas legais: telefone, endereço e CPF/CNPJ", () => {
     expect(text(fillCompanyPlaceholders(old, company()))).toBe("inscrita no CPF sob o nº 123.456.789-09");
     // Número que não dá para saber: o rótulo fica como está.
     expect(text(fillCompanyPlaceholders(old, company({ document: "ABC" })))).toBe("inscrita no CNPJ sob o nº ABC");
+  });
+
+  it("documento de fora do Brasil: RFC (México) e NIF (Espanha/Portugal) saem com o rótulo certo", () => {
+    // RFC: empresa (3 letras) e pessoa física (4), com ou sem hífens/espaços.
+    expect(documentKind("ABC680524P76")).toBe("RFC");
+    expect(documentKind("GODE561231GR8")).toBe("RFC");
+    expect(documentKind("abc-680524-p76")).toBe("RFC");
+    expect(documentKind("ÑAB 680524 1A2")).toBe("RFC");
+    // NIF da Espanha: DNI, NIE e CIF (com o "ES" do IVA também); Portugal com "PT".
+    expect(documentKind("12345678Z")).toBe("NIF");
+    expect(documentKind("X1234567L")).toBe("NIF");
+    expect(documentKind("Y-1234567-X")).toBe("NIF");
+    expect(documentKind("B12345678")).toBe("NIF");
+    expect(documentKind("B-1234567-J")).toBe("NIF");
+    expect(documentKind("ESB12345678")).toBe("NIF");
+    expect(documentKind("PT 123 456 789")).toBe("NIF");
+    // Portugal só com algarismos: só numa oferta em euro (9 algarismos podem ser outra coisa).
+    expect(documentKind("123 456 789")).toBeNull();
+    expect(documentKind("123 456 789", "BRL")).toBeNull();
+    expect(documentKind("123 456 789", "EUR")).toBe("NIF");
+    // CPF e CNPJ como antes (também numa oferta em euro).
+    expect(documentKind("123.456.789-09", "EUR")).toBe("CPF");
+    expect(documentKind("12.345.678/0001-90", "MXN")).toBe("CNPJ");
+    // Texto qualquer: não dá para saber.
+    for (const other of ["ABC", "Empresa X", "12345", "A1234567"]) expect(documentKind(other), other).toBeNull();
+
+    const terms = text(fillCompanyPlaceholders(termsHtml, company({ document: "ABC680524P76" })));
+    expect(terms).toContain("RFC nº ABC680524P76");
+    expect(terms).not.toMatch(/CNPJ(\/CPF)?\s*(nº\s*)?ABC680524P76/);
+    const privacy = text(fillCompanyPlaceholders(privacyHtml, company({ document: "B12345678" })));
+    expect(privacy).toContain("NIF B12345678");
+    expect(privacy).not.toMatch(/CNPJ(\/CPF)?\s*B12345678/);
+    const old = '<p>inscrita no CNPJ sob o nº <span class="os-ph">{{CNPJ}}</span></p>';
+    expect(text(fillCompanyPlaceholders(old, company({ document: "123456789" }), "EUR"))).toBe(
+      "inscrita no NIF sob o nº 123456789",
+    );
+    expect(text(fillCompanyPlaceholders(old, company({ document: "123456789" })))).toBe(
+      "inscrita no CNPJ sob o nº 123456789",
+    );
   });
 });

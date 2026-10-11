@@ -1,12 +1,16 @@
 "use client";
 
 /**
- * Aba "Empresa e SEO" da oferta: dados da empresa (preenchem os marcadores
- * das páginas de Política/Termos), SEO padrão das páginas e o SEO de cada
- * página. Os dados vêm de getOfferSettingsPanel (src/server/services/offer-settings.ts).
+ * Aba "Moeda, empresa e SEO" da oferta: moeda da oferta (./currency-form.tsx,
+ * com o aviso das páginas que ficaram em outra moeda),
+ * dados da empresa (preenchem os marcadores das páginas de Política/Termos), SEO
+ * padrão das páginas e o SEO de cada página. Os dados vêm de
+ * getOfferSettingsPanel (src/server/services/offer-settings.ts).
  */
 import { Building2Icon, FileTextIcon, HomeIcon, SearchIcon } from "lucide-react";
-import { useId, useState } from "react";
+import { useSearchParams } from "next/navigation";
+import { useEffect, useId, useRef, useState } from "react";
+import { LANGUAGE_SETTING, SETTING_QUERY_PARAM } from "@/components/offers/offer-link-href";
 import { Callout } from "@/components/offers/tracking/callout";
 import { CharCount, Panel, SaveBar, SectionHeading, SwitchRow, useDraft } from "@/components/offers/tracking/form-kit";
 import { Badge } from "@/components/ui/badge";
@@ -15,16 +19,20 @@ import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
+import { replaceQuery } from "@/hooks/replace-query";
 import { useAction } from "@/hooks/use-action";
 import { PAGE_TYPE_LABEL } from "@/lib/labels";
 import type { Company, OfferSettings } from "@/lib/offer-settings";
+import type { StoreCurrency } from "@/lib/store";
 import { saveOfferSettingsAction } from "@/server/actions/offer-settings";
 import type { OfferSettingsPanel as OfferSettingsPanelData } from "@/server/services/offer-settings";
+import { CurrencyForm } from "./currency-form";
 import {
   COMPANY_FIELDS,
   COMPANY_MAX,
   type CompanyFieldKey,
   companyEmailProblem,
+  companyPlaceholder,
   KEEP_LANGUAGE,
   LANGUAGE_LABEL,
   type LanguageId,
@@ -37,7 +45,7 @@ import { SearchPreview } from "./search-preview";
 
 // ─── Dados da empresa ───────────────────────────────────────────────────────
 
-function CompanyForm({ offerId, company }: { offerId: string; company: Company }) {
+function CompanyForm({ offerId, company, currency }: { offerId: string; company: Company; currency: StoreCurrency }) {
   const { draft, patch, dirty, reset, commit } = useDraft(company);
   const [errors, setErrors] = useState<Partial<Record<CompanyFieldKey | "form", string>>>({});
   const save = useAction(saveOfferSettingsAction);
@@ -107,7 +115,7 @@ function CompanyForm({ offerId, company }: { offerId: string; company: Company }
                   id={id}
                   value={draft[f.key]}
                   maxLength={COMPANY_MAX[f.key]}
-                  placeholder={f.placeholder}
+                  placeholder={companyPlaceholder(f.key, currency)}
                   type={f.key === "email" ? "email" : "text"}
                   inputMode={f.key === "phone" ? "tel" : f.key === "email" ? "email" : undefined}
                   autoComplete="off"
@@ -180,6 +188,36 @@ function SeoDefaultsForm({
   const [errors, setErrors] = useState<Partial<Record<SeoField, string>>>({});
   const save = useAction(saveOfferSettingsAction);
   const ids = useId();
+  // "Escolher o idioma" do "Próximos passos" (?campo=idioma): rola até o campo e põe o foco
+  // nele; o pedido sai do endereço (clicar de novo rola de novo). Fora do roteador (testes), nada.
+  // Como o ?link= da aba de links: o pedido vira um contador e a rolagem fica num efeito à parte —
+  // tirar o parâmetro do endereço muda o useSearchParams, e a rolagem não pode depender dele
+  // (a limpeza do efeito cancelaria o quadro antes de rolar).
+  const params = useSearchParams();
+  const focusLanguage = params?.get(SETTING_QUERY_PARAM) === LANGUAGE_SETTING;
+  const languageRef = useRef<HTMLButtonElement>(null);
+  const [languageFocus, setLanguageFocus] = useState(0);
+  // O anel de foco não aparece quando o foco vem do código: o campo fica destacado por alguns
+  // segundos (como o link pedido por ?link= na aba de links).
+  const [languageFlash, setLanguageFlash] = useState(false);
+  useEffect(() => {
+    if (!focusLanguage) return;
+    setLanguageFocus((n) => n + 1);
+    replaceQuery({ [SETTING_QUERY_PARAM]: null });
+  }, [focusLanguage]);
+  useEffect(() => {
+    if (!languageFocus) return;
+    setLanguageFlash(true);
+    const frame = requestAnimationFrame(() => {
+      languageRef.current?.scrollIntoView({ block: "center", behavior: "smooth" });
+      languageRef.current?.focus({ preventScroll: true });
+    });
+    const timer = setTimeout(() => setLanguageFlash(false), 4000);
+    return () => {
+      cancelAnimationFrame(frame);
+      clearTimeout(timer);
+    };
+  }, [languageFocus]);
 
   function change(changes: Partial<SeoDraft>, field?: SeoField) {
     patch(changes);
@@ -270,8 +308,9 @@ function SeoDefaultsForm({
               <ImageUploadField
                 offerId={offerId}
                 label="Ícone da aba (favicon)"
-                description="Imagem quadrada, de preferência 512×512."
+                description="Imagem quadrada (de preferência 512×512) ou um arquivo .ico."
                 shape="square"
+                icon
                 value={draft.faviconSrc}
                 error={errors.faviconKey}
                 onChange={(src) => change({ faviconSrc: src }, "faviconKey")}
@@ -300,7 +339,12 @@ function SeoDefaultsForm({
                   change({ language: v === KEEP_LANGUAGE ? "" : (v as keyof typeof LANGUAGE_LABEL) }, "language")
                 }
               >
-                <SelectTrigger id={`${ids}-language`} className="w-full">
+                <SelectTrigger
+                  ref={languageRef}
+                  id={`${ids}-language`}
+                  className={languageFlash ? "w-full ring-2 ring-primary" : "w-full"}
+                  data-highlight={languageFlash || undefined}
+                >
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -407,7 +451,18 @@ export function OfferSettingsPanel({ data }: { data: OfferSettingsPanelData }) {
   const { offer, settings } = data;
   return (
     <div className="flex max-w-5xl flex-col gap-6">
-      <CompanyForm key={JSON.stringify(settings.company)} offerId={offer.id} company={settings.company} />
+      <CurrencyForm
+        key={settings.currency}
+        offerId={offer.id}
+        currency={settings.currency}
+        mismatch={data.currencyMismatch}
+      />
+      <CompanyForm
+        key={JSON.stringify(settings.company)}
+        offerId={offer.id}
+        company={settings.company}
+        currency={settings.currency}
+      />
       <SeoDefaultsForm
         key={JSON.stringify([settings.seo, settings.language])}
         offerId={offer.id}

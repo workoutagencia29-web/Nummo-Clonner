@@ -376,7 +376,26 @@ interface TablePlan {
   selfColumns: string[];
 }
 
-function planTables(manifest: BackupManifest, schema: SchemaMeta, archive: BackupArchive): TablePlan[] {
+/**
+ * Tabelas num formato antigo que a restauração deixa de fora (com um aviso) em
+ * vez de recusar o backup inteiro. PaymentGateway sem offerId: a chave da Kyvo
+ * era uma só para o app (antes da chave por oferta) e não dá para saber de
+ * qual oferta ela é.
+ */
+const LEGACY_TABLES: Record<string, { column: string; warning: string }> = {
+  PaymentGateway: {
+    column: "offerId",
+    warning:
+      "A chave da Kyvo deste backup é de quando ela era uma só para o Offer Studio inteiro e não foi restaurada: cadastre de novo em cada oferta, na aba “Links e checkouts”.",
+  },
+};
+
+function planTables(
+  manifest: BackupManifest,
+  schema: SchemaMeta,
+  archive: BackupArchive,
+  warnings: string[] = [],
+): TablePlan[] {
   const current = new Set(backupTableNames(schema));
   const plans = new Map<string, TablePlan>();
   for (const entry of manifest.tables) {
@@ -385,6 +404,11 @@ function planTables(manifest: BackupManifest, schema: SchemaMeta, archive: Backu
     // Tabela que não existe mais nesta versão: fica de fora.
     if (!meta || !current.has(entry.name)) continue;
     const present = new Set(entry.columns);
+    const legacy = Object.hasOwn(LEGACY_TABLES, entry.name) ? LEGACY_TABLES[entry.name] : null;
+    if (legacy && !present.has(legacy.column)) {
+      if (entry.rows > 0) warnings.push(legacy.warning);
+      continue;
+    }
     const missingRequired = meta.columns.filter((c) => !present.has(c.name) && !c.nullable && !c.hasDefault);
     if (missingRequired.length) throw new UserError(OLD_INCOMPATIBLE_MESSAGE);
     const columns = meta.columns.map((c) => c.name).filter((c) => present.has(c));
@@ -480,7 +504,7 @@ export async function restoreBackup(opts: RestoreOptions): Promise<RestoreResult
     }
     const problem = compatibilityProblem(manifest, { appVersion: appVersion(), migrations });
     if (problem) throw new UserError(problem);
-    const plans = planTables(manifest, schema, opened);
+    const plans = planTables(manifest, schema, opened, warnings);
     // O tamanho de cada entrada tem que ser o prometido (o leitor do ZIP nunca
     // entrega mais que isso): um arquivo forjado não enche o disco nem a memória.
     for (const plan of plans) {

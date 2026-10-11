@@ -214,6 +214,26 @@ export function corruptFilesWarning(n: number): string {
 export const CORRUPT_FILES_RE = /estragados? neste Mac e fic/;
 
 /**
+ * Arquivos/pastas do storage que existem mas não puderam ser lidos (sem
+ * permissão, erro do disco): ficaram de fora do backup, que não falha por isso.
+ */
+export function unreadableFilesWarning(files: number, folders: number, denied = true): string {
+  const why = denied ? " (sem permissão)" : "";
+  const parts: string[] = [];
+  if (files === 1) parts.push(`1 arquivo não pôde ser lido${why} e ficou de fora do backup.`);
+  else if (files > 1) parts.push(`${files} arquivos não puderam ser lidos${why} e ficaram de fora do backup.`);
+  if (folders === 1) {
+    parts.push(`1 pasta de arquivos não pôde ser lida${why} e o que estava nela ficou de fora do backup.`);
+  } else if (folders > 1) {
+    parts.push(
+      `${folders} pastas de arquivos não puderam ser lidas${why} e o que estava nelas ficou de fora do backup.`,
+    );
+  }
+  return parts.join(" ");
+}
+export const UNREADABLE_FILES_RE = /não (?:pôde|puderam) ser lid[oa]s?(?: \(sem permissão\))? e /;
+
+/**
  * Diz se o backup pode ser restaurado nesta instalação. Recusa (com a mensagem
  * em pt-BR) um backup de uma versão mais nova: formato, versão do app ou uma
  * migration que este banco ainda não tem. Um backup mais antigo é aceito (as

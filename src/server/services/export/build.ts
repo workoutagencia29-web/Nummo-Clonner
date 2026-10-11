@@ -17,6 +17,8 @@
  *   os_versao em todo evento e a marca no checkout (src/runtime/tracking);
  * - canonical/alternate e o script de chegada (barra no fim, celular, versão
  *   A/B vista, file://);
+ * - "Imagens mais leves" (opção): lazy e dimensões nas imagens abaixo da
+ *   primeira tela (src/lib/export/lighter-images.ts; não nas "Com scripts");
  * - /os-assets/<arquivo> → assets/<arquivo> (também dentro dos CSS, que são
  *   copiados com as referências reescritas, recursivamente); com o endereço no
  *   ar, a imagem de compartilhamento (og:image, twitter:image) com endereço
@@ -27,7 +29,10 @@
  * Arquivos que faltarem no disco viram aviso (o ZIP sai mesmo assim).
  */
 import { createHash } from "node:crypto";
+import sharp from "sharp";
+import { ZIP_CHECKOUT_DIR } from "@/lib/checkout/contract";
 import { UserError } from "@/lib/errors";
+import { rebaseCheckoutLinks, rebaseCheckoutPrizes, zipCheckoutDir } from "@/lib/export/checkout-pages";
 import {
   absoluteUrl,
   absolutizeShareImages,
@@ -41,6 +46,7 @@ import {
   verificationMetas,
 } from "@/lib/export/head";
 import { type LayoutFile, shortHash } from "@/lib/export/layout";
+import { type ImageSize, lighterImagesPlan } from "@/lib/export/lighter-images";
 import { NOT_FOUND_FILE, notFoundHtml } from "@/lib/export/not-found";
 import { optimizeHtml } from "@/lib/export/optimize";
 import { EXPORT_STEP, type ExportOptions, type ServerEventVendor } from "@/lib/export/options";
@@ -73,12 +79,27 @@ import {
 } from "@/lib/export/php";
 import { leiaMe } from "@/lib/export/readme";
 import { splitterHtml } from "@/lib/export/splitter";
-import { companyMarkersIn, companyMarkersWarning, OG_IMAGE_WARNING } from "@/lib/export/warnings";
+import {
+  clonedCheckoutWarning,
+  companyMarkersIn,
+  companyMarkersWarning,
+  OG_IMAGE_WARNING,
+} from "@/lib/export/warnings";
 import { effectiveSeo, type OfferSettings, parseOfferSettings, parsePageSeo, type Seo } from "@/lib/offer-settings";
 import { parsePageCode } from "@/lib/page-code";
 import { renderPageHtml } from "@/lib/page-render";
-import { METHOD_LABEL } from "@/lib/payments/rules";
-import { PAYMENT_SCRIPT_ATTR, paymentScript, runtimeScript, trackingScript } from "@/lib/runtime-bundle";
+import { formatAmount, METHOD_LABEL, PROVIDER_LABEL } from "@/lib/payments/rules";
+import {
+  CHECKOUT_SCRIPT_ATTR,
+  checkoutScript,
+  hasProductPage,
+  PAYMENT_SCRIPT_ATTR,
+  PRODUCT_SCRIPT_ATTR,
+  paymentScript,
+  productScript,
+  runtimeScript,
+  trackingScript,
+} from "@/lib/runtime-bundle";
 import { seoRenderFrom } from "@/lib/seo-render";
 import { getObject, objectInfo, storagePath } from "@/lib/storage";
 import { blankPageHtml } from "@/lib/templates";
@@ -86,10 +107,12 @@ import { loadTracking } from "@/lib/tracking/config";
 import { TRACKING_SCRIPT_ATTR } from "@/lib/tracking/runtime-config";
 import { explicitPageCodeCategory } from "@/lib/tracking/schema";
 import { wheelRenderData } from "@/lib/wheel-prizes";
+import { renderCheckoutPage } from "@/server/services/checkout/page";
 import { readPixelTokenForServerFile } from "@/server/services/tracking";
+import { checkoutGateways, loadCheckoutExport } from "./checkout";
 import { NO_PAGES_MESSAGE } from "./keys";
 import { loadPaymentExport, zipPaymentConfig, zipPaymentRender } from "./payments";
-import { planFrom, README_FILE, SERVER_VENDOR_LABEL, uniqueVendors } from "./plan";
+import { clonedCheckoutPlan, planFrom, README_FILE, SERVER_VENDOR_LABEL, uniqueVendors } from "./plan";
 import { PRESERVE_COPY_MAX_BYTES } from "./preserve";
 import { type ExportSource, loadExportSource, type SourceDocument, type SourcePage, serverEventPixels } from "./source";
 import { writeZip, type ZipEntry } from "./zip";
@@ -127,13 +150,21 @@ function scriptFile(prefix: string, code: string) {
 export const SCRIPTS_FAILED_MESSAGE =
   "Não foi possível preparar os scripts das páginas (rastreamento e botões). Feche e abra o Offer Studio e tente de novo.";
 
-/** Scripts do Offer Studio compilados (os mesmos da prévia); a janela de pagamento só com pagamento na página. */
-function pageScripts(withPayments: boolean) {
+/**
+ * Scripts do Offer Studio compilados (os mesmos da prévia); a janela de
+ * pagamento só com pagamento na página ou checkout do Offer Studio (o bloco
+ * "Acesso ao produto" está nele), o da página de checkout só com o checkout e
+ * o da página do produto só quando alguma página tem galeria, caixa de
+ * compra ou "Voltar para a loja".
+ */
+function pageScripts(withPayments: boolean, withProduct: boolean, withCheckout: boolean) {
   try {
     return {
       runtime: scriptFile("os-runtime", runtimeScript()),
       tracking: scriptFile("os-tracking", trackingScript()),
-      payment: withPayments ? scriptFile("os-pagamento", paymentScript()) : null,
+      payment: withPayments || withCheckout ? scriptFile("os-pagamento", paymentScript()) : null,
+      product: withProduct ? scriptFile("os-produto", productScript()) : null,
+      checkout: withCheckout ? scriptFile("os-checkout", checkoutScript()) : null,
     };
   } catch (err) {
     console.error("[export] os scripts das páginas não compilaram:", err);
@@ -183,6 +214,28 @@ export function exportSeo(
   return { seo: hiddenByType ? { ...seo, noindex: true } : seo, hiddenByType };
 }
 
+/** Formatos cujas dimensões entram nas "Imagens mais leves" (o navegador mostra no tamanho dos pixels). */
+const SIZED_FORMATS = new Set(["jpeg", "png", "webp"]);
+
+/**
+ * Largura e altura de uma imagem do storage ("<sha>.<ext>") para as "Imagens
+ * mais leves". null (a imagem não muda) quando o arquivo não abre, é animado,
+ * tem rotação do celular (EXIF) ou densidade diferente de 72 dpi: nesses
+ * casos o tamanho que o navegador mostra pode não ser o dos pixels.
+ */
+async function readImageSize(file: string): Promise<ImageSize | null> {
+  try {
+    const meta = await sharp(storagePath(storageKeyOf(file))).metadata();
+    if (!SIZED_FORMATS.has(meta.format ?? "")) return null;
+    if ((meta.pages ?? 1) > 1 || (meta.orientation ?? 1) !== 1) return null;
+    if (meta.density !== undefined && Math.round(meta.density) !== 72) return null;
+    if (!meta.width || !meta.height) return null;
+    return { width: meta.width, height: meta.height };
+  } catch {
+    return null;
+  }
+}
+
 /** Idioma declarado no <html lang> de uma página ("" se não tiver). */
 function htmlLang(html: string): string {
   const m = /<html\b(?:[^>"']|"[^"]*"|'[^']*')*?\slang\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))/i.exec(html);
@@ -200,19 +253,35 @@ export async function buildExport(input: BuildInput): Promise<BuildResult> {
   const serverPixels = input.options.serverEvents ? await serverPixelsWithTokens(input.offerId, early) : [];
   const serverVendors: ServerEventVendor[] = uniqueVendors(serverPixels);
   const payment = await loadPaymentExport(input.offerId);
-  const plan = planFrom(source, input.options, serverVendors, payment);
+  const checkout = await loadCheckoutExport(input.offerId);
+  const plan = planFrom(source, input.options, serverVendors, payment, checkout);
+  const checkoutRoot = source.checkoutRoot ?? ZIP_CHECKOUT_DIR;
   const warnings = [...plan.warnings, ...early];
+  // Checkout do dono da página clonada (o mesmo aviso da prévia): primeiro da lista e no LEIA-ME.
+  const clonedWarning = clonedCheckoutWarning((await clonedCheckoutPlan(input.offerId)).map((l) => l.label));
+  if (clonedWarning) warnings.unshift(clonedWarning);
   const { layout } = plan;
 
   const settings = parseOfferSettings(source.offer.settings);
   const liveBase = liveBaseUrl(source.offer.liveUrl);
-  const { runtime, tracking, payment: paymentJs } = pageScripts(payment !== null);
+  const withProduct = source.pages.some((p) =>
+    p.variants.some((v) => v.documents.some((d) => !!d.html && hasProductPage(d.html))),
+  );
+  const {
+    runtime,
+    tracking,
+    payment: paymentJs,
+    product: productJs,
+    checkout: checkoutJs,
+  } = pageScripts(payment !== null, withProduct, checkout !== null);
 
   /** Conteúdo gerado (páginas, scripts, PHP, LEIA-ME), por caminho no ZIP. */
   const generated = new Map<string, Buffer>();
   generated.set(`${ASSETS_DIR}${runtime.name}`, runtime.data);
   generated.set(`${ASSETS_DIR}${tracking.name}`, tracking.data);
   if (paymentJs) generated.set(`${ASSETS_DIR}${paymentJs.name}`, paymentJs.data);
+  if (productJs) generated.set(`${ASSETS_DIR}${productJs.name}`, productJs.data);
+  if (checkoutJs) generated.set(`${ASSETS_DIR}${checkoutJs.name}`, checkoutJs.data);
   /** Arquivos /os-assets/ citados (a copiar para assets/). */
   const wanted = new Set<string>();
   const brokenLinks = new Set<string>();
@@ -231,6 +300,23 @@ export async function buildExport(input: BuildInput): Promise<BuildResult> {
     source.links,
     source.offer.id,
   );
+  /** Dimensões das imagens já lidas (a mesma imagem em várias páginas é lida uma vez). */
+  const imageSizes = new Map<string, Promise<ImageSize | null>>();
+  /** "Imagens mais leves": lazy e dimensões nas imagens abaixo da primeira tela (src/lib/export/lighter-images.ts). */
+  async function lighterPageImages(html: string): Promise<string> {
+    const lighter = lighterImagesPlan(html);
+    if (!lighter) return html;
+    const sizes = new Map<string, ImageSize | null>();
+    for (const f of lighter.files) {
+      let size = imageSizes.get(f);
+      if (!size) {
+        size = readImageSize(f);
+        imageSizes.set(f, size);
+      }
+      sizes.set(f, await size);
+    }
+    return lighter.apply((f) => sizes.get(f));
+  }
   /** HTML final de cada página (o divisor copia metas da versão de controle). */
   const rendered = new Map<string, string>();
   /** HTML da primeira página do ZIP que não é o divisor (idioma do 404.html). */
@@ -260,9 +346,14 @@ export async function buildExport(input: BuildInput): Promise<BuildResult> {
     const seo = seoRenderFrom(pageSeo.seo, settings.language);
     const pageCode = parsePageCode(page.customCode);
     let out = renderPageHtml(doc?.html ?? blankPageHtml(page.name), {
-      links: source.links,
+      // Checkout do Offer Studio: a página checkout/<chave>/ relativa a esta pasta.
+      links: rebaseCheckoutLinks(source.links, file.dir, checkoutRoot),
       pageHref,
       runtimeTag: `<script src="${rel}${ASSETS_DIR}${runtime.name}" data-os-runtime></script>`,
+      // Só entra nas páginas com galeria, caixa de compra ou "Voltar para a loja".
+      productScriptTag: productJs
+        ? `<script src="${rel}${ASSETS_DIR}${productJs.name}" ${PRODUCT_SCRIPT_ATTR}></script>`
+        : null,
       customCode: { ...pageCode, category: explicitPageCodeCategory(page.customCode) },
       tracking: loaded
         ? {
@@ -272,8 +363,10 @@ export async function buildExport(input: BuildInput): Promise<BuildResult> {
           }
         : null,
       company: settings.company,
+      // Moeda da oferta: telefone de fora do Brasil no formulário e NIF de 9 algarismos (como na prévia).
+      currency: settings.currency,
       seo,
-      wheel,
+      wheel: rebaseCheckoutPrizes(wheel, file.dir, checkoutRoot),
       // Pagamento na página: o pagamento.php da raiz e a página de obrigado, relativos a esta pasta.
       payments: zipPaymentRender(payment, {
         rel,
@@ -281,6 +374,7 @@ export async function buildExport(input: BuildInput): Promise<BuildResult> {
         scriptTag: paymentJs
           ? `<script src="${rel}${ASSETS_DIR}${paymentJs.name}" ${PAYMENT_SCRIPT_ATTR}></script>`
           : "",
+        checkout: checkout !== null,
       }),
     });
     // Verificação de domínio (Meta, Google…) colada nos códigos livres: sempre
@@ -301,6 +395,8 @@ export async function buildExport(input: BuildInput): Promise<BuildResult> {
       mobileAlternate: file.mobileAlternateDir ? href(file.mobileAlternateDir) : null,
     });
     out = insertEarlyHead(out, earlyScriptTag({ mobileDir: file.mobileDir, ab: file.ab }));
+    // Antes de trocar /os-assets/ por assets/: as imagens do Offer Studio são reconhecidas pelo endereço.
+    if (input.options.lighterImages && !file.preserveJs) out = await lighterPageImages(out);
     out = rewriteAssetRefs(out, rel, wanted);
     // Imagem de compartilhamento: o Facebook/WhatsApp só leem endereço completo.
     if (liveBase) out = absolutizeShareImages(out, absoluteUrl(liveBase, file.dir));
@@ -349,6 +445,49 @@ export async function buildExport(input: BuildInput): Promise<BuildResult> {
       : await renderFile(file, page, docs.get(file.documentId ?? "") ?? null);
     rendered.set(file.path, html);
     generated.set(file.path, Buffer.from(html, "utf8"));
+  }
+
+  // Páginas de checkout do Offer Studio: checkout/<chave>/index.html (pagamento.php e obrigado relativos a ela).
+  for (const product of checkout?.products ?? []) {
+    const dir = zipCheckoutDir(checkoutRoot, product.key);
+    const rel = upPrefix(dir);
+    const pageHref = (id: string) => {
+      const target = layout.pageDirs[id];
+      if (target === undefined) {
+        brokenLinks.add(product.label);
+        return "#";
+      }
+      return relativeDir(dir, target);
+    };
+    const loaded = await loadTracking({
+      offerId: source.offer.id,
+      pageId: null,
+      mode: "live",
+      pageHref,
+      serverEndpoint: plan.serverFiles ? `${rel}${EVENTOS_FILE}` : null,
+      variant: null,
+    });
+    let out = await renderCheckoutPage(source.offer.id, product.key, {
+      endpoint: `${rel}${PAGAMENTO_FILE}`,
+      simulation: false,
+      pageHref,
+      scriptTag: checkoutJs
+        ? `<script src="${rel}${ASSETS_DIR}${checkoutJs.name}" ${CHECKOUT_SCRIPT_ATTR}></script>`
+        : "",
+      tracking: loaded
+        ? {
+            config: loaded.config,
+            scriptTag: `<script src="${rel}${ASSETS_DIR}${tracking.name}" ${TRACKING_SCRIPT_ATTR}></script>`,
+            offerCode: loaded.settings.customCode,
+          }
+        : null,
+    });
+    if (out === null) continue;
+    // Barra no fim do endereço (os caminhos relativos dependem dela) e aberto do computador (file://).
+    out = insertEarlyHead(out, earlyScriptTag({}));
+    out = rewriteAssetRefs(out, rel, wanted);
+    if (input.options.optimizeHtml) out = optimizeHtml(out);
+    generated.set(`${dir}index.html`, Buffer.from(out, "utf8"));
   }
 
   if (brokenLinks.size) {
@@ -431,12 +570,12 @@ export async function buildExport(input: BuildInput): Promise<BuildResult> {
     generated.set(HTACCESS_FILE, Buffer.from(htaccess(), "utf8"));
   }
 
-  // pagamento.php (+ pagamento-dados/config.php com a chave e o .htaccess que bloqueia a pasta)
-  if (payment) {
+  // pagamento.php (+ pagamento-dados/config.php com as chaves e o .htaccess que bloqueia a pasta)
+  if (payment || checkout) {
     generated.set(PAGAMENTO_FILE, Buffer.from(pagamentoPhp(), "utf8"));
     generated.set(
       PAGAMENTO_CONFIG_FILE,
-      Buffer.from(pagamentoConfigPhp(await zipPaymentConfig(payment, layout.pageDirs)), "utf8"),
+      Buffer.from(pagamentoConfigPhp(await zipPaymentConfig(payment, layout.pageDirs, checkout)), "utf8"),
     );
     generated.set(PAGAMENTO_HTACCESS_FILE, Buffer.from(pagamentoHtaccess(), "utf8"));
   }
@@ -477,6 +616,13 @@ export async function buildExport(input: BuildInput): Promise<BuildResult> {
               methods: p.methods.map((m) => METHOD_LABEL[m]),
             }))
           : [],
+        checkouts: (checkout?.products ?? []).map((p) => ({
+          name: p.name,
+          dir: zipCheckoutDir(checkoutRoot, p.key),
+          price: formatAmount(p.amountCents, p.currency).replace(/\s/g, " "),
+          gateway: PROVIDER_LABEL[p.provider],
+        })),
+        checkoutGateways: checkoutGateways(checkout).map((p) => PROVIDER_LABEL[p]),
         preserveJs: plan.preserveJsPages,
         hiddenFromSearch: [...hiddenByType],
         warnings,

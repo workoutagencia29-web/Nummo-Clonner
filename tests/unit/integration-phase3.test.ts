@@ -153,7 +153,23 @@ describe("script das páginas (widgets + clones)", () => {
   it("é pequeno, único e idempotente", () => {
     const script = runtimeScript();
     // 40 KB até a roleta de desconto (roleta + prêmio na página de vendas: +~11,5 KB).
-    expect(script.length).toBeLessThan(42 * 1024);
+    // "Contagem no topo (barra)": barra presa no topo (módulo único com a faixa do
+    // prêmio) e a faixa no visual da barra: +~1,65 KB (hoje ~43,5 KB).
+    // Loja (busca do cabeçalho de loja, categorias, setas do carrossel da vitrine,
+    // cabeçalho fixo e o CSS deles): +~4,8 KB (~48,9 KB).
+    // Correções da revisão da loja (busca no título e no selo, linha de resultados
+    // presa no cabeçalho fixo, rolagem longa sem abrir o popup de saída, ?busca=
+    // conferido no load, setas de vitrine que começa escondida): +~1,1 KB (hoje ~50 KB).
+    // Cabeçalho de loja que ficou num contêiner vai para o nível de cima: +~0,13 KB.
+    // Páginas em espanhol/inglês e telefone de fora do Brasil: os textos passam por
+    // t("chave", "padrão em pt-BR") e o formulário aceita número de outro país
+    // (as traduções ficam no JSON #os-textos da página, fora do script): +~0,85 KB
+    // (hoje ~51 KB).
+    expect(script.length).toBeLessThan(51.5 * 1024);
+    // Só ASCII: numa hospedagem que serve a página como latin-1, um caractere cru
+    // dentro de uma expressão regular pode virar um intervalo inválido e derrubar o
+    // script inteiro (o esbuild escapa textos, mas não o que está dentro de regex).
+    expect(script.match(/[\u0080-\uffff]/g) ?? []).toEqual([]);
     expect(script).toContain("__osRuntime");
     expect(script).toContain("__osCloneCompat");
     const once = injectRuntime("<html><head></head><body></body></html>", "<script data-os-runtime></script>");

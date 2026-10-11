@@ -39,6 +39,19 @@ export function editorTimeout(editor: Editor, fn: () => void, ms = 0): ReturnTyp
   }, ms);
 }
 
+/**
+ * Tarefa logo depois do código atual (microtask), que não roda depois que o
+ * editor foi destruído. Roda antes de qualquer setTimeout: uma mudança feita
+ * aqui entra no mesmo passo do Desfazer que a ação que a causou (o Desfazer do
+ * GrapesJS junta tudo o que acontece até o próximo setTimeout).
+ */
+export function editorMicrotask(editor: Editor, fn: () => void) {
+  watchEditor(editor);
+  queueMicrotask(() => {
+    if (!closed.has(editor)) fn();
+  });
+}
+
 /** requestAnimationFrame que não roda depois que o editor foi destruído. */
 export function editorFrame(editor: Editor, fn: () => void): number {
   watchEditor(editor);

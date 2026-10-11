@@ -5,10 +5,15 @@
  * - elementos (texto, botão, contador…) entram logo abaixo do elemento selecionado;
  * - sem nada selecionado, e para itens fixos na tela (WhatsApp flutuante, popup,
  *   notificação), vão para o fim da página;
- * - um quiz nunca entra dentro de outro (vai para depois do quiz selecionado).
+ * - um quiz nunca entra dentro de outro (vai para depois do quiz selecionado);
+ * - o cabeçalho de loja só mora no nível de cima da página (largura toda): vai
+ *   para o topo, logo depois das barras que já estão lá ("Contagem no topo");
+ * - nada entra em elementos que só aceitam certos filhos (etapas do quiz, a
+ *   linha de vitrines lado a lado da Loja): sobe até um que aceite.
  * O bloco novo fica selecionado e aparece na tela. Um ⌘Z desfaz.
  */
 import type { Block, Component, Editor } from "grapesjs";
+import { topInsertIndex } from "@/editor/widgets/store-header-place";
 
 const FIXED_ON_SCREEN = new Set(["whatsapp-flutuante", "popup-saida", "notificacao-compra"]);
 const SECTION_TAGS = new Set(["section", "header", "footer", "article", "main", "nav"]);
@@ -41,15 +46,15 @@ function rootTagOf(block: Block) {
   return "";
 }
 
-/** O bloco é um quiz (data-os-widget="quiz")? */
-function isQuizBlock(block: Block) {
+/** Widget da raiz do bloco (data-os-widget: "quiz", "store-header"…); "" se não for um. */
+function blockWidget(block: Block): string {
   const content = block.get("content") as unknown;
   const first = (Array.isArray(content) ? content[0] : content) as
     | { attributes?: Record<string, unknown> }
     | string
     | undefined;
-  if (typeof first === "string") return /^\s*<[^>]*data-os-widget=["']?quiz\b/i.test(first);
-  return first?.attributes?.["data-os-widget"] === "quiz";
+  if (typeof first === "string") return /^\s*<[^>]*data-os-widget=["']?([\w-]+)/i.exec(first)?.[1] ?? "";
+  return String(first?.attributes?.["data-os-widget"] ?? "");
 }
 
 /** Seção que contém o componente (ou o filho direto da página). */
@@ -84,10 +89,13 @@ export function insertBlockOnClick(editor: Editor, block: Block) {
 
   let parent: Component = wrapper;
   let at: number | undefined;
-  if (selected && selected !== wrapper && !FIXED_ON_SCREEN.has(String(block.getId()))) {
+  if (blockWidget(block) === "store-header") {
+    // Só no nível de cima (num contêiner ficaria estreito): no topo da página.
+    at = topInsertIndex(wrapper);
+  } else if (selected && selected !== wrapper && !FIXED_ON_SCREEN.has(String(block.getId()))) {
     let anchor = isSection ? sectionOf(selected, wrapper) : blockLevelOf(selected, wrapper);
     // Quiz dentro da etapa de outro: um clique responderia os dois. Vai para depois dele.
-    if (isQuizBlock(block)) {
+    if (blockWidget(block) === "quiz") {
       for (let at = anchor.parent(); at && at !== wrapper; at = at.parent()) {
         if (at.getAttributes()["data-os-widget"] === "quiz") anchor = at;
       }
@@ -98,9 +106,13 @@ export function insertBlockOnClick(editor: Editor, block: Block) {
       const droppable = c?.get("droppable");
       return droppable === false || typeof droppable === "string";
     };
+    const start = anchor;
     while (anchor.parent() && anchor.parent() !== wrapper && closed(anchor.parent())) {
       anchor = anchor.parent() as Component;
     }
+    // Seção que subiu até um elemento comum (ex.: a linha "Oferta do dia + ofertas",
+    // que só recebe vitrines): entra depois da seção em volta dele, não dentro dela.
+    if (isSection && anchor !== start && !SECTION_TAGS.has(tagOf(anchor))) anchor = sectionOf(anchor, wrapper);
     const anchorParent = anchor.parent();
     if (anchorParent) {
       parent = anchorParent;

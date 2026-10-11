@@ -75,10 +75,20 @@ export function editorBundle(): Promise<string> {
 }
 
 export interface TestContext {
-  links?: { key: string; label: string; kind?: string; payment?: string | null; paymentLocale?: string | null }[];
+  links?: {
+    key: string;
+    label: string;
+    kind?: string;
+    payment?: string | null;
+    paymentLocale?: string | null;
+    /** "Checkout do Offer Studio": resumo do produto ("" = sem produto salvo). */
+    checkout?: string | null;
+  }[];
   pages?: { id: string; name: string; type?: string }[];
   /** Projeto salvo (getProjectData) para reabrir. */
   project?: unknown;
+  /** Moeda da oferta (BRL, MXN, EUR, USD): blocos com preço nascem nela. Sem ela: real. */
+  currency?: string;
 }
 
 /** Abre o editor numa página em branco. `window.ed` é o editor. */
@@ -110,7 +120,11 @@ export async function openEditor(browser: Browser, ctx: TestContext = {}): Promi
         );
         const ed = w.OS.createEditor({ canvas, blocks, layers, styles, traits }, context.project ?? null);
         w.ed = ed;
-        w.OS.setWidgetContext(ed, () => ({ links: context.links ?? [], pages: context.pages ?? [] }));
+        w.OS.setWidgetContext(ed, () => ({
+          links: context.links ?? [],
+          pages: context.pages ?? [],
+          currency: context.currency as never,
+        }));
         // Como o editor: "Roleta de desconto: mostrar" quando a página tem roleta.
         w.OS.registerDynamicTraits(ed, () => ({
           links: context.links ?? [],

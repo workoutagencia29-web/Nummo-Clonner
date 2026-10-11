@@ -516,6 +516,9 @@ describe("normalizeLazy", () => {
     // src real e sem classe de lazy load: não mexe (data-src pode ser outra coisa)
     expect($("#e").attr("src")).toBe("real.jpg");
     expect($("#e").attr("data-src")).toBe("zoom.jpg");
+    // Vinham do plugin: carregam só perto de aparecer, como no site original.
+    for (const id of ["a", "b", "c", "d"]) expect($(`#${id}`).attr("loading"), id).toBe("lazy");
+    expect($("#e").attr("loading")).toBeUndefined();
   });
 
   it("lazysizes: troca o LQIP, data-srcset/data-sizes e lazyload → lazyloaded", () => {
@@ -542,6 +545,9 @@ describe("normalizeLazy", () => {
     expect($("img").attr("data-lazy-src")).toBeUndefined();
     expect($("iframe").attr("src")).toBe("https://www.youtube.com/embed/x");
     expect($("iframe").attr("class")).toBe("lazyloaded");
+    // O vídeo do YouTube (1,2 MB) e a imagem só carregam perto de aparecer.
+    expect($("img").attr("loading")).toBe("lazy");
+    expect($("iframe").attr("loading")).toBe("lazy");
   });
 
   it("jQuery lazyload (data-original), Revolution (data-lazyload) e data-ll-src", () => {
@@ -552,6 +558,7 @@ describe("normalizeLazy", () => {
     expect($("#a").attr("src")).toBe("o.jpg");
     expect($("#b").attr("src")).toBe("r.jpg");
     expect($("#c").attr("src")).toBe("l.jpg");
+    expect($("img[loading=lazy]").length).toBe(3);
   });
 
   it("picture > source[data-srcset] e vídeo com data-src/data-poster", () => {
@@ -563,6 +570,10 @@ describe("normalizeLazy", () => {
     expect($("picture img").attr("src")).toBe("p.jpg");
     expect($("video").attr("src")).toBe("v.mp4");
     expect($("video").attr("poster")).toBe("v.jpg");
+    expect($("picture img").attr("loading")).toBe("lazy");
+    // <source> e <video> não têm loading.
+    expect($("source").attr("loading")).toBeUndefined();
+    expect($("video").attr("loading")).toBeUndefined();
   });
 
   it("fundos: data-bg/data-background/data-background-image/data-bg-src mesclados ao style", () => {
@@ -603,6 +614,11 @@ describe("normalizeLazy", () => {
     expect($("img").attr("data-lazyloaded")).toBeUndefined();
     expect($("img").hasClass("litespeed-loaded")).toBe(true);
     expect($("iframe").attr("src")).toBe("https://player.vimeo.com/video/1");
+    expect($("img").attr("loading")).toBe("lazy");
+    expect($("iframe").attr("loading")).toBe("lazy");
+    // Sem inventar dimensões: a largura que havia continua, a altura não aparece.
+    expect($("img").attr("width")).toBe("10");
+    expect($("img").attr("height")).toBeUndefined();
   });
 
   it("classe lazyload esconde imagem já carregada: vira lazyloaded; a3 lazy-hidden → lazy-loaded", () => {
@@ -615,6 +631,35 @@ describe("normalizeLazy", () => {
     expect($("#b").attr("src")).toBe("a3.jpg");
     // sem endereço real: nada a mostrar, fica como está
     expect($("#c").attr("class")).toBe("lazyload");
+    expect($("#a").attr("loading")).toBe("lazy");
+    expect($("#b").attr("loading")).toBe("lazy");
+    expect($("#c").attr("loading")).toBeUndefined();
+  });
+
+  it("carregar só perto de aparecer: plugins ganham loading=lazy; o resto fica igual", () => {
+    const $ = load(
+      [
+        // Como a página chega da captura: o plugin já trocou o src (e deixou o data-src).
+        `<img id="lazysizes" class="lazyloaded" src="/u/a.jpg" data-src="/u/a.jpg">`,
+        `<iframe id="rocket" class="lazyloaded" data-ll-status="loaded" src="https://www.youtube.com/embed/x" data-lazy-src="https://www.youtube.com/embed/x"></iframe>`,
+        `<img id="jetpack" class="jetpack-lazy-image" src="/u/j.jpg" data-lazy-src="/u/j.jpg" srcset="data:image/gif;base64,R0l" data-lazy-srcset="/u/j.jpg 1x">`,
+        // Sem plugin, ou com loading escolhido pelo site: não muda.
+        `<img id="comum" src="/u/c.jpg" width="300">`,
+        `<img id="eager" class="lazyload" src="/u/e.jpg" data-src="/u/e.jpg" loading="eager">`,
+        `<iframe id="mapa" src="https://maps.example/embed"></iframe>`,
+      ].join(""),
+    );
+    normalizeLazy($);
+    expect($("#lazysizes").attr("loading")).toBe("lazy");
+    expect($("#lazysizes").attr("data-src")).toBeUndefined();
+    expect($("#rocket").attr("loading")).toBe("lazy");
+    expect($("#jetpack").attr("loading")).toBe("lazy");
+    expect($("#jetpack").attr("srcset")).toBe("/u/j.jpg 1x");
+    expect($("#comum").attr("loading")).toBeUndefined();
+    expect($("#comum").attr("height")).toBeUndefined();
+    expect($("#eager").attr("loading")).toBe("eager");
+    expect($("#mapa").attr("loading")).toBeUndefined();
+    expect($("#comum").toString()).toBe('<img id="comum" src="/u/c.jpg" width="300">');
   });
 
   it("idempotente: segunda passada não muda nada", () => {

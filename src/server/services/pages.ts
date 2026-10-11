@@ -3,10 +3,13 @@
  * definir a inicial, duplicar e excluir.
  */
 import { gunzipSync } from "node:zlib";
+import * as cheerio from "cheerio";
 import { type PageType, Prisma } from "@/generated/prisma/client";
 import { atomically, type Db, prisma } from "@/lib/db";
 import { UserError } from "@/lib/errors";
 import { internalLink } from "@/lib/internal-links";
+import { offerCurrencyOf } from "@/lib/offer-currency";
+import { PRODUCT_ATTR } from "@/lib/store";
 import { copyName, slugify, slugProblem, uniqueSlug } from "@/lib/text";
 import { bulkReplace } from "@/server/services/bulk-replace";
 import { relabelLatestVersions, removeVersionFiles } from "@/server/services/documents";
@@ -26,7 +29,10 @@ export const PAGE_TYPE_VALUES = [
 ] as const satisfies readonly PageType[];
 
 async function offerOrThrow(offerId: string, db: Db = prisma) {
-  const offer = await db.offer.findFirst({ where: { id: offerId, deletedAt: null }, select: { id: true } });
+  const offer = await db.offer.findFirst({
+    where: { id: offerId, deletedAt: null },
+    select: { id: true, settings: true },
+  });
   if (!offer) throw new UserError("Oferta não encontrada.");
   return offer;
 }
@@ -64,16 +70,16 @@ export interface CreatePageInput {
 }
 
 export async function createPage(input: CreatePageInput, db: Db = prisma) {
-  await offerOrThrow(input.offerId, db);
-  const start = pageStart(input.templateId, input.name);
+  const offer = await offerOrThrow(input.offerId, db);
+  // Modelos da loja: os preços nascem na moeda da oferta.
+  const start = pageStart(input.templateId, input.name, offerCurrencyOf(offer.settings));
   const html = input.adjustHtml ? input.adjustHtml(start.html) : start.html;
   const taken = await takenSlugs(input.offerId, undefined, db);
   let slug: string;
   if (input.slug) {
     const problem = slugProblem(input.slug);
     if (problem) throw new UserError(problem, "slug");
-    if (taken.includes(input.slug))
-      throw new UserError("Já existe uma página com esse endereço (slug) nesta oferta.", "slug");
+    if (taken.includes(input.slug)) throw new UserError("Já existe uma página com esse endereço nesta oferta.", "slug");
     slug = input.slug;
   } else {
     slug = uniqueSlug(input.name, taken);
@@ -116,7 +122,7 @@ export async function updatePage(input: UpdatePageInput) {
     const problem = slugProblem(input.slug);
     if (problem) throw new UserError(problem, "slug");
     if ((await takenSlugs(page.offerId, page.id)).includes(input.slug)) {
-      throw new UserError("Já existe uma página com esse endereço (slug) nesta oferta.", "slug");
+      throw new UserError("Já existe uma página com esse endereço nesta oferta.", "slug");
     }
   }
   await prisma.page.update({
@@ -236,12 +242,30 @@ export interface PageReferences {
   count: number;
   /** Essas páginas, na ordem do funil. */
   pages: { id: string; name: string }[];
+  /**
+   * Produtos de vitrines (cartões) que levam a esta página — ela é a "página do
+   * produto" deles —, por página, na ordem do funil. Os nomes não se repetem.
+   */
+  products: { pageId: string; pageName: string; names: string[] }[];
+}
+
+/** Nomes dos produtos (cartões da vitrine) do HTML que levam a `token` (os-page:<id>). */
+function productNamesTo(html: string, token: string): string[] {
+  if (!html.includes(PRODUCT_ATTR) || !html.includes(token)) return [];
+  const $ = cheerio.load(html);
+  const names: string[] = [];
+  $(`a[${PRODUCT_ATTR}]`).each((_, el) => {
+    const card = $(el);
+    if (card.attr("href")?.trim() !== token) return;
+    names.push(card.find(".os-pd-name").first().text().replace(/\s+/g, " ").trim() || "Produto sem nome");
+  });
+  return names;
 }
 
 /**
  * Outras páginas da oferta com botões ou links para esta ("Página do funil",
- * formulários que levam a ela, links do funil clonado). Usado para avisar antes
- * de excluir a página.
+ * formulários que levam a ela, links do funil clonado, produtos de vitrines).
+ * Usado para avisar antes de excluir a página.
  */
 export async function pageReferences(pageId: string): Promise<PageReferences> {
   const page = await pageOrThrow(pageId);
@@ -255,13 +279,26 @@ export async function pageReferences(pageId: string): Promise<PageReferences> {
     },
   });
   const found = new Map<string, { id: string; name: string; position: number }>();
+  const products = new Map<string, Set<string>>();
   for (const doc of docs) {
     const p = doc.variant.page;
+    // Versões A/B e o layout do celular: os mesmos produtos contam uma vez.
+    for (const name of productNamesTo(doc.html ?? "", token)) {
+      const names = products.get(p.id) ?? new Set<string>();
+      names.add(name);
+      products.set(p.id, names);
+    }
     if (found.has(p.id)) continue;
     if (doc.html?.includes(token) || projectText(doc.project).includes(token)) found.set(p.id, p);
   }
-  const pages = [...found.values()].sort((a, b) => a.position - b.position).map(({ id, name }) => ({ id, name }));
-  return { count: pages.length, pages };
+  const ordered = [...found.values()].sort((a, b) => a.position - b.position);
+  return {
+    count: ordered.length,
+    pages: ordered.map(({ id, name }) => ({ id, name })),
+    products: ordered
+      .filter((p) => products.has(p.id))
+      .map((p) => ({ pageId: p.id, pageName: p.name, names: [...(products.get(p.id) ?? [])] })),
+  };
 }
 
 function shortName(name: string) {

@@ -3,9 +3,11 @@ import {
   addPage,
   chooseInSubmenu,
   createOffer,
+  editorCanvas,
   expectToast,
   offerCard,
   openCardMenu,
+  openEditor,
   pageRows,
   selectOption,
   sidebar,
@@ -59,6 +61,47 @@ test.describe("Ofertas", () => {
     // Rascunho sem endereço: nada de "Ainda não hospedada" repetido em todo card.
     await expect(card).not.toContainText("hospedada");
     await expect(card).not.toContainText("endereço");
+  });
+
+  test("pergunta a moeda: a loja nasce nela, a aba da oferta mostra e a próxima “Nova oferta” já vem com ela", async ({
+    page,
+  }) => {
+    const name = `Loja México ${uid()}`;
+    await page.goto("/ofertas");
+    await sidebar(page).getByRole("button", { name: "Nova oferta" }).click();
+    const dialog = page.getByRole("dialog", { name: "Nova oferta" });
+    const currency = dialog.getByRole("group", { name: "Em qual moeda essa oferta vai rodar?" });
+    await expect(currency.getByRole("radio", { name: "Real (R$)" })).toBeChecked();
+    await currency.getByRole("radio", { name: "Peso mexicano ($)" }).check();
+    await dialog.getByLabel("Nome da oferta").fill(name);
+    await dialog
+      .getByRole("radiogroup", { name: "Primeira página" })
+      .getByRole("radio", { name: "Loja (vitrine)", exact: true })
+      .click();
+    await dialog.getByRole("button", { name: "Criar oferta" }).click();
+    await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+
+    // A moeda fica na oferta (aba "Moeda, empresa e SEO").
+    await page.getByRole("tab", { name: "Moeda, empresa e SEO" }).click();
+    const form = page.getByRole("form", { name: "Moeda da oferta" });
+    await expect(form.getByRole("radio", { name: "Peso mexicano ($)" })).toBeChecked();
+
+    // A vitrine nasceu em peso mexicano, com as frases em espanhol.
+    await page.getByRole("tab", { name: "Páginas do funil" }).click();
+    await openEditor(page, "Página principal");
+    const firstCard = editorCanvas(page).locator("a[data-os-product]").first();
+    await expect(firstCard.locator(".os-pd-now")).toHaveText("$63.76");
+    await expect(firstCard.locator(".os-pd-inst")).toHaveText("4x $15.94 sin intereses");
+
+    // A próxima "Nova oferta" já vem com a última moeda escolhida; volta para o real.
+    await page.goto("/ofertas");
+    await sidebar(page).getByRole("button", { name: "Nova oferta" }).click();
+    await expect(currency.getByRole("radio", { name: "Peso mexicano ($)" })).toBeChecked();
+    await currency.getByRole("radio", { name: "Real (R$)" }).check();
+    await dialog.getByLabel("Nome da oferta").fill(`Oferta em real ${uid()}`);
+    await dialog.getByRole("radio", { name: "Em branco", exact: true }).click();
+    await dialog.getByRole("button", { name: "Criar oferta" }).click();
+    await expect(page).toHaveURL(/\/ofertas\/[^/?]+$/);
   });
 
   test("renomeia a oferta pelo menu do card", async ({ page }) => {

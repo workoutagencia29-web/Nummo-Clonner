@@ -9,7 +9,7 @@ import { WHEEL_MARK, type WheelRender, wheelRenderData } from "@/lib/wheel-prize
 /** Mapa de prêmios e botões de checkout da oferta (só lê as páginas com roleta). */
 export async function offerWheelRender(
   offerId: string,
-  links: { key: string; url: string; kind: string; pay?: boolean }[],
+  links: { key: string; url: string; kind: string; pay?: boolean; checkout?: boolean }[],
 ): Promise<WheelRender> {
   const docs = await prisma.pageDocument.findMany({
     where: { variant: { page: { offerId } }, html: { contains: WHEEL_MARK } },

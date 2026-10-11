@@ -8,6 +8,7 @@
  * Função pura, sem DOM (roda no servidor), com as mesmas expressões de tag de
  * src/lib/tracking/inject.ts (">" dentro de aspas não fecha a tag).
  */
+import { afterLeadingDoctype } from "@/lib/doctype";
 import type { Seo } from "@/lib/offer-settings";
 
 export interface SeoRender {
@@ -45,7 +46,6 @@ export function seoRenderFrom(seo: Seo, lang: string | null, assetPrefix = "/os-
 const ATTRS = `(?:[^>"']|"[^"]*"|'[^']*')*`;
 const HEAD_OPEN_RE = new RegExp(`<head\\b${ATTRS}>`, "i");
 const HTML_OPEN_RE = new RegExp(`<html\\b(${ATTRS})>`, "i");
-const DOCTYPE_RE = /^\s*(?:<!--[\s\S]*?-->\s*)*<!doctype[^>]*>/i;
 const TITLE_RE = /<title\b[^>]*>[\s\S]*?<\/title\s*>\s*/gi;
 const META_RE = new RegExp(`<meta\\b${ATTRS}>\\s*`, "gi");
 const LINK_RE = new RegExp(`<link\\b${ATTRS}>\\s*`, "gi");
@@ -70,8 +70,7 @@ function withHead(html: string): { html: string; start: number; end: number } {
   let open = HEAD_OPEN_RE.exec(out);
   if (!open) {
     const htmlOpen = HTML_OPEN_RE.exec(out);
-    const doctype = DOCTYPE_RE.exec(out);
-    const at = htmlOpen ? htmlOpen.index + htmlOpen[0].length : doctype ? doctype[0].length : 0;
+    const at = htmlOpen ? htmlOpen.index + htmlOpen[0].length : afterLeadingDoctype(out);
     out = `${out.slice(0, at)}<head></head>${out.slice(at)}`;
     open = HEAD_OPEN_RE.exec(out) as RegExpExecArray;
   }
@@ -135,10 +134,15 @@ export function applySeo(html: string, seo: SeoRender | null | undefined): strin
     });
     if (favicon) {
       inner = inner.replace(LINK_RE, (tag) => (/\bicon\b/i.test(attrOf(tag, "rel") ?? "") ? "" : tag));
-      add.push(
-        `<link rel="icon" href="${escapeAttr(favicon)}">`,
-        `<link rel="apple-touch-icon" href="${escapeAttr(favicon)}">`,
-      );
+      // .ico leva o tipo e fica só como ícone da aba (o iPhone não usa .ico na tela de início).
+      if (/\.ico(?:[?#]|$)/i.test(favicon)) {
+        add.push(`<link rel="icon" type="image/x-icon" href="${escapeAttr(favicon)}">`);
+      } else {
+        add.push(
+          `<link rel="icon" href="${escapeAttr(favicon)}">`,
+          `<link rel="apple-touch-icon" href="${escapeAttr(favicon)}">`,
+        );
+      }
     }
     out = `${out.slice(0, head.start)}${inner}${add.join("")}${out.slice(head.end)}`;
   }
@@ -150,8 +154,7 @@ export function applySeo(html: string, seo: SeoRender | null | undefined): strin
       const tag = `<html${attrs.replace(/\s*\/?\s*$/, "")} lang="${escapeAttr(lang)}">`;
       out = `${out.slice(0, htmlOpen.index)}${tag}${out.slice(htmlOpen.index + htmlOpen[0].length)}`;
     } else {
-      const doctype = DOCTYPE_RE.exec(out);
-      const at = doctype ? doctype[0].length : 0;
+      const at = afterLeadingDoctype(out);
       out = `${out.slice(0, at)}<html lang="${escapeAttr(lang)}">${out.slice(at)}`;
     }
   }

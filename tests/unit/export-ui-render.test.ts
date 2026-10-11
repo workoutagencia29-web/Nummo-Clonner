@@ -16,7 +16,7 @@ import { dateTime } from "@/lib/format";
 const noop = () => {};
 const html = (el: Parameters<typeof renderToStaticMarkup>[0]) => renderToStaticMarkup(el);
 const count = (text: string, part: string) => text.split(part).length - 1;
-const DEFAULTS: ExportOptions = { splitter: true, serverEvents: false, optimizeHtml: true };
+const DEFAULTS: ExportOptions = { splitter: true, serverEvents: false, optimizeHtml: true, lighterImages: true };
 
 function view(over: Partial<ExportView> & { id: string }): ExportView {
   return {
@@ -82,7 +82,7 @@ describe("ExportOptionsForm", () => {
       }),
     );
 
-  it("com versões e token: as três opções, com explicação", () => {
+  it("com versões e token: as quatro opções, com explicação", () => {
     const out = form();
     expect(out).toContain("Divisor A/B");
     expect(out).toContain("O index.html de cada página com versões sorteia a versão pelo percentual");
@@ -92,9 +92,11 @@ describe("ExportOptionsForm", () => {
     expect(out).toContain("API de Conversões (Meta) e Events API (TikTok)");
     expect(out).toContain("eventos.php");
     expect(out).toContain("HTML otimizado");
-    expect(count(out, 'role="switch"')).toBe(3);
-    // Padrão: divisor e HTML otimizado ligados, eventos.php desligado.
-    expect(count(out, 'aria-checked="true"')).toBe(2);
+    expect(out).toContain("Imagens mais leves");
+    expect(out).toContain("O visual não muda. Não vale para páginas “Com scripts”.");
+    expect(count(out, 'role="switch"')).toBe(4);
+    // Padrão: divisor, HTML otimizado e imagens mais leves ligados, eventos.php desligado.
+    expect(count(out, 'aria-checked="true"')).toBe(3);
     expect(out).not.toContain("Só ligue se a sua hospedagem tiver PHP");
   });
 
@@ -112,11 +114,11 @@ describe("ExportOptionsForm", () => {
     expect(tiktok).not.toContain("Meta");
   });
 
-  it("sem versões e sem token: só o HTML otimizado", () => {
+  it("sem versões e sem token: só o HTML otimizado e as imagens mais leves", () => {
     const out = form({ hasVariants: false, hasServerEventTokens: false });
     expect(out).not.toContain("Divisor A/B");
     expect(out).not.toContain("eventos.php");
-    expect(count(out, 'role="switch"')).toBe(1);
+    expect(count(out, 'role="switch"')).toBe(2);
   });
 
   it("eventos.php ligado → aviso de que a hospedagem PRECISA ter PHP", () => {
@@ -157,11 +159,42 @@ describe("HostingGuide", () => {
 
   it("páginas Preservar JS: avisa que só funcionam na raiz do domínio", () => {
     const one = html(createElement(HostingGuide, { open: true, onOpenChange: noop, preserveJsPages: ["Quiz"] }));
-    expect(one).toContain("a página <strong>Quiz</strong> (modo Preservar JS) só funciona na raiz do domínio");
+    expect(one).toContain("a página <strong>Quiz</strong> (modo “Com scripts”) só funciona na raiz do domínio");
     const two = html(
       createElement(HostingGuide, { open: true, onOpenChange: noop, preserveJsPages: ["Quiz", "Checkout"] }),
     );
-    expect(two).toContain("as páginas <strong>Quiz, Checkout</strong> (modo Preservar JS) só funcionam");
+    expect(two).toContain("as páginas <strong>Quiz, Checkout</strong> (modo “Com scripts”) só funcionam");
+  });
+
+  it("ZIP com o pagamento.php (pagamento na página ou só o checkout): não subir as chaves sem PHP e testar o pagamento.php", () => {
+    const plain = html(createElement(HostingGuide, { open: true, onOpenChange: noop }));
+    expect(plain).not.toContain("pagamento-dados");
+    expect(plain).not.toContain("pagamento.php");
+    // Só o checkout do Offer Studio (FlevoPay): as chaves da FlevoPay também ficariam visíveis.
+    const pix = html(
+      createElement(HostingGuide, { open: true, onOpenChange: noop, hasPayments: true, paymentGateways: ["FlevoPay"] }),
+    );
+    expect(pix).toContain("ela guarda a chave da FlevoPay, que ficaria visível");
+    expect(pix).toContain(
+      "seudominio.com.br/pagamento.php</strong>: deve aparecer “funcionando”, com a chave da FlevoPay",
+    );
+    expect(pix).toContain("no painel da FlevoPay");
+    expect(pix).not.toContain("Kyvo");
+    const all = html(
+      createElement(HostingGuide, {
+        open: true,
+        onOpenChange: noop,
+        hasPayments: true,
+        paymentGateways: ["Kyvo", "FlevoPay", "BlackCat"],
+      }),
+    );
+    expect(all).toContain("ela guarda as chaves da Kyvo, da FlevoPay e da BlackCat, que ficariam visíveis");
+    expect(all).toContain("cadastradas e HTTPS");
+    expect(all).toContain("no painel do gateway");
+    // Plano antigo (sem a lista): a Kyvo do pagamento na página.
+    expect(html(createElement(HostingGuide, { open: true, onOpenChange: noop, hasPayments: true }))).toContain(
+      "a chave da Kyvo",
+    );
   });
 });
 
@@ -193,7 +226,10 @@ describe("ExportHistory", () => {
   });
 
   it("ZIP pronto: data, tamanho, opções, baixar e apagar", () => {
-    const item = view({ id: "e1", options: { splitter: true, serverEvents: true, optimizeHtml: true } });
+    const item = view({
+      id: "e1",
+      options: { splitter: true, serverEvents: true, optimizeHtml: true, lighterImages: true },
+    });
     const out = history({ rows: [item] });
     const when = dateTime(item.createdAt);
     expect(out).toContain("oferta-teste-2026-09-29.zip");

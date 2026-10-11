@@ -39,7 +39,7 @@ function view(over: Partial<ExportView> & { id: string }): ExportView {
     status: "DONE",
     progress: 100,
     step: null,
-    options: { splitter: true, serverEvents: false, optimizeHtml: true },
+    options: { splitter: true, serverEvents: false, optimizeHtml: true, lighterImages: true },
     fileName: "oferta-2026-09-29.zip",
     bytes: 1000,
     errorMessage: null,
@@ -280,7 +280,7 @@ describe("planOptionsFor e visiblePlanWarnings", () => {
       "O eventos.php só funciona em hospedagem com PHP (Hostinger, HostGator, cPanel). Em Netlify, Vercel ou outra hospedagem só de arquivos, não suba o eventos.php nem o eventos-config.php: os tokens ficariam visíveis.";
     const notIncluded =
       "O eventos.php não foi incluído: nenhum pixel da Meta ou do TikTok tem a API de Conversões/Events API ligada com o token salvo (aba Pixels).";
-    const preserve = "A página “Quiz” usa “Preservar JS”: suba a oferta na raiz do domínio (public_html).";
+    const preserve = "A página “Quiz” usa o modo “Com scripts”: suba a oferta na raiz do domínio (public_html).";
     expect(visiblePlanWarnings([php, notIncluded, preserve])).toEqual([notIncluded, preserve]);
     expect(visiblePlanWarnings(null)).toEqual([]);
   });
@@ -323,15 +323,15 @@ describe("formatBytes", () => {
 
 describe("optionsSummary", () => {
   it("lista só as opções ligadas; o divisor só conta quando a oferta tem versões", () => {
-    expect(optionsSummary({ splitter: true, serverEvents: true, optimizeHtml: true }, true)).toEqual([
-      "Divisor A/B",
-      "eventos.php",
-      "HTML otimizado",
-    ]);
-    expect(optionsSummary({ splitter: true, serverEvents: false, optimizeHtml: true }, false)).toEqual([
-      "HTML otimizado",
-    ]);
-    expect(optionsSummary({ splitter: false, serverEvents: false, optimizeHtml: false }, true)).toEqual([]);
+    expect(
+      optionsSummary({ splitter: true, serverEvents: true, optimizeHtml: true, lighterImages: true }, true),
+    ).toEqual(["Divisor A/B", "eventos.php", "HTML otimizado"]);
+    expect(
+      optionsSummary({ splitter: true, serverEvents: false, optimizeHtml: true, lighterImages: true }, false),
+    ).toEqual(["HTML otimizado"]);
+    expect(
+      optionsSummary({ splitter: false, serverEvents: false, optimizeHtml: false, lighterImages: true }, true),
+    ).toEqual([]);
   });
 
   it("opções faltando ou vazias valem o padrão", () => {
@@ -342,27 +342,68 @@ describe("optionsSummary", () => {
 
 describe("opções iniciais e envio", () => {
   it("usa as opções do último ZIP pronto; sem nenhum, o padrão", () => {
-    expect(initialOptions([])).toEqual({ splitter: true, serverEvents: false, optimizeHtml: true });
-    expect(initialOptions(null)).toEqual({ splitter: true, serverEvents: false, optimizeHtml: true });
+    expect(initialOptions([])).toEqual({
+      splitter: true,
+      serverEvents: false,
+      optimizeHtml: true,
+      lighterImages: true,
+    });
+    expect(initialOptions(null)).toEqual({
+      splitter: true,
+      serverEvents: false,
+      optimizeHtml: true,
+      lighterImages: true,
+    });
     const list = [
-      view({ id: "3", status: "FAILED", options: { splitter: false, serverEvents: false, optimizeHtml: false } }),
-      view({ id: "2", status: "DONE", options: { splitter: false, serverEvents: true, optimizeHtml: true } }),
+      view({
+        id: "3",
+        status: "FAILED",
+        options: { splitter: false, serverEvents: false, optimizeHtml: false, lighterImages: true },
+      }),
+      view({
+        id: "2",
+        status: "DONE",
+        options: { splitter: false, serverEvents: true, optimizeHtml: true, lighterImages: true },
+      }),
       view({ id: "1", status: "DONE" }),
     ];
-    expect(initialOptions(list)).toEqual({ splitter: false, serverEvents: true, optimizeHtml: true });
+    expect(initialOptions(list)).toEqual({
+      splitter: false,
+      serverEvents: true,
+      optimizeHtml: true,
+      lighterImages: true,
+    });
   });
 
   it("opções inválidas no histórico → padrão", () => {
     const broken = view({ id: "1", options: { splitter: "sim" } as never });
-    expect(initialOptions([broken])).toEqual({ splitter: true, serverEvents: false, optimizeHtml: true });
+    expect(initialOptions([broken])).toEqual({
+      splitter: true,
+      serverEvents: false,
+      optimizeHtml: true,
+      lighterImages: true,
+    });
+  });
+
+  it("“Imagens mais leves”: ligada por padrão (também nos ZIPs de antes dela); desligada, fica lembrada", () => {
+    const old = view({
+      id: "1",
+      status: "DONE",
+      options: { splitter: true, serverEvents: false, optimizeHtml: true } as never,
+    });
+    expect(initialOptions([old]).lighterImages).toBe(true);
+    const off = view({ id: "2", status: "DONE", options: { ...initialOptions([]), lighterImages: false } });
+    expect(initialOptions([off]).lighterImages).toBe(false);
+    // O histórico não mostra o selo (os ZIPs de antes dela apareceriam com ela).
+    expect(optionsSummary({ ...initialOptions([]), lighterImages: true }, false)).not.toContain("Imagens mais leves");
   });
 
   it("sem token configurado, nunca pede o eventos.php", () => {
-    const opts = { splitter: true, serverEvents: true, optimizeHtml: true };
+    const opts = { splitter: true, serverEvents: true, optimizeHtml: true, lighterImages: true };
     expect(optionsToSend(opts, { hasServerEventTokens: true }).serverEvents).toBe(true);
     expect(optionsToSend(opts, { hasServerEventTokens: false }).serverEvents).toBe(false);
     expect(optionsToSend(opts, null).serverEvents).toBe(false);
-    expect(optionsToSend(opts, null)).toMatchObject({ splitter: true, optimizeHtml: true });
+    expect(optionsToSend(opts, null)).toMatchObject({ splitter: true, optimizeHtml: true, lighterImages: true });
   });
 });
 

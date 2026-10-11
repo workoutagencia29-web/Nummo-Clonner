@@ -10,6 +10,7 @@ import {
   completeUrl,
   contextSnippet,
   createMatcher,
+  describeAttribute,
   destinationOf,
   foldText,
   isSearchableAttribute,
@@ -139,7 +140,7 @@ describe("contextSnippet", () => {
 
 describe("isSearchableAttribute", () => {
   it("só os atributos de conteúdo (e value em botões)", () => {
-    for (const name of ["href", "data-os-href", "src", "alt", "title", "action", "placeholder", "HREF"]) {
+    for (const name of ["href", "data-os-href", "src", "alt", "title", "action", "placeholder", "aria-label", "HREF"]) {
       expect(isSearchableAttribute("a", name, {})).toBe(true);
     }
     for (const name of [
@@ -202,6 +203,18 @@ describe("replaceInHtml", () => {
     expect(r.html).toContain("<!-- compre -->");
     expect(r.html).toContain('<script>var compre = "Compre";</script>');
     expect(r.html).toContain('<noscript><img src="compre.gif"></noscript>');
+  });
+
+  it("troca também o nome lido pelo leitor de tela (aria-label), junto com o texto de dentro do campo", async () => {
+    const html =
+      '<!doctype html><html><head></head><body><form data-os-widget="lead-form"><input type="tel" name="phone" placeholder="Seu WhatsApp" aria-label="Seu WhatsApp"></form>' +
+      '<a data-os-widget="whatsapp" href="https://wa.me/5511999999999" aria-label="Falar no WhatsApp"></a></body></html>';
+    const r = await replaceInHtml(html, matcher("seu whatsapp"), "Tu WhatsApp");
+    expect(r.count).toBe(2);
+    expect(r.html).toContain('placeholder="Tu WhatsApp" aria-label="Tu WhatsApp"');
+    const label = await replaceInHtml(html, matcher("Falar no"), "Hablar por");
+    expect(label.html).toContain('aria-label="Hablar por WhatsApp"');
+    expect(describeAttribute("input", "aria-label")).toBe("Nome lido pelo leitor de tela");
   });
 
   it("não troca dentro de nomes de tags nem de atributos", async () => {

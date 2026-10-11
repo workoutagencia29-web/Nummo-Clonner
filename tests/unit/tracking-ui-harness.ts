@@ -72,7 +72,24 @@ const stubs: Plugin = {
       if (args.path === "navigation") {
         return {
           loader: "js",
-          contents: `export function useRouter() { return { push: (h) => (window.__navs = [...(window.__navs || []), h]), replace: () => {}, refresh: () => {}, back: () => {}, prefetch: () => {} }; }`,
+          resolveDir: ROOT,
+          // Como o roteador do Next: o useSearchParams acompanha também o history.replaceState
+          // e o pushState feitos pela tela (ex.: replaceQuery tirando ?link=/?campo= do endereço).
+          contents: `import { useSyncExternalStore } from "react";
+            if (!window.__osHistoryStub) {
+              window.__osHistoryStub = true;
+              for (const name of ["replaceState", "pushState"]) {
+                const original = history[name].bind(history);
+                history[name] = (...args) => { original(...args); dispatchEvent(new Event("os-stub-url")); };
+              }
+            }
+            const sub = (cb) => {
+              addEventListener("popstate", cb);
+              addEventListener("os-stub-url", cb);
+              return () => { removeEventListener("popstate", cb); removeEventListener("os-stub-url", cb); };
+            };
+            export function useSearchParams() { return new URLSearchParams(useSyncExternalStore(sub, () => location.search)); }
+            export function useRouter() { return { push: (h) => (window.__navs = [...(window.__navs || []), h]), replace: () => {}, refresh: () => {}, back: () => {}, prefetch: () => {} }; }`,
         };
       }
       if (args.path === "link") {
@@ -95,7 +112,11 @@ const stubs: Plugin = {
         loader: "js",
         contents: `
           const calls = (window.__toasts = []);
-          const rec = (type) => (message) => { calls.push({ type, message: String(message) }); return calls.length; };
+          // "persistent": o toast fica até a pessoa fechar (duration Infinity, com o botão de fechar).
+          const rec = (type) => (message, opts) => {
+            calls.push({ type, message: String(message), ...(opts && opts.duration === Infinity && { persistent: true, closeButton: Boolean(opts.closeButton) }) });
+            return calls.length;
+          };
           export const toast = Object.assign(rec("default"), { success: rec("success"), error: rec("error"), warning: rec("warning"), info: rec("info"), loading: rec("loading"), dismiss: () => {} });`,
       };
     });
@@ -278,7 +299,7 @@ export async function openPanel(
 
 interface OSWindow {
   OS: { render(kind: string, props: unknown): void };
-  __toasts: { type: string; message: string }[];
+  __toasts: { type: string; message: string; persistent?: true; closeButton?: boolean }[];
   __navs?: string[];
 }
 

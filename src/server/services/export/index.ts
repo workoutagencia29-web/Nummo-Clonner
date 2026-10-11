@@ -49,7 +49,12 @@ export function toExportView(row: Export): ExportView {
 }
 
 function sameOptions(a: ExportOptions, b: ExportOptions) {
-  return a.splitter === b.splitter && a.serverEvents === b.serverEvents && a.optimizeHtml === b.optimizeHtml;
+  return (
+    a.splitter === b.splitter &&
+    a.serverEvents === b.serverEvents &&
+    a.optimizeHtml === b.optimizeHtml &&
+    a.lighterImages === b.lighterImages
+  );
 }
 
 /**

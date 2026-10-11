@@ -5,6 +5,7 @@
  * Na prévia e no ZIP, o href (ou data-os-href/action) recebe a URL atual do link.
  */
 import * as cheerio from "cheerio";
+import { NEW_LINK_TARGET_ATTR } from "@/lib/checkout/rules";
 import { restoreDoctype } from "@/lib/doctype";
 import { PAY_ATTR } from "@/lib/payments/contract";
 import { SLUG_MAX, slugify } from "@/lib/text";
@@ -19,7 +20,16 @@ export interface OfferLinkValue {
    * pagamento (data-os-pay), não vai a endereço nenhum.
    */
   pay?: boolean;
+  /**
+   * "Checkout do Offer Studio": true com o produto salvo (`url` é a página de
+   * checkout — quem renderiza diz o endereço; ver src/lib/payments/links.ts),
+   * false ainda sem o produto. Ausente = outro destino.
+   */
+  checkout?: boolean;
 }
+
+/** Marca do clonador nos botões de checkout da página original (o rastreamento conta como checkout de fora). */
+export const CLONED_CHECKOUT_ATTR = "data-os-checkout";
 
 /** O link leva a algum lugar: endereço preenchido ou pagamento na página. */
 export function linkHasDestination(link: { url: string; pay?: boolean }): boolean {
@@ -47,20 +57,39 @@ export function linkKey(label: string, taken: Iterable<string>) {
  * pagamento na página: o elemento ganha data-os-pay="<chave>" (a janela de
  * pagamento abre no clique, src/runtime), o <a> fica com href="#" e os outros
  * perdem o data-os-href — nada leva ao checkout antigo do site clonado.
+ *
+ * "Checkout do Offer Studio": o elemento perde a marca do clonador
+ * (data-os-checkout: senão o rastreamento o trata como checkout de fora —
+ * InitiateCheckout no clique, além do da página de checkout, e as UTMs pela
+ * regra dos checkouts); sem o endereço da página de checkout (quem
+ * renderiza não o deu) ou sem o produto salvo, nada leva ao endereço que o elemento tinha
+ * (o checkout da página clonada): <a> com href="#", sem data-os-href nem action.
  */
 export function applyOfferLinks(html: string, links: OfferLinkValue[]) {
   if (!html.includes(LINK_ATTR)) return html;
   const byKey = new Map(links.filter((l) => l.url && !l.pay).map((l) => [l.key, l.url]));
   const pay = new Set(links.filter((l) => l.pay).map((l) => l.key));
+  const own = new Set(links.filter((l) => l.checkout !== undefined && !l.pay).map((l) => l.key));
   const $ = cheerio.load(html);
   $(`[${LINK_ATTR}]`).each((_, el) => {
     const node = $(el);
+    // Preferência só do editor (o link novo do "Botão de checkout"): não vai para a página.
+    node.removeAttr(NEW_LINK_TARGET_ATTR);
     const key = node.attr(LINK_ATTR) ?? "";
     if (pay.has(key)) {
       node.attr(PAY_ATTR, key);
       if (el.tagName === "a" || el.tagName === "area") node.attr("href", "#");
       node.removeAttr("data-os-href");
       return;
+    }
+    if (own.has(key)) {
+      node.removeAttr(CLONED_CHECKOUT_ATTR);
+      if (!byKey.has(key)) {
+        if (el.tagName === "a" || el.tagName === "area") node.attr("href", "#");
+        else if (el.tagName === "form") node.removeAttr("action");
+        node.removeAttr("data-os-href");
+        return;
+      }
     }
     const url = byKey.get(key);
     if (!url) return;

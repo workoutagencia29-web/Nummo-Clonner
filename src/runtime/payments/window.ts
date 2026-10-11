@@ -49,6 +49,7 @@ import { copyText } from "../widgets/copy";
 import { dropOrder, loadOrder, type OpenOrder, type PayError, postPayment, saveOrder } from "./api";
 import { PAY_CSS } from "./css";
 import { payMetadata, trackingInfo } from "./meta";
+import { loadSdk } from "./sdk";
 import { formatDate, formatMoney, type PayTexts, payTexts, SIM_TEXTS } from "./texts";
 
 /** O que a página expõe do rastreamento (src/runtime/tracking/index.ts). */
@@ -124,28 +125,6 @@ function metadata(): Record<string, string> {
   } catch {
     return {};
   }
-}
-
-const sdkLoads: Record<string, Promise<boolean>> = {};
-
-/** Carrega o SDK do gateway uma vez (true = carregou). */
-function loadSdk(url: string): Promise<boolean> {
-  if ((window as unknown as { KyvoCard?: CardSdk }).KyvoCard) return Promise.resolve(true);
-  if (!sdkLoads[url]) {
-    sdkLoads[url] = new Promise((resolve) => {
-      const s = document.createElement("script");
-      s.src = url;
-      s.async = true;
-      s.onload = () => resolve(true);
-      s.onerror = () => {
-        delete sdkLoads[url];
-        s.remove();
-        resolve(false);
-      };
-      (document.head || document.documentElement).appendChild(s);
-    });
-  }
-  return sdkLoads[url];
 }
 
 function addCss() {

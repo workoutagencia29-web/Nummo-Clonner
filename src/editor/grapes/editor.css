@@ -892,6 +892,19 @@
 .os-panel .gjs-trt-trait--button .gjs-btn--full {
   width: 100%;
 }
+/* Botão de destaque (os-action com osPrimary): a ação principal do elemento, como o "Trocar logo". */
+.os-panel .gjs-trt-trait .gjs-btn-prim.os-action-primary {
+  width: 100%;
+  height: 38px;
+  border-color: var(--primary);
+  background: var(--primary);
+  color: var(--primary-foreground);
+  font-size: 13.5px;
+  font-weight: 600;
+}
+.os-panel .gjs-trt-trait .gjs-btn-prim.os-action-primary:hover {
+  filter: brightness(1.08);
+}
 
 /* "Vai para": destino de um link da oferta ou página do funil (só leitura). */
 .os-panel .gjs-trt-trait--os-info .gjs-field {
@@ -1244,6 +1257,10 @@
 .os-editor .gjs-toolbar-item {
   width: 26px;
   padding: 4px;
+}
+/* O GrapesJS pinta todo svg da barra (fill: currentColor): ícones de traço ("Trocar imagem") viravam um quadrado cheio. */
+.os-editor .gjs-toolbar-item svg[fill="none"] {
+  fill: none;
 }
 .os-editor .gjs-toolbar-item:hover {
   background: color-mix(in oklch, white 18%, transparent);

@@ -151,9 +151,8 @@ afterAll(async () => {
 
 async function expectPrizeOnSales(page: Page) {
   await expect.poll(() => page.locator(".os-pz").count()).toBe(1);
-  expect(await page.locator(".os-pz-msg").textContent()).toMatch(
-    /^🎉 Você ganhou 20% OFF — seu desconto está reservado por (10:00|09:5\d)$/,
-  );
+  expect(await page.locator(".os-pz-msg").textContent()).toBe("20% OFF liberado! Use o cupom no pagamento");
+  expect(await page.locator(".os-pz-t").textContent()).toMatch(/^00:(10:00|09:5\d)$/);
   expect(await page.locator(".os-pz-cp code").textContent()).toBe("VINTE");
   const hrefs = await page
     .locator('[data-os-link="checkout"]')

@@ -1,9 +1,12 @@
 /**
  * pagamento.php do ZIP: o servidor do pagamento na página (checkout
- * transparente) no site publicado — o mesmo contrato da prévia
- * (src/lib/payments/contract.ts; a prévia responde em simulação,
- * src/server/services/payments/simulation.ts), com a Kyvo de verdade.
- * PHP 7.4+, com cURL (ou allow_url_fopen), sem banco e sem dependências.
+ * transparente) e do checkout do Offer Studio no site publicado — o mesmo
+ * contrato da prévia (src/lib/payments/contract.ts e
+ * src/lib/checkout/contract.ts; a prévia responde em simulação,
+ * src/server/services/payments/simulation.ts), com os gateways de verdade.
+ * PHP 7.4+, com cURL (ou allow_url_fopen), sem banco e sem dependências. A
+ * parte do checkout (PIX da FlevoPay/BlackCat, Kyvo nas outras moedas,
+ * pedidos guardados, webhook) está em ./checkout-php.ts.
  *
  * - pagamento.php: o código (igual em todo ZIP, sem segredo nenhum). Recebe o
  *   POST JSON da janela de pagamento e do bloco "Acesso ao produto"
@@ -39,10 +42,11 @@ import {
   PRODUCT_KEY_RE,
 } from "@/lib/payments/contract";
 import { METHOD_CURRENCIES } from "@/lib/payments/rules";
+import { checkoutPhpFunctions, checkoutsConfigPhp, type PagamentoCheckout } from "./checkout-php";
 import { PHP_CLIENT_IP_FUNCTIONS, phpString } from "./php";
 
 export const PAGAMENTO_FILE = "pagamento.php";
-/** Pasta da chave (com o .htaccess dela e os limites por IP). */
+/** Pasta das chaves (com o .htaccess dela, os limites por IP e os pedidos do checkout). */
 export const PAGAMENTO_CONFIG_DIR = "pagamento-dados/";
 export const PAGAMENTO_CONFIG_FILE = `${PAGAMENTO_CONFIG_DIR}config.php`;
 export const PAGAMENTO_HTACCESS_FILE = `${PAGAMENTO_CONFIG_DIR}.htaccess`;
@@ -92,6 +96,10 @@ export interface PagamentoConfig {
   /** Chave da API da Kyvo ("" = não cadastrada: o pagamento.php responde "configuracao"). */
   apiKey: string;
   products: PagamentoProduct[];
+  /** Chaves da FlevoPay e da BlackCat (checkout do Offer Studio em real; "" = não cadastrada). */
+  keys?: { flevopay?: string; blackcat?: string };
+  /** Checkouts do Offer Studio (páginas checkout/<chave>/). */
+  checkouts?: PagamentoCheckout[];
 }
 
 const phpList = (items: readonly string[]) => `array(${items.map(phpString).join(", ")})`;
@@ -111,13 +119,14 @@ function productEntry(p: PagamentoProduct): string {
   ].join("\n");
 }
 
-/** pagamento-dados/config.php com a chave da API (só no ZIP; nunca vai para o HTML). */
+/** pagamento-dados/config.php com as chaves das APIs (só no ZIP; nunca vai para o HTML). */
 export function pagamentoConfigPhp(config: PagamentoConfig): string {
   const products = config.products.length ? `array(\n${config.products.map(productEntry).join("\n")}\n  )` : "array()";
+  const checkouts = config.checkouts ?? [];
   return `<?php
-// Offer Studio — chave da API da Kyvo e produtos do pagamento na página.
+// Offer Studio — chaves das APIs (Kyvo${checkouts.length ? ", FlevoPay, BlackCat" : ""}) e produtos do pagamento.
 // Usado pelo pagamento.php. NÃO compartilhe este arquivo: com a chave,
-// qualquer pessoa consegue criar cobranças e ver as suas vendas na Kyvo.
+// qualquer pessoa consegue criar cobranças e ver as suas vendas no gateway.
 // Só funciona em hospedagem com PHP (veja o LEIA-ME.txt).
 // Mudou o valor, o link de acesso ou a chave? Mude no Offer Studio e gere o ZIP de novo.
 if (!defined('OS_PAGAMENTO')) {
@@ -128,7 +137,13 @@ if (!defined('OS_PAGAMENTO')) {
 return array(
   'gateway' => 'kyvo',
   'chave' => ${phpString(config.apiKey)},
+  'chaves' => array(
+    'flevopay' => ${phpString(config.keys?.flevopay ?? "")},
+    'blackcat' => ${phpString(config.keys?.blackcat ?? "")},
+  ),
   'produtos' => ${products},
+  // Checkouts do Offer Studio (páginas checkout/<chave>/): valores em centavos.
+  'checkouts' => ${checkoutsConfigPhp(checkouts)},
   // true só se o site fica atrás de um CDN/proxy que não seja a Cloudflare
   // (a Cloudflare já é reconhecida): aí o IP do comprador vem do cabeçalho
   // X-Forwarded-For. Deixe false se não tiver certeza.
@@ -143,7 +158,7 @@ return array(
  * para essa pasta (nunca mexe no .htaccess da raiz da hospedagem).
  */
 export function pagamentoHtaccess(): string {
-  return `# Offer Studio: nada desta pasta (chave da Kyvo e controle de abuso do pagamento.php) pode ser aberto pelo navegador.
+  return `# Offer Studio: nada desta pasta (chaves dos gateways, pedidos do checkout e controle de abuso do pagamento.php) pode ser aberto pelo navegador.
 <IfModule mod_authz_core.c>
   Require all denied
 </IfModule>
@@ -344,7 +359,7 @@ function os_limit_dir()
 {
     $dir = __DIR__ . '/' . OS_DATA_DIR . '/limites';
     if (!is_dir($dir)) {
-        @mkdir($dir, 0755, true);
+        @mkdir($dir, 0700, true);
     }
     if (is_dir($dir) && @is_writable($dir)) {
         return array($dir, '');
@@ -381,9 +396,14 @@ function os_rate_hit($bucket, $who)
     }
     $key = md5(__DIR__ . '|' . $bucket . '|' . $who);
     $file = $where[0] . '/' . $where[1] . $bucket . '-' . substr($key, 0, 2) . '.php';
+    $new = !is_file($file);
     $handle = @fopen($file, 'c+');
     if (!$handle) {
         return 0;
+    }
+    if ($new) {
+        // Só para o PHP: outra conta da hospedagem (ou a pasta temporária, compartilhada) não lê nem muda.
+        @chmod($file, 0600);
     }
     $count = 0;
     if (@flock($handle, LOCK_EX)) {
@@ -514,18 +534,109 @@ function os_gateway_error($status, $raw)
     return 'indisponivel';
 }
 
-/** Transação da Kyvo (GET /v1/transactions/{id}); erro → responde e termina. */
-function os_transaction($apiKey, $id)
+/** Transação da Kyvo (GET /v1/transactions/{id}): o array dela ou o código de erro do contrato. */
+function os_kyvo_tx($apiKey, $id)
 {
     $res = os_kyvo('GET', '/v1/transactions/' . rawurlencode($id), $apiKey, null);
     if ($res[0] < 200 || $res[0] >= 300) {
-        os_fail(os_gateway_error($res[0], $res[1]));
+        return os_gateway_error($res[0], $res[1]);
     }
     $tx = json_decode($res[1], true);
     if (!is_array($tx) || os_field($tx, 'id') !== $id || !in_array(os_field($tx, 'status'), OS_STATUSES, true)) {
-        os_fail('indisponivel');
+        return 'indisponivel';
     }
     return $tx;
+}
+
+/** Transação da Kyvo; erro → responde e termina. */
+function os_transaction($apiKey, $id)
+{
+    $tx = os_kyvo_tx($apiKey, $id);
+    if (is_string($tx)) {
+        os_fail($tx);
+    }
+    return $tx;
+}
+
+/** Metadata da cobrança da Kyvo: a da página (já filtrada) + ip e navegador. */
+function os_kyvo_metadata($metadata, $ip)
+{
+    if ($ip !== '') {
+        $metadata['ip'] = $ip;
+    }
+    $agent = isset($_SERVER['HTTP_USER_AGENT']) ? (string) $_SERVER['HTTP_USER_AGENT'] : '';
+    if ($agent !== '' && os_len($agent) >= 0) {
+        $metadata['ua'] = os_cut($agent, 500);
+    }
+    return $metadata;
+}
+
+/**
+ * Cria a cobrança na Kyvo (SPEI, cartão, Bizum ou MB WAY). Devolve
+ * array('id', 'status', 'spei' ou 'cartao') ou o código de erro do contrato.
+ */
+function os_kyvo_create($apiKey, $metodo, $valor, $moeda, $customer, $external, $metadata, $host)
+{
+    $body = array('amount' => $valor, 'customer' => $customer, 'externalOrderId' => $external);
+    $source = os_source_url($host);
+    if ($source !== null) {
+        $body['sourceUrl'] = $source;
+    }
+    if (count($metadata)) {
+        $body['metadata'] = $metadata;
+    }
+    if ($metodo === 'spei') {
+        $path = '/v1/spei/charges';
+    } else {
+        $path = '/v1/card/charges';
+        $body['currency'] = $moeda;
+        if ($metodo === 'bizum' || $metodo === 'mb_way') {
+            $body['onlyMethods'] = array($metodo);
+        }
+    }
+
+    $res = os_kyvo('POST', $path, $apiKey, $body);
+    if ($res[0] < 200 || $res[0] >= 300) {
+        return os_gateway_error($res[0], $res[1]);
+    }
+    $charge = json_decode($res[1], true);
+    $id = os_text(os_field($charge, 'id'));
+    $status = os_field($charge, 'status');
+    if ($id === null || !preg_match('/^[A-Za-z0-9_-]{3,100}$/', $id) || !in_array($status, OS_STATUSES, true)) {
+        return 'indisponivel';
+    }
+    $instructions = os_field($charge, 'instructions');
+    $out = array('id' => $id, 'status' => $status);
+    if ($metodo === 'spei') {
+        $spei = os_field($instructions, 'spei');
+        $clabe = (string) os_text(os_field($spei, 'clabe'));
+        if (os_field($instructions, 'method') !== 'spei' || $clabe === '') {
+            return 'indisponivel';
+        }
+        $holder = (string) os_text(os_field($spei, 'nominal'));
+        $expires = (string) os_text(os_field($spei, 'expires_at'));
+        $out['spei'] = array(
+            'clabe' => $clabe,
+            'banco' => (string) os_text(os_field($spei, 'bank')),
+            'titular' => $holder !== '' ? $holder : (string) os_text(os_field($spei, 'beneficiary')),
+            'referencia' => (string) os_text(os_field($spei, 'reference')),
+            'expiraEm' => $expires !== '' ? $expires : null,
+        );
+    } else {
+        // A sessão vai para o SDK exatamente como veio (objetos continuam objetos).
+        $raw = json_decode($res[1]);
+        $card = isset($raw->instructions->card) && is_object($raw->instructions->card) ? $raw->instructions->card : null;
+        $sdk = $card !== null && isset($card->sdk_url) && is_string($card->sdk_url) ? $card->sdk_url : '';
+        if (os_field($instructions, 'method') !== 'card' || !preg_match(OS_SDK_RE, $sdk) || !isset($card->session) || !is_object($card->session)) {
+            return 'indisponivel';
+        }
+        $out['cartao'] = array(
+            'sdkUrl' => $sdk,
+            'sessao' => $card->session,
+            'expiraEm' => isset($card->expires_at) && is_string($card->expires_at) && $card->expires_at !== '' ? $card->expires_at : null,
+        );
+    }
+    return $out;
 }
 
 /** Código do produto de um pedido do Offer Studio (os_<código>_<20>); null = não é daqui. */
@@ -595,27 +706,74 @@ function os_https()
     return isset($_SERVER['HTTP_X_FORWARDED_PROTO']) && strtolower((string) $_SERVER['HTTP_X_FORWARDED_PROTO']) === 'https';
 }
 
+/**
+ * Limites de cobranças novas (termina com "limite" quando passou): por IP
+ * (IPv6 por /64), por rede IPv6 /48 e, para cartão, Bizum e MB WAY, por
+ * e-mail. O teto do site só conta as cobranças além das primeiras de cada IP:
+ * quem chega para comprar nunca é barrado por um ataque de outros IPs.
+ */
+function os_create_limits($ip, $email, $perEmail)
+{
+    $mine = os_rate_hit('criar', os_rate_key($ip, 64));
+    if ($mine > OS_CREATE_LIMIT) {
+        os_fail('limite');
+    }
+    if (os_rate_key($ip, 48) !== $ip && !os_rate_ok('criar-rede', os_rate_key($ip, 48), OS_CREATE_NET_LIMIT)) {
+        os_fail('limite');
+    }
+    if ($perEmail && !os_rate_ok('criar-email', $email, OS_CARD_EMAIL_LIMIT)) {
+        os_fail('limite');
+    }
+    if ($mine > OS_CREATE_FREE && !os_rate_ok('criar-site', '*', OS_CREATE_TOTAL)) {
+        os_fail('limite');
+    }
+}
+
+/** Hora do servidor em ms (o "agora" das respostas do checkout). */
+function os_now_ms()
+{
+    return (int) round(microtime(true) * 1000);
+}
+${checkoutPhpFunctions()}
+
 $config = @include __DIR__ . '/' . OS_DATA_DIR . '/config.php';
 if (!is_array($config)) {
     $config = array();
 }
 $apiKey = trim((string) os_text(os_field($config, 'chave')));
 $products = is_array(os_field($config, 'produtos')) ? $config['produtos'] : array();
+$checkouts = is_array(os_field($config, 'checkouts')) ? $config['checkouts'] : array();
 $trustProxy = os_field($config, 'trust_proxy') === true;
 
 $method = isset($_SERVER['REQUEST_METHOD']) ? strtoupper((string) $_SERVER['REQUEST_METHOD']) : '';
 
-// Aberto no navegador: mostra se está funcionando (sem a chave nem os links de acesso).
+// Aberto no navegador: mostra se está funcionando (sem as chaves nem os links de acesso).
 if ($method === 'GET' || $method === 'HEAD') {
     header('Content-Type: text/plain; charset=utf-8');
     header('Cache-Control: no-store');
     header('X-Robots-Tag: noindex');
     $send = function_exists('curl_init') ? 'cURL' : (ini_get('allow_url_fopen') ? 'allow_url_fopen' : 'INDISPONÍVEL (peça à hospedagem para ativar o cURL)');
     $limits = os_limit_dir();
+    $used = array();
+    foreach ($checkouts as $checkout) {
+        $used[(string) os_text(os_field($checkout, 'gateway'))] = true;
+    }
     echo "pagamento.php do Offer Studio funcionando.\n";
-    echo 'PHP ' . PHP_VERSION . ' · conexão com a Kyvo: ' . $send . "\n";
-    echo 'Chave da Kyvo: ' . ($apiKey !== '' ? 'cadastrada' : 'FALTANDO (cadastre em Configurações → Pagamentos no Offer Studio e gere o ZIP de novo)') . "\n";
+    echo 'PHP ' . PHP_VERSION . ' · conexão com os gateways: ' . $send . "\n";
+    $missing = 'FALTANDO (cadastre na oferta, aba Links e checkouts do Offer Studio, e gere o ZIP de novo)';
+    if (count($products) || isset($used['kyvo']) || !count($checkouts)) {
+        echo 'Chave da Kyvo: ' . ($apiKey !== '' ? 'cadastrada' : $missing) . "\n";
+    }
+    foreach (array('flevopay' => 'FlevoPay', 'blackcat' => 'BlackCat') as $gateway => $label) {
+        if (isset($used[$gateway])) {
+            echo 'Chave da ' . $label . ': ' . (os_gateway_key($config, $gateway) !== '' ? 'cadastrada' : $missing) . "\n";
+        }
+    }
     echo 'Produtos: ' . count($products) . "\n";
+    if (count($checkouts)) {
+        echo 'Checkouts: ' . count($checkouts) . "\n";
+        echo 'Pedidos do checkout: ' . (os_orders_dir() !== null ? 'gravando em pagamento-dados/' . OS_ORDERS_DIR : 'NÃO (a pasta pagamento-dados não aceita gravação: o checkout não cobra)') . "\n";
+    }
     echo 'HTTPS: ' . (os_https() ? 'sim' : 'NÃO (o pagamento precisa do site em https://)') . "\n";
     echo 'Limite por IP: ' . ($limits !== null ? 'ligado' : 'desligado (a pasta pagamento-dados não aceita gravação)') . "\n";
     exit;
@@ -623,6 +781,12 @@ if ($method === 'GET' || $method === 'HEAD') {
 if ($method !== 'POST') {
     header('Allow: GET, POST');
     os_fail('invalido');
+}
+
+// Webhook da FlevoPay/BlackCat (servidor do gateway: sem Origin). O corpo só
+// diz qual cobrança olhar; o status vem da API, consultada com a chave.
+if (isset($_GET[OS_WEBHOOK_PARAM])) {
+    os_webhook($config, $trustProxy);
 }
 
 // Só da própria página (mesmo site): o navegador sempre manda Origin num POST
@@ -660,7 +824,15 @@ if (!is_string($raw) || $raw === '') {
 if (strlen($raw) > OS_MAX_BODY) {
     os_fail('corpo_grande');
 }
-$req = os_parse(json_decode($raw, true));
+$json = json_decode($raw, true);
+
+// Página de checkout do Offer Studio (checkout/<chave>/).
+$acao = is_array($json) ? os_field($json, 'acao') : null;
+if ($acao === 'checkout_criar' || $acao === 'checkout_status') {
+    os_checkout_request($config, $checkouts, os_parse_checkout($json), $trustProxy, $host);
+}
+
+$req = os_parse($json);
 if ($req === null || $req['acao'] === 'simular') {
     os_fail('invalido');
 }
@@ -683,102 +855,30 @@ if ($req['acao'] === 'criar') {
     if ($apiKey === '' || trim((string) os_text(os_field($product, 'acesso'))) === '') {
         os_fail('configuracao');
     }
-    // Limites: por IP (IPv6 por /64), por rede IPv6 /48 e, para cartão, por
-    // e-mail. O teto do site só conta as cobranças além das primeiras de cada
-    // IP: quem chega para comprar nunca é barrado por um ataque de outros IPs.
-    $mine = os_rate_hit('criar', os_rate_key($ip, 64));
-    if ($mine > OS_CREATE_LIMIT) {
-        os_fail('limite');
-    }
-    if (os_rate_key($ip, 48) !== $ip && !os_rate_ok('criar-rede', os_rate_key($ip, 48), OS_CREATE_NET_LIMIT)) {
-        os_fail('limite');
-    }
-    if ($req['metodo'] !== 'spei' && !os_rate_ok('criar-email', $req['email'], OS_CARD_EMAIL_LIMIT)) {
-        os_fail('limite');
-    }
-    if ($mine > OS_CREATE_FREE && !os_rate_ok('criar-site', '*', OS_CREATE_TOTAL)) {
-        os_fail('limite');
-    }
+    os_create_limits($ip, $req['email'], $req['metodo'] !== 'spei');
 
     $external = os_new_order($product['codigo']);
     $customer = array('name' => $req['nome'], 'email' => $req['email']);
     if (isset($req['documento'])) {
         $customer['document'] = $req['documento'];
     }
-    $metadata = $req['metadata'];
-    if ($ip !== '') {
-        $metadata['ip'] = $ip;
+    $charge = os_kyvo_create($apiKey, $req['metodo'], $product['valor'], $product['moeda'], $customer, $external, os_kyvo_metadata($req['metadata'], $ip), $host);
+    if (is_string($charge)) {
+        os_fail($charge);
     }
-    $agent = isset($_SERVER['HTTP_USER_AGENT']) ? (string) $_SERVER['HTTP_USER_AGENT'] : '';
-    if ($agent !== '' && os_len($agent) >= 0) {
-        $metadata['ua'] = os_cut($agent, 500);
-    }
-    $body = array('amount' => $product['valor'], 'customer' => $customer, 'externalOrderId' => $external);
-    $source = os_source_url($host);
-    if ($source !== null) {
-        $body['sourceUrl'] = $source;
-    }
-    if (count($metadata)) {
-        $body['metadata'] = $metadata;
-    }
-    if ($req['metodo'] === 'spei') {
-        $path = '/v1/spei/charges';
-    } else {
-        $path = '/v1/card/charges';
-        $body['currency'] = $product['moeda'];
-        if ($req['metodo'] === 'bizum' || $req['metodo'] === 'mb_way') {
-            $body['onlyMethods'] = array($req['metodo']);
-        }
-    }
-
-    $res = os_kyvo('POST', $path, $apiKey, $body);
-    if ($res[0] < 200 || $res[0] >= 300) {
-        os_fail(os_gateway_error($res[0], $res[1]));
-    }
-    $charge = json_decode($res[1], true);
-    $id = os_text(os_field($charge, 'id'));
-    $status = os_field($charge, 'status');
-    if ($id === null || !preg_match('/^[A-Za-z0-9_-]{3,100}$/', $id) || !in_array($status, OS_STATUSES, true)) {
-        os_fail('indisponivel');
-    }
-    $instructions = os_field($charge, 'instructions');
     $out = array(
         'ok' => true,
-        'pedido' => $id,
+        'pedido' => $charge['id'],
         'pedidoExterno' => $external,
-        'status' => $status,
+        'status' => $charge['status'],
         'valor' => $product['valor'],
         'moeda' => $product['moeda'],
         'metodo' => $req['metodo'],
     );
-    if ($req['metodo'] === 'spei') {
-        $spei = os_field($instructions, 'spei');
-        $clabe = (string) os_text(os_field($spei, 'clabe'));
-        if (os_field($instructions, 'method') !== 'spei' || $clabe === '') {
-            os_fail('indisponivel');
+    foreach (array('spei', 'cartao') as $part) {
+        if (isset($charge[$part])) {
+            $out[$part] = $charge[$part];
         }
-        $holder = (string) os_text(os_field($spei, 'nominal'));
-        $expires = (string) os_text(os_field($spei, 'expires_at'));
-        $out['spei'] = array(
-            'clabe' => $clabe,
-            'banco' => (string) os_text(os_field($spei, 'bank')),
-            'titular' => $holder !== '' ? $holder : (string) os_text(os_field($spei, 'beneficiary')),
-            'referencia' => (string) os_text(os_field($spei, 'reference')),
-            'expiraEm' => $expires !== '' ? $expires : null,
-        );
-    } else {
-        // A sessão vai para o SDK exatamente como veio (objetos continuam objetos).
-        $raw = json_decode($res[1]);
-        $card = isset($raw->instructions->card) && is_object($raw->instructions->card) ? $raw->instructions->card : null;
-        $sdk = $card !== null && isset($card->sdk_url) && is_string($card->sdk_url) ? $card->sdk_url : '';
-        if (os_field($instructions, 'method') !== 'card' || !preg_match(OS_SDK_RE, $sdk) || !isset($card->session) || !is_object($card->session)) {
-            os_fail('indisponivel');
-        }
-        $out['cartao'] = array(
-            'sdkUrl' => $sdk,
-            'sessao' => $card->session,
-            'expiraEm' => isset($card->expires_at) && is_string($card->expires_at) && $card->expires_at !== '' ? $card->expires_at : null,
-        );
     }
     os_reply(201, $out);
 }
@@ -786,6 +886,17 @@ if ($req['acao'] === 'criar') {
 // status e acesso: consultas (limite folgado por IP: a janela confere a cada ~4 s).
 if (!os_rate_ok('consulta', os_rate_key($ip, 64), OS_READ_LIMIT)) {
     os_fail('limite');
+}
+// Acesso de um pedido da página de checkout (guardado aqui, com o gateway e os bumps comprados).
+if ($req['acao'] === 'acesso' && os_checkout_order_ok($req['pedido'])) {
+    $order = os_order_get($req['pedido']);
+    if ($order !== null) {
+        os_checkout_access($config, $checkouts, $req, $order);
+    }
+    // Pedido do checkout que não está mais aqui (apagado depois de 180 dias, ou inventado).
+    if (strpos($req['pedido'], 'ck_') === 0 || !count($products)) {
+        os_fail('nao_encontrado');
+    }
 }
 if ($apiKey === '') {
     os_fail('configuracao');

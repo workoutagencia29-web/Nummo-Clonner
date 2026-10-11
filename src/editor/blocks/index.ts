@@ -19,6 +19,7 @@ import { formBlocks } from "./forms";
 import { proofBlocks } from "./proof";
 import { quizBlocks } from "./quiz";
 import { BLOCK_CATEGORIES, type OsBlock } from "./shared";
+import { storeBlocks } from "./store";
 import { structureBlocks } from "./structure";
 import { videoBlocks } from "./video";
 
@@ -32,6 +33,7 @@ export const ALL_BLOCKS: OsBlock[] = [
   ...structureBlocks,
   ...conversionBlocks,
   ...quizBlocks,
+  ...storeBlocks,
   ...videoBlocks,
   ...proofBlocks,
   ...formBlocks,
@@ -48,6 +50,7 @@ export function registerBlocks(editor: Editor) {
       content: block.content as never,
       ...(block.select && { select: true }),
       ...(block.activate && { activate: true }),
+      ...(block.hint && { attributes: { title: block.hint } }),
     });
   }
 }

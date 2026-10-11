@@ -33,7 +33,7 @@ export function num(el: Element, name: string, def: number, min = 0, max = 1e9):
 /** Liga/desliga em data-os-<name> ("1", "true", "sim" / "0", "false", "não"). */
 export function flag(el: Element, name: string, def: boolean): boolean {
   const v = opt(el, name).toLowerCase();
-  return v ? !/^(0|false|n[aã]o|off|no)$/.test(v) : def;
+  return v ? !/^(0|false|n[a\u00e3]o|off|no)$/.test(v) : def;
 }
 
 export function load(key: string, session = false): string | null {
@@ -83,10 +83,11 @@ let autoScrollUntil = 0;
 
 /**
  * A página vai rolar sozinha (ex.: o quiz voltando ao topo ao trocar de etapa):
- * o popup de saída não conta essa rolagem como a pessoa saindo da página.
+ * o popup de saída não conta essa rolagem como a pessoa saindo da página. Só
+ * estica a marca (uma chamada curta não encurta uma mais longa ainda valendo).
  */
 export function markAutoScroll(ms = 1200) {
-  autoScrollUntil = Date.now() + ms;
+  autoScrollUntil = Math.max(autoScrollUntil, Date.now() + ms);
 }
 
 /** Rolagem feita pela própria página (markAutoScroll) ainda em andamento. */
@@ -96,3 +97,6 @@ export const autoScrolling = () => Date.now() < autoScrollUntil;
 export function isTouch() {
   return matchMedia("(hover: none), (pointer: coarse)").matches;
 }
+
+/** A pessoa pediu menos animação (prefers-reduced-motion): sem giro, confete nem rolagem suave. */
+export const reducedMotion = () => matchMedia("(prefers-reduced-motion: reduce)").matches;

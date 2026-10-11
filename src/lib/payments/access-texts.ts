@@ -37,3 +37,13 @@ export const ACCESS_TEXTS: Record<PayLocale, Record<AccessTextKey, string>> = {
       "Se você acabou de pagar, aguarde alguns minutos e recarregue esta página. Se precisar de ajuda, fale com o nosso suporte.",
   },
 };
+
+/**
+ * Botão de acesso de cada order bump comprado no checkout do Offer Studio
+ * (posto pelo script ao lado do "Acessar meu produto"; {nome} = título do bump).
+ */
+export const ACCESS_EXTRA_LABEL: Record<PayLocale, string> = {
+  es: "Acceder a “{nome}”",
+  en: "Access “{nome}”",
+  pt: "Acessar “{nome}”",
+};

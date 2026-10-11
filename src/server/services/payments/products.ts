@@ -21,6 +21,7 @@ import {
   type PaymentProviderId,
   parseAmount,
   paymentProductProblems,
+  windowCurrency,
 } from "@/lib/payments/rules";
 
 /** Tipos de link que podem virar "Pagamento na página" (os de compra). */
@@ -69,7 +70,8 @@ export function paymentProductView(row: ProductRow): PaymentProductView {
     amountCents: row.amountCents,
     amount: amountInput(row.amountCents),
     price: formatAmount(row.amountCents, row.currency),
-    currency: row.currency,
+    // Sempre uma moeda da Kyvo (o real só existe no checkout do Offer Studio).
+    currency: windowCurrency(row.currency),
     methods: orderedMethods(row.methods),
     locale: row.locale,
     thankYouPageId: row.thankYouPageId,
@@ -135,13 +137,24 @@ export async function savePaymentProduct(linkId: string, input: PaymentProductIn
   return paymentProductView(row);
 }
 
+/** Só links de compra podem virar pagamento na página ou checkout do Offer Studio. */
+export const NOT_CHECKOUT_KIND_MESSAGE =
+  "Só links de checkout (checkout, upsell ou downsell) podem ser “Checkout do Offer Studio”. Mude o tipo do link antes.";
+
 /**
- * Troca para onde o link leva: endereço (URL) ou pagamento na página. O
- * produto e o endereço ficam guardados: voltar não perde nada.
+ * Troca para onde o link leva: endereço (URL), pagamento na página ou checkout
+ * do Offer Studio. Os produtos e o endereço ficam guardados: voltar não perde
+ * nada. Pagamento na página e checkout só com o produto já salvo (quem liga
+ * pela primeira vez é o "Salvar" do formulário).
  */
 export async function setOfferLinkTarget(linkId: string, target: OfferLinkTarget, db: Db = prisma) {
   const link = await linkOrThrow(linkId, db);
   if (target === "PAYMENT" && !isPaymentKind(link.kind)) throw new UserError(NOT_PAYMENT_KIND_MESSAGE);
+  if (target === "CHECKOUT") {
+    if (!isPaymentKind(link.kind)) throw new UserError(NOT_CHECKOUT_KIND_MESSAGE);
+    const saved = await db.checkoutProduct.count({ where: { linkId } });
+    if (!saved) throw new UserError("Preencha e salve o produto do checkout antes.");
+  }
   await db.offerLink.update({ where: { id: linkId }, data: { target } });
   await db.offer.update({ where: { id: link.offerId }, data: { updatedAt: new Date() } });
 }
@@ -205,8 +218,10 @@ export interface PaymentRenderOptions {
 export function paymentRenderFor(
   products: readonly ServerPaymentProduct[],
   opts: PaymentRenderOptions,
+  /** A oferta tem checkout do Offer Studio (o acesso da página de obrigado usa o mesmo endpoint). */
+  checkout = false,
 ): PaymentRender | null {
-  if (!products.length) return null;
+  if (!products.length && !checkout) return null;
   const out: Record<string, PublicPaymentProduct> = {};
   for (const p of products) out[p.key] = publicPaymentProduct(p, opts.pageHref);
   return {
@@ -214,6 +229,7 @@ export function paymentRenderFor(
     simulation: opts.simulation,
     products: out,
     ...(opts.scriptTag ? { scriptTag: opts.scriptTag } : {}),
+    ...(checkout ? { checkout: true } : {}),
   };
 }
 
@@ -227,6 +243,12 @@ export async function offerPaymentRender(
   offerId: string,
   opts: PaymentRenderOptions,
   db: Db = prisma,
+  /** Contar também o checkout do Offer Studio (a prévia; o ZIP monta com zipPaymentRender). */
+  withCheckout = false,
 ): Promise<PaymentRender | null> {
-  return paymentRenderFor(await offerPaymentProducts(offerId, db), opts);
+  const [products, checkouts] = await Promise.all([
+    offerPaymentProducts(offerId, db),
+    withCheckout ? db.checkoutProduct.count({ where: { link: { offerId, target: "CHECKOUT" } } }) : 0,
+  ]);
+  return paymentRenderFor(products, opts, checkouts > 0);
 }

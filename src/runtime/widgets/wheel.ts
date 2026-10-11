@@ -47,7 +47,8 @@ import {
   wheelNumber,
 } from "@/lib/wheel";
 import { copyText, markPrizeOn, prizeMap, savePrize, swapCheckouts } from "./prize";
-import { flag, load, markAutoScroll, save, widgets } from "./util";
+import { t, tf } from "./texts";
+import { flag, load, markAutoScroll, reducedMotion, save, widgets } from "./util";
 
 /** Duração do giro (ms). */
 export const SPIN_MS = 5200;
@@ -139,12 +140,12 @@ function setup(wheel: HTMLElement) {
   const code = q("[data-os-wh-code]");
   const days = wheelNumber(wheel.getAttribute("data-os-days"), WHEEL_DAYS, 1, 365);
   const track = flag(wheel, "track", true);
-  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduced = reducedMotion();
   // Separada por oferta: duas ofertas no mesmo domínio não dividem o giro.
   const memory = scopedKey(`os_roleta_${sliceSignature(slices)}`, wheel.getAttribute(SCOPE_ATTR) || "");
   const goHref = go?.getAttribute(HREF_ATTR) ?? go?.getAttribute("href") ?? "";
   const goText = go?.textContent || "";
-  const loseText = (q("[data-os-wh-lose]")?.textContent || "Não foi dessa vez").trim();
+  const loseText = (q("[data-os-wh-lose]")?.textContent || t("whLose", "Não foi dessa vez")).trim();
 
   const live = document.createElement("p");
   live.className = "os-wh-sr";
@@ -199,7 +200,10 @@ function setup(wheel: HTMLElement) {
       }
     }
     if (!fresh) return;
-    live.textContent = s.lose ? loseText : `Você ganhou ${s.text}!${s.coupon ? ` Seu cupom: ${s.coupon}.` : ""}`;
+    live.textContent = s.lose
+      ? loseText
+      : tf("whWon", "Você ganhou {p}!", { p: s.text }) +
+        (s.coupon ? tf("whCode", " Seu cupom: {c}.", { c: s.coupon }) : "");
     if (!s.lose && !reduced) confetti();
     const target = go || result;
     if (!target) return;
@@ -249,7 +253,7 @@ function setup(wheel: HTMLElement) {
     spin.disabled = true;
     wheel.classList.add("os-wh-spinning");
     wheel.setAttribute("aria-busy", "true");
-    live.textContent = "Girando a roleta…";
+    live.textContent = t("whSpin", "Girando a roleta…");
     const ms = reduced ? 0 : SPIN_MS;
     const target = stopRotation(
       i,

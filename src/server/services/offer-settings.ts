@@ -1,12 +1,15 @@
 /**
  * Configurações gerais da oferta (Offer.settings: dados da empresa para as
- * páginas legais, SEO padrão e idioma) e SEO de cada página (Page.seo). Usadas
- * pelo painel, pela prévia e pelo ZIP (Fase 5).
+ * páginas legais, SEO padrão, idioma e moeda) e SEO de cada página (Page.seo).
+ * Usadas pelo painel, pela prévia e pelo ZIP (Fase 5).
  */
 import * as cheerio from "cheerio";
 import type { Prisma } from "@/generated/prisma/client";
-import { prisma } from "@/lib/db";
+import { atomically, prisma } from "@/lib/db";
 import { UserError } from "@/lib/errors";
+import { ICO_NOT_FOR_SHARING } from "@/lib/ico";
+import { chosenOfferCurrency } from "@/lib/offer-currency";
+import type { CurrencyMismatch } from "@/lib/offer-currency-switch";
 import {
   type Company,
   effectiveSeo,
@@ -19,6 +22,7 @@ import {
   parsePageSeo,
   type Seo,
 } from "@/lib/offer-settings";
+import { CURRENCY_TX_OPTIONS, storeCurrencyMismatch, switchOfferCurrency } from "@/server/services/offer-currency";
 
 const STORAGE_KEY_RE = /^a\/[0-9a-f]{2}\/([0-9a-f]{64}\.[a-z0-9]{1,8})$/;
 const ASSET_SRC_RE = /^\/os-assets\/([0-9a-f]{64}\.[a-z0-9]{1,8})$/;
@@ -73,14 +77,21 @@ function throwFirstIssue(error: { issues: { path: PropertyKey[]; code: string; m
 /**
  * Imagem do SEO: aceita a chave do storage ("a/3f/<sha>.webp") ou o endereço da
  * biblioteca ("/os-assets/<sha>.webp") e confere que a imagem é desta oferta.
+ * Ícone .ico só no favicon (`icon`): o Facebook e o WhatsApp não mostram .ico.
  */
-async function cleanImageKey(offerId: string, value: unknown, field: string): Promise<string | null> {
+async function cleanImageKey(
+  offerId: string,
+  value: unknown,
+  field: string,
+  { icon = false }: { icon?: boolean } = {},
+): Promise<string | null> {
   if (value === null || value === undefined || value === "") return null;
   if (typeof value !== "string") throw new UserError("Escolha a imagem de novo na biblioteca.", field);
   const text = value.trim();
   const fromSrc = ASSET_SRC_RE.exec(text);
   const key = fromSrc ? `a/${fromSrc[1].slice(0, 2)}/${fromSrc[1]}` : text;
   if (!STORAGE_KEY_RE.test(key)) throw new UserError("Escolha a imagem de novo na biblioteca.", field);
+  if (!icon && key.endsWith(".ico")) throw new UserError(ICO_NOT_FOR_SHARING, field);
   const asset = await prisma.asset.count({ where: { offerId, key, kind: { in: ["IMAGE", "ICON"] } } });
   if (!asset) {
     throw new UserError("Essa imagem não está na biblioteca desta oferta. Envie a imagem de novo.", field);
@@ -96,6 +107,11 @@ export interface OfferSettingsPatch {
   company?: Partial<Company>;
   seo?: Partial<Seo>;
   language?: OfferSettings["language"];
+  /**
+   * Moeda da oferta. Trocar troca também o que já existe (vitrines, caixas de
+   * compra, pagamento na página, valor dos pixels): switchOfferCurrency.
+   */
+  currency?: OfferSettings["currency"];
 }
 
 export async function getOfferSettings(offerId: string): Promise<OfferSettings> {
@@ -103,9 +119,14 @@ export async function getOfferSettings(offerId: string): Promise<OfferSettings> 
   return parseOfferSettings(offer.settings);
 }
 
+const asObject = (v: unknown): Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
+
 /**
  * Junta as mudanças com o que está salvo, valida e grava. Mantém chaves que
- * outras fases guardam no mesmo JSON.
+ * outras fases guardam no mesmo JSON. Tudo é conferido antes de gravar: com a
+ * moeda junto, a troca (switchOfferCurrency) e as configurações vão na mesma
+ * transação — um erro em outro campo não deixa a moeda trocada pela metade.
  */
 export async function saveOfferSettings(offerId: string, patch: OfferSettingsPatch): Promise<OfferSettings> {
   const offer = await offerOrThrow(offerId);
@@ -114,13 +135,14 @@ export async function saveOfferSettings(offerId: string, patch: OfferSettingsPat
     company: { ...current.company, ...(patch.company ?? {}) },
     seo: { ...current.seo, ...(patch.seo ?? {}) },
     language: patch.language ?? current.language,
+    currency: patch.currency ?? current.currency,
   };
   const email = typeof merged.company.email === "string" ? merged.company.email.trim() : "";
   if (email && !EMAIL_RE.test(email)) {
     throw new UserError("Digite um e-mail válido, como contato@suaempresa.com.br.", "company.email");
   }
   if (patch.seo && "faviconKey" in patch.seo) {
-    merged.seo.faviconKey = await cleanImageKey(offerId, patch.seo.faviconKey, "seo.faviconKey");
+    merged.seo.faviconKey = await cleanImageKey(offerId, patch.seo.faviconKey, "seo.faviconKey", { icon: true });
   }
   if (patch.seo && "ogImageKey" in patch.seo) {
     merged.seo.ogImageKey = await cleanImageKey(offerId, patch.seo.ogImageKey, "seo.ogImageKey");
@@ -128,14 +150,29 @@ export async function saveOfferSettings(offerId: string, patch: OfferSettingsPat
   const parsed = OfferSettingsSchema.safeParse(merged);
   if (!parsed.success) throwFirstIssue(parsed.error);
   const settings = parsed.data as OfferSettings;
-  const previous =
-    typeof offer.settings === "object" && offer.settings !== null && !Array.isArray(offer.settings)
-      ? (offer.settings as Record<string, unknown>)
-      : {};
-  await prisma.offer.update({
-    where: { id: offerId },
-    data: { settings: { ...previous, ...settings } as unknown as Prisma.InputJsonObject },
-  });
+  // Oferta de antes da pergunta da moeda (sem a chave): salvar a empresa, o SEO ou o idioma não
+  // grava "real" como escolha (chosenOfferCurrency continua null, como o pagamento na página espera).
+  const { currency: _default, ...withoutCurrency } = settings;
+  const keepCurrency = patch.currency !== undefined || chosenOfferCurrency(offer.settings) !== null;
+  const switching = patch.currency !== undefined && patch.currency !== current.currency;
+  await atomically(
+    prisma,
+    async (tx) => {
+      // A moeda nunca muda sozinha: o que já tem preço na oferta vai junto.
+      if (switching && patch.currency) await switchOfferCurrency(offerId, patch.currency, tx);
+      const fresh = await tx.offer.findUniqueOrThrow({ where: { id: offerId }, select: { settings: true } });
+      await tx.offer.update({
+        where: { id: offerId },
+        data: {
+          settings: {
+            ...asObject(fresh.settings),
+            ...(keepCurrency ? settings : withoutCurrency),
+          } as unknown as Prisma.InputJsonObject,
+        },
+      });
+    },
+    CURRENCY_TX_OPTIONS,
+  );
   return settings;
 }
 
@@ -213,7 +250,9 @@ export async function savePageSeo(pageId: string, patch: Partial<PageSeo>): Prom
   const page = await pageOrThrow(pageId);
   const current = parsePageSeo(page.seo);
   const merged = { ...current, ...patch };
-  if ("faviconKey" in patch) merged.faviconKey = await cleanImageKey(page.offerId, patch.faviconKey, "faviconKey");
+  if ("faviconKey" in patch) {
+    merged.faviconKey = await cleanImageKey(page.offerId, patch.faviconKey, "faviconKey", { icon: true });
+  }
   if ("ogImageKey" in patch) merged.ogImageKey = await cleanImageKey(page.offerId, patch.ogImageKey, "ogImageKey");
   const parsed = PageSeoSchema.safeParse(merged);
   if (!parsed.success) throwFirstIssue(parsed.error);
@@ -233,6 +272,12 @@ export interface OfferSettingsPanel {
   /** liveUrl: "Onde está no ar" (Detalhes). O ZIP usa para o endereço completo da imagem de compartilhamento. */
   offer: { id: string; name: string; liveUrl: string | null };
   settings: OfferSettings;
+  /**
+   * Páginas com vitrines ou caixas de compra fora da moeda escolhida da oferta
+   * (o cartão da moeda oferece "Passar tudo para …"); null = nenhuma, ou a
+   * oferta é de antes da pergunta da moeda.
+   */
+  currencyMismatch: CurrencyMismatch | null;
   faviconSrc: string | null;
   ogImageSrc: string | null;
   pages: ({ id: string; name: string; type: string; isHome: boolean } & PageSeoData)[];
@@ -255,9 +300,11 @@ export async function getOfferSettingsPanel(offerId: string): Promise<OfferSetti
   });
   if (!offer) return null;
   const settings = parseOfferSettings(offer.settings);
+  const mismatch = await storeCurrencyMismatch(offerId);
   return {
     offer: { id: offer.id, name: offer.name, liveUrl: offer.liveUrl },
     settings,
+    currencyMismatch: mismatch?.pages.length ? mismatch : null,
     faviconSrc: settings.seo.faviconKey ? assetSrc(settings.seo.faviconKey) : null,
     ogImageSrc: settings.seo.ogImageKey ? assetSrc(settings.seo.ogImageKey) : null,
     pages: offer.pages.map((p) => ({

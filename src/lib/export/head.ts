@@ -32,6 +32,7 @@
  *   controle.
  */
 
+import { afterLeadingDoctype } from "@/lib/doctype";
 import { INERT_CODE_RE, VERIFICATION_NAME_RE, verificationMetas } from "@/lib/tracking/domain-verification";
 
 /** Celular pelo User-Agent (mesma lista de isMobileUserAgent em src/lib/page-render.ts). */
@@ -201,7 +202,6 @@ export function earlyScriptTag(opts: EarlyScriptOptions = {}): string {
 const ATTRS = `(?:[^>"']|"[^"]*"|'[^']*')*`;
 const HEAD_OPEN_RE = new RegExp(`<head\\b${ATTRS}>`, "i");
 const HTML_OPEN_RE = new RegExp(`<html\\b${ATTRS}>`, "i");
-const DOCTYPE_RE = /^\s*(?:<!--[\s\S]*?-->\s*)*<!doctype[^>]*>/i;
 /** Metas, comentários e espaços do começo do <head>. */
 const LEADING_RE = new RegExp(`^(?:\\s+|<!--[\\s\\S]*?-->|<meta\\b${ATTRS}>)`, "i");
 
@@ -226,8 +226,7 @@ export function insertEarlyHead(html: string, tags: string): string {
     const at = htmlOpen.index + htmlOpen[0].length;
     return `${html.slice(0, at)}<head>${tags}</head>${html.slice(at)}`;
   }
-  const doctype = DOCTYPE_RE.exec(html);
-  const at = doctype ? doctype[0].length : 0;
+  const at = afterLeadingDoctype(html);
   return `${html.slice(0, at)}<head>${tags}</head>${html.slice(at)}`;
 }
 

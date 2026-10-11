@@ -4,13 +4,20 @@
  * Avisos do "Antes de subir" com a solução ali mesmo: o endereço do site
  * (imagem de compartilhamento) e os dados da empresa ({{EMPRESA}}… nas
  * páginas legais). Salvou → a prévia do ZIP é refeita; com o ZIP pronto, o
- * botão já gera o ZIP de novo. Os do pagamento na página levam para onde se
- * resolve (Configurações → Pagamentos, o link na aba "Links e checkouts", a
- * página de obrigado no editor, os eventos dos pixels).
+ * botão já gera o ZIP de novo. Os outros levam para onde se resolve: o link
+ * com o checkout da página clonada e os do pagamento na página (a conta da
+ * Kyvo e o link na aba "Links e checkouts", a página de obrigado no editor, os
+ * eventos dos pixels) e o das vitrines fora da moeda da oferta leva ao cartão
+ * "Moeda da oferta" ("Passar tudo para …").
  */
 import Link from "next/link";
 import { useId, useState } from "react";
-import { offerLinkHref } from "@/components/offers/offer-link-href";
+import {
+  CURRENCY_SETTING,
+  offerLinkHref,
+  offerPaymentAccountHref,
+  offerSettingHref,
+} from "@/components/offers/offer-link-href";
 import { COMPANY_FIELDS, COMPANY_MAX, companyEmailProblem } from "@/components/offers/settings/helpers";
 import { Button } from "@/components/ui/button";
 import { FieldError } from "@/components/ui/field";
@@ -19,6 +26,7 @@ import { Label } from "@/components/ui/label";
 import { Spinner } from "@/components/ui/spinner";
 import { useAction } from "@/hooks/use-action";
 import { type CompanyMarkerField, exportWarningFix } from "@/lib/export/warnings";
+import { PROVIDER_LABEL } from "@/lib/payments/rules";
 import { cn } from "@/lib/utils";
 import { saveOfferSettingsAction } from "@/server/actions/offer-settings";
 import { updateOfferAction } from "@/server/actions/offers";
@@ -186,18 +194,40 @@ export function ExportWarning({ text, c }: { text: string; c: ExportController }
       {text}
       {fix?.kind === "liveUrl" && <LiveUrlFix c={c} />}
       {fix?.kind === "company" && <CompanyFix c={c} fields={fix.fields} />}
-      {fix?.kind === "deadButtons" && <DeadButtonsFix c={c} quiz={fix.quiz ?? false} wheel={fix.wheel ?? false} />}
+      {fix?.kind === "deadButtons" && (
+        <DeadButtonsFix c={c} quiz={fix.quiz ?? false} wheel={fix.wheel ?? false} products={fix.products ?? false} />
+      )}
       {fix && (fix.kind === "paymentKey" || fix.kind === "purchaseRule") && (
         <FixLinks
           c={c}
           links={[
             fix.kind === "paymentKey"
-              ? { href: "/configuracoes#pagamentos", label: "Abrir Configurações → Pagamentos" }
+              ? { href: offerPaymentAccountHref(c.offerId), label: "Abrir a conta da Kyvo desta oferta" }
               : { href: `/ofertas/${c.offerId}?aba=rastreamento&secao=eventos`, label: "Abrir os eventos dos pixels" },
           ]}
         />
       )}
+      {fix?.kind === "checkoutKey" && (
+        <FixLinks
+          c={c}
+          links={[
+            {
+              href: offerPaymentAccountHref(c.offerId, fix.provider),
+              label: `Abrir a conta da ${PROVIDER_LABEL[fix.provider]} desta oferta`,
+            },
+          ]}
+        />
+      )}
+      {fix?.kind === "currency" && (
+        <FixLinks
+          c={c}
+          links={[{ href: offerSettingHref(c.offerId, CURRENCY_SETTING), label: "Abrir a moeda da oferta" }]}
+        />
+      )}
+      {fix?.kind === "clonedCheckout" && <ClonedCheckoutFix c={c} />}
+      {fix?.kind === "legalLinks" && <EditorPagesFix c={c} text={text} pages={c.plan.data?.legalLinkPages ?? []} />}
       {fix?.kind === "paymentLink" && <PaymentLinkFix c={c} text={text} />}
+      {fix?.kind === "checkoutLink" && <PaymentLinkFix c={c} text={text} checkout />}
       {fix?.kind === "accessBlock" && <AccessBlockFix c={c} text={text} />}
     </>
   );
@@ -219,9 +249,9 @@ function FixLinks({ c, links }: { c: ExportController; links: { href: string; la
   );
 }
 
-/** Link de pagamento com algo faltando: abre o link na aba "Links e checkouts". */
-function PaymentLinkFix({ c, text }: { c: ExportController; text: string }) {
-  const all = c.plan.data?.paymentLinks ?? [];
+/** Link de pagamento (ou do checkout do Offer Studio) com algo faltando: abre o link na aba "Links e checkouts". */
+function PaymentLinkFix({ c, text, checkout = false }: { c: ExportController; text: string; checkout?: boolean }) {
+  const all = (checkout ? c.plan.data?.checkoutLinks : c.plan.data?.paymentLinks) ?? [];
   const named = all.filter((l) => text.includes(`“${l.label}”`));
   const links = (named.length ? named : all).slice(0, 4).map((l) => ({
     href: offerLinkHref(c.offerId, l.linkId),
@@ -235,14 +265,37 @@ function PaymentLinkFix({ c, text }: { c: ExportController; text: string }) {
   );
 }
 
-/** Página de obrigado sem o bloco "Acesso ao produto": abre no editor. */
-function AccessBlockFix({ c, text }: { c: ExportController; text: string }) {
-  const all = c.plan.data?.accessBlockPages ?? [];
-  const named = all.filter((p) => text.includes(`“${p.name}”`));
+/**
+ * Link que ainda leva ao checkout da página clonada: abre a aba "Links e
+ * checkouts" rolada até o (primeiro) link, que mostra o selo "troque pelo seu".
+ */
+function ClonedCheckoutFix({ c }: { c: ExportController }) {
+  const all = c.plan.data?.clonedCheckoutLinks ?? [];
+  const first = all[0];
+  const link = first
+    ? {
+        href: offerLinkHref(c.offerId, first.linkId),
+        label: all.length === 1 ? `Abrir o link “${first.label}”` : "Abrir os links",
+      }
+    : { href: `/ofertas/${c.offerId}?aba=links`, label: "Abrir Links e checkouts" };
+  return <FixLinks c={c} links={[link]} />;
+}
+
+/** Abre no editor as páginas citadas no aviso (ou todas da lista, se o texto não citar nenhuma). */
+function EditorPagesFix({
+  c,
+  text,
+  pages,
+}: {
+  c: ExportController;
+  text: string;
+  pages: { name: string; documentId: string }[];
+}) {
+  const named = pages.filter((p) => text.includes(`“${p.name}”`));
   return (
     <FixLinks
       c={c}
-      links={(named.length ? named : all).slice(0, 4).map((p) => ({
+      links={(named.length ? named : pages).slice(0, 4).map((p) => ({
         href: `/editor/${p.documentId}`,
         label: `Abrir “${p.name}” no editor`,
       }))}
@@ -250,13 +303,31 @@ function AccessBlockFix({ c, text }: { c: ExportController; text: string }) {
   );
 }
 
+/** Página de obrigado sem o bloco "Acesso ao produto": abre no editor. */
+function AccessBlockFix({ c, text }: { c: ExportController; text: string }) {
+  return <EditorPagesFix c={c} text={text} pages={c.plan.data?.accessBlockPages ?? []} />;
+}
+
 /**
  * Botão de compra sem link (lá, “Link da oferta” ou “Links e checkouts”), botão
- * final do quiz sem destino (Configurações do quiz) ou roleta com prêmio sem
- * link / "Resgatar" sem destino (Configurações da roleta): abre a página no editor.
+ * final do quiz sem destino (Configurações do quiz), roleta com prêmio sem
+ * link / "Resgatar" sem destino (Configurações da roleta) ou produto da vitrine
+ * sem a página do produto (Configurações do produto): abre a página no editor.
  */
-function DeadButtonsFix({ c, quiz, wheel }: { c: ExportController; quiz: boolean; wheel: boolean }) {
-  const pages = (c.plan.data?.deadButtonPages ?? []).filter((p) => (quiz ? p.quiz : wheel ? p.wheel : p.buy !== false));
+function DeadButtonsFix({
+  c,
+  quiz,
+  wheel,
+  products,
+}: {
+  c: ExportController;
+  quiz: boolean;
+  wheel: boolean;
+  products: boolean;
+}) {
+  const pages = (c.plan.data?.deadButtonPages ?? []).filter((p) =>
+    products ? p.products : quiz ? p.quiz : wheel ? p.wheel : p.buy !== false,
+  );
   if (!pages.length) return null;
   return (
     <div className="mt-2 flex flex-wrap gap-2">

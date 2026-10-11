@@ -5,7 +5,11 @@
  * que escondem o conteúdo até o JavaScript rodar.
  *
  * Chame ANTES de collectHtmlRefs/rewriteHtmlRefs, para os endereços reais
- * serem baixados e reescritos. `loading="lazy"` (nativo) é mantido.
+ * serem baixados e reescritos. `loading="lazy"` (nativo) é mantido — e
+ * imagens/iframes que vinham de um desses plugins ganham `loading="lazy"`: no
+ * site original eles só carregavam perto de aparecer (o vídeo do YouTube do WP
+ * Rocket, os bônus no fim da página); sem isso a cópia baixaria tudo na
+ * abertura. O navegador continua carregando na hora o que está na primeira tela.
  */
 import type { CheerioAPI } from "cheerio";
 import type { Element } from "domhandler";
@@ -16,6 +20,9 @@ const SRC_ATTRS = ["data-src", "data-lazy-src", "data-original", "data-lazyload"
 const SRCSET_ATTRS = ["data-srcset", "data-lazy-srcset"];
 const SIZES_ATTRS = ["data-sizes", "data-lazy-sizes"];
 const BG_ATTRS = ["data-bg", "data-background", "data-background-image", "data-bg-src", "data-bg-image"];
+
+/** Elementos que aceitam `loading="lazy"` (carregar só perto de aparecer). */
+const LOADING_TAGS = new Set(["img", "iframe"]);
 
 /** Elementos que aceitam `src`. */
 const SRC_TAGS = new Set(["img", "iframe", "video", "audio", "source", "embed", "track", "input"]);
@@ -166,6 +173,8 @@ function normalizeElement(el: Element): boolean {
   let changed = false;
   let applied = false;
   let bgApplied = false;
+  /** O endereço real (src/srcset) veio de um atributo de plugin de lazy load. */
+  let fromPlugin = false;
 
   // src
   const acceptsSrc = SRC_TAGS.has(name) && (name !== "input" || (a.type ?? "").trim().toLowerCase() === "image");
@@ -183,6 +192,7 @@ function normalizeElement(el: Element): boolean {
       if (applied) {
         for (const k of SRC_ATTRS) if (a[k]?.trim() === value) delete a[k];
         changed = true;
+        fromPlugin = true;
       }
     }
   }
@@ -202,6 +212,7 @@ function normalizeElement(el: Element): boolean {
         for (const k of SRCSET_ATTRS) if (a[k]?.trim() === value) delete a[k];
         applied = true;
         changed = true;
+        fromPlugin = true;
         const sizesKey = SIZES_ATTRS.find((k) => a[k]?.trim());
         const sizes = sizesKey ? (a[sizesKey] ?? "").trim() : "";
         if (sizesKey && sizes.toLowerCase() !== "auto" && !a.sizes?.trim()) {
@@ -237,6 +248,13 @@ function normalizeElement(el: Element): boolean {
       bgApplied = true;
       changed = true;
     }
+  }
+
+  // Carregar só perto de aparecer, como o plugin fazia no site original. Sem
+  // largura/altura inventadas: o que o elemento tinha continua igual.
+  if (LOADING_TAGS.has(name) && a.loading === undefined && (fromPlugin || (lazyClass && hasRealMedia(el, name)))) {
+    a.loading = "lazy";
+    changed = true;
   }
 
   // Classes/atributos que escondem o conteúdo até o JS rodar.

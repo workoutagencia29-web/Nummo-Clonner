@@ -246,10 +246,11 @@ export function createVendors(cfg: Cfg, report: Report) {
       const ev: Ev | QuizEvent = buy ? buy.std : (input as Ev | QuizEvent);
       const q = typeof ev === "string" ? null : ev;
       const amount = q ? {} : buy ? buy.amount : amountOf(cfg, ev as Ev);
-      const params = { ...(q ? q.params : amount), ...versionOf(cfg) };
+      // biome-ignore lint/complexity/useOptionalChain: "?." vira código mais longo no alvo es2018 (script pequeno)
+      const params = { ...(q ? q.params : amount), ...(buy && buy.x), ...versionOf(cfg) };
       const pv = ev === "PAGE_VIEW";
       // GA4 e Google Ads identificam (e deduplicam) a compra por transaction_id, não por event_id.
-      const tx = buy ? { transaction_id: buy.id } : {};
+      const tx = ev === "PURCHASE" && buy ? { transaction_id: buy.id } : {};
       for (const p of cfg.pixels) {
         const vendor = p.vendor;
         const st = states[key(vendor, p.id)];

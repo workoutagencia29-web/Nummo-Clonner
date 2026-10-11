@@ -1,7 +1,9 @@
 /**
  * Formulário de captura (form[data-os-widget="lead-form"]).
  *
- * Ao enviar: valida (mensagens em pt-BR), dispara o evento "os:lead" (usado
+ * Ao enviar: valida (mensagens em pt-BR; em espanhol/inglês pelo #os-textos,
+ * ver ./texts — e, com telefone de fora do Brasil, de 8 a 15 dígitos e sem a
+ * formatação brasileira), dispara o evento "os:lead" (usado
  * pelos pixels, ver src/runtime/tracking/rules.ts), manda os dados em JSON para
  * data-os-webhook (se houver) e vai para o endereço do atributo action (URL,
  * página do funil ou link da oferta). Com o script de pixels na página, espera
@@ -25,6 +27,7 @@
  * das páginas, que os pixels mandam para as plataformas.
  */
 import { formatPhoneBR, type LeadFieldKind, leadFieldError, withScheme } from "./options";
+import { intlPhone, t } from "./texts";
 import { flag, isPreview, navigate, opt, save, widgets } from "./util";
 
 type Field = HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement;
@@ -54,6 +57,12 @@ function kindOf(f: Field): LeadFieldKind {
   if (f.type === "tel") return "phone";
   return /^(name|nome|first_name)$/i.test(f.name) ? "name" : "other";
 }
+
+/** Erro do campo, no idioma da página (e com o telefone de fora do Brasil, se for o caso). */
+const fieldError = (f: Field) => leadFieldError(kindOf(f), f.value, f.required, t, intlPhone());
+
+/** Mensagem de sucesso com que o bloco nasce (o editor grava em data-os-success). */
+const OK_PT = "Pronto! Recebemos seus dados.";
 
 let seq = 0;
 
@@ -120,7 +129,7 @@ async function submit(form: HTMLFormElement) {
   );
   let invalid: Field | null = null;
   for (const f of fields) {
-    const msg = f.type === "checkbox" ? "" : leadFieldError(kindOf(f), f.value, f.required);
+    const msg = f.type === "checkbox" ? "" : fieldError(f);
     showError(f, msg);
     if (msg && !invalid) invalid = f;
   }
@@ -187,11 +196,15 @@ async function submit(form: HTMLFormElement) {
   // material" (só "Obrigado!"). Na prévia, avisa quem está montando a página.
   const warn = !sent && isPreview();
   ok.className = warn ? "os-lf-ok os-lf-warn" : "os-lf-ok";
+  // A mensagem com que o bloco nasce (não mudada) segue o idioma da página.
+  const success = opt(form, "success", OK_PT);
   ok.textContent = sent
-    ? opt(form, "success", "Pronto! Recebemos seus dados.")
+    ? success === OK_PT
+      ? t("lfOk", OK_PT)
+      : success
     : warn
       ? "Prévia: este formulário ainda não envia os dados. Configure o webhook ou o destino no editor."
-      : "Obrigado!";
+      : t("lfThanks", "Obrigado!");
 }
 
 export function initLeadForms(root?: ParentNode) {
@@ -202,16 +215,17 @@ export function initLeadForms(root?: ParentNode) {
       e.preventDefault();
       void submit(form);
     });
-    // Corrige o erro assim que o visitante mexe no campo; formata o telefone ao sair.
+    // Corrige o erro assim que o visitante mexe no campo; formata o telefone ao sair
+    // (só o do Brasil: número de outro país fica como o visitante digitou).
     form.addEventListener("input", (e) => {
       const f = e.target as Field;
-      if (f.getAttribute("aria-invalid")) showError(f, leadFieldError(kindOf(f), f.value, f.required));
+      if (f.getAttribute("aria-invalid")) showError(f, fieldError(f));
     });
     form.addEventListener(
       "blur",
       (e) => {
         const f = e.target as Field;
-        if (f.type === "tel") f.value = formatPhoneBR(f.value);
+        if (f.type === "tel" && !intlPhone()) f.value = formatPhoneBR(f.value);
       },
       true,
     );

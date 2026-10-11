@@ -8,6 +8,10 @@
  * - fidelity#12: página sem doctype continua sem doctype na cópia.
  * - ux#5 / ux#9: avisos da captura e da importação chegam à revisão.
  * - ZIP com só a pasta "_files" e o layout do Chrome (Página.html + Página_files/).
+ * - Script da página em laço: a clonagem passa do prazo, falha com explicação e a
+ *   fila segue (antes ficava "Abrindo a página" para sempre); o Chromium da
+ *   clonagem roda com o sandbox ligado. A montagem (downloads) não tem prazo fixo:
+ *   download lento termina; só a montagem parada (nada termina) é interrompida.
  */
 import { execFileSync } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -23,6 +27,10 @@ import { env } from "@/lib/env";
 import { getObject, putObject } from "@/lib/storage";
 import { createFetcher } from "@/worker/clone/fetcher";
 import {
+  CLONE_TIMEOUT_CODE,
+  type CloneLimits,
+  claimNextJob,
+  cloneTimeoutMessage,
   failInterruptedJobs,
   pendingJobIds,
   runCloneJob,
@@ -90,6 +98,30 @@ beforeAll(async () => {
       res.on("close", () => clearInterval(timer));
       return;
     }
+    if (url === "/vsl-demorada") {
+      return html(
+        `<!doctype html><html><head><meta charset="utf-8"><title>VSL</title></head><body>${TEXT}<video src="/demorado.mp4" muted></video></body></html>`,
+      );
+    }
+    if (url === "/demorado.mp4") {
+      // O navegador (com Range) recebe na hora; o download da cópia (sem Range) leva 10 s, mas termina.
+      const body = Buffer.alloc(2048, 1);
+      if (req.headers.range) {
+        res.writeHead(206, {
+          "content-type": "video/mp4",
+          "content-range": `bytes 0-${body.length - 1}/${body.length}`,
+          "content-length": String(body.length),
+        });
+        return res.end(body);
+      }
+      slowSockets.add(res);
+      const timer = setTimeout(() => {
+        res.writeHead(200, { "content-type": "video/mp4", "content-length": String(body.length) });
+        res.end(body);
+      }, 10_000);
+      res.on("close", () => clearTimeout(timer));
+      return;
+    }
     html(
       `<!doctype html><html><head><meta charset="utf-8"><title>Oferta G1</title></head><body><h1>Oferta</h1>${TEXT}</body></html>`,
     );
@@ -118,8 +150,8 @@ async function createJob(data: { source: "URL" | "ZIP" | "HTML"; sourceUrl?: str
   return prisma.cloneJob.create({ data: { ...data, options: { devices: ["desktop"], maxVideoMb: 300 } } });
 }
 
-async function runAndGet(jobId: string) {
-  await runCloneJob(jobId);
+async function runAndGet(jobId: string, limits?: Partial<CloneLimits>) {
+  await runCloneJob(jobId, limits);
   return prisma.cloneJob.findUniqueOrThrow({ where: { id: jobId } });
 }
 
@@ -420,10 +452,13 @@ describe("avisos da captura chegam à revisão (ux#5, ux#9)", () => {
 
   it("página que não terminou de carregar: aviso PAGE_STALLED na revisão", async () => {
     const job = await createJob({ source: "URL", sourceUrl: pubUrl("/lenta") });
-    const done = await runAndGet(job.id);
+    // Espera do "load" encurtada (padrão: 20 s) — o prazo vem das opções da captura.
+    const started = Date.now();
+    const done = await runAndGet(job.id, { loadMs: 2_000 });
     expect(done.status, done.errorMessage ?? "").toBe("REVIEW");
     const warning = resultOf(done).warnings.find((w) => w.code === "PAGE_STALLED");
     expect(warning?.message).toMatch(/continuou carregando/);
+    expect(Date.now() - started).toBeLessThan(60_000);
   }, 180_000);
 });
 
@@ -435,4 +470,123 @@ describe("doctype na cópia (fidelity#12)", () => {
     const html = await editableHtml(resultOf(done));
     expect(html.trimStart().toLowerCase().startsWith("<!doctype")).toBe(false);
   }, 120_000);
+});
+
+// ─── Prazo da clonagem e sandbox ─────────────────────────────────────────────
+
+/** Processos do Chromium da clonagem abertos por este processo de teste (argumento só dela). */
+function cloneChromiumCommands(): string[] {
+  const out = execFileSync("ps", ["-axo", "ppid=,command="], { encoding: "utf8" });
+  return out
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith(`${process.pid} `) && line.includes("disable_non_proxied_udp"))
+    .map((line) => line.slice(String(process.pid).length + 1));
+}
+
+describe("prazo da clonagem: script da página em laço", () => {
+  it("passa do prazo da captura: FAILED com explicação em pt-BR e a próxima clonagem da fila roda", async () => {
+    const stuck = await prisma.cloneJob.create({
+      data: {
+        source: "URL",
+        sourceUrl: fixtures.url("laco"),
+        options: { devices: ["desktop", "mobile"], maxVideoMb: 0 },
+      },
+    });
+    const next = await createJob({ source: "URL", sourceUrl: pubUrl("/") });
+    // Só estas duas na fila.
+    await prisma.cloneJob.updateMany({
+      where: { status: "QUEUED", id: { notIn: [stuck.id, next.id] } },
+      data: { status: "CANCELED" },
+    });
+
+    // Enquanto a página prende o navegador: o Chromium da clonagem roda com o sandbox ligado.
+    let commands: string[] = [];
+    const peek = setTimeout(() => {
+      commands = cloneChromiumCommands();
+    }, 3_000);
+
+    const started = Date.now();
+    const claimed: string[] = [];
+    try {
+      for (let id = await claimNextJob(); id; id = await claimNextJob()) {
+        claimed.push(id);
+        await runCloneJob(id, { captureMs: 6_000 });
+      }
+    } finally {
+      clearTimeout(peek);
+    }
+    expect(claimed).toEqual([stuck.id, next.id]);
+    expect(Date.now() - started).toBeLessThan(90_000);
+
+    const failed = await prisma.cloneJob.findUniqueOrThrow({ where: { id: stuck.id } });
+    expect(failed.status).toBe("FAILED");
+    expect(failed.errorCode).toBe(CLONE_TIMEOUT_CODE);
+    expect(failed.errorMessage).toBe(cloneTimeoutMessage("capture", false));
+    expect(failed.errorMessage).toMatch(/travou o navegador do Offer Studio/);
+    const logs = await prisma.cloneLog.findMany({ where: { jobId: stuck.id } });
+    expect(logs.some((l) => l.level === "ERROR" && l.message === failed.errorMessage)).toBe(true);
+    expect(logs.some((l) => l.message === "Clonagem cancelada.")).toBe(false);
+
+    const done = await prisma.cloneJob.findUniqueOrThrow({ where: { id: next.id } });
+    expect(done.status, done.errorMessage ?? "").toBe("REVIEW");
+
+    expect(commands.length).toBeGreaterThan(0);
+    for (const command of commands) expect(command).not.toContain("--no-sandbox");
+    // O navegador da clonagem travada foi fechado.
+    expect(cloneChromiumCommands()).toEqual([]);
+  }, 180_000);
+
+  it("prazo da clonagem inteira: também falha com explicação (não como cancelada)", async () => {
+    const job = await createJob({ source: "URL", sourceUrl: fixtures.url("laco") });
+    const done = await runAndGet(job.id, { totalMs: 4_000, captureMs: 120_000 });
+    expect(done.status).toBe("FAILED");
+    expect(done.errorCode).toBe(CLONE_TIMEOUT_CODE);
+    expect(done.errorMessage).toBe(cloneTimeoutMessage("total", false));
+  }, 120_000);
+
+  it("download lento na montagem passa do prazo de abertura e mesmo assim a cópia fica pronta", async () => {
+    // Internet lenta: a página já foi capturada, e o vídeo ainda está chegando quando o prazo
+    // de abertura (8 s) passa. A montagem não tem prazo fixo: o vídeo termina e a cópia sai.
+    const job = await createJob({ source: "URL", sourceUrl: pubUrl("/vsl-demorada") });
+    const started = Date.now();
+    const done = await runAndGet(job.id, { totalMs: 8_000 });
+    expect(done.status, done.errorMessage ?? "").toBe("REVIEW");
+    expect(Date.now() - started).toBeGreaterThan(8_000);
+    const video = resultOf(done).assets.find((a) => new URL(a.sourceUrl).pathname === "/demorado.mp4");
+    expect(video?.kind).toBe("VIDEO");
+  }, 120_000);
+
+  it("montagem parada (nenhum download termina): para depois do tempo sem andar, com explicação", async () => {
+    // O vídeo chega a conta-gotas e nunca termina (até o prazo do próprio download, ~3 min).
+    const job = await createJob({ source: "URL", sourceUrl: pubUrl("/vsl") });
+    const started = Date.now();
+    const done = await runAndGet(job.id, { buildIdleMs: 3_000 });
+    expect(done.status).toBe("FAILED");
+    expect(done.errorCode).toBe(CLONE_TIMEOUT_CODE);
+    expect(done.errorMessage).toBe(cloneTimeoutMessage("total", false));
+    expect(Date.now() - started).toBeLessThan(60_000);
+  }, 120_000);
+
+  it("cancelar uma clonagem presa continua dando 'Clonagem cancelada'", async () => {
+    const job = await createJob({ source: "URL", sourceUrl: fixtures.url("laco") });
+    const cancel = setTimeout(() => void cancelFromPanel(job.id), 3_000);
+    const started = Date.now();
+    try {
+      const done = await runAndGet(job.id, { captureMs: 120_000 });
+      expect(done.status).toBe("CANCELED");
+      expect(done.errorCode).toBeNull();
+    } finally {
+      clearTimeout(cancel);
+    }
+    expect(Date.now() - started).toBeLessThan(30_000);
+    const logs = await prisma.cloneLog.findMany({ where: { jobId: job.id } });
+    expect(logs.some((l) => l.message === "Clonagem cancelada.")).toBe(true);
+  }, 120_000);
+
+  it("importação (HTML colado) que trava: a mensagem não manda importar de novo", () => {
+    expect(cloneTimeoutMessage("capture", true)).toMatch(/^A página importada travou/);
+    expect(cloneTimeoutMessage("capture", true)).not.toMatch(/importe/);
+    expect(cloneTimeoutMessage("total", true)).not.toMatch(/importe/);
+  });
 });

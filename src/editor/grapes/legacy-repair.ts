@@ -1,6 +1,7 @@
 /**
- * Reparo, ao abrir, de páginas gravadas antes das correções de <noscript> e de
- * ids repetidos (o servidor diz o que reparar: src/lib/legacy-repair.ts).
+ * Reparo, ao abrir, de páginas gravadas antes das correções de <noscript>, de
+ * ids repetidos e do lugar do cabeçalho de loja (o servidor diz o que reparar:
+ * src/lib/legacy-repair.ts).
  *
  * - Regras que vieram de um <style> dentro de <noscript> saem do CSS do editor
  *   (só as que continuam exatamente como vieram; uma regra que a pessoa editou
@@ -8,8 +9,12 @@
  * - Ids renomeados ("comprar-2") voltam a ser repetidos de "comprar": o elemento
  *   ganha a marca data-os-dup-id e o salvar põe o id original de volta. O id do
  *   editor ("comprar-2") continua sendo o dele (as edições feitas nele valem).
+ * - Cabeçalho de loja dentro de um contêiner (gravado antes de ele só morar no
+ *   nível de cima): vai para o nível de cima, antes do contêiner
+ *   (src/editor/widgets/store-header-place.ts).
  */
 import type { Component, Editor } from "grapesjs";
+import { liftStoreHeaders } from "@/editor/widgets/store-header-place";
 import { DUP_ID_ATTR } from "@/lib/dup-ids";
 import type { LegacyRepair } from "@/lib/legacy-repair";
 
@@ -88,6 +93,11 @@ export function applyLegacyRepair(editor: Editor, repair: LegacyRepair | null | 
       editor.Css.remove(rule as never);
       changed = true;
     }
+  }
+
+  if (repair.storeHeaders) {
+    const wrapper = editor.getWrapper();
+    if (wrapper && liftStoreHeaders(wrapper).length) changed = true;
   }
   return changed;
 }

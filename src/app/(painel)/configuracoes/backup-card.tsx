@@ -326,8 +326,8 @@ export function BackupCard({
           gerar de novo).
         </Callout>
         <Callout variant="warning" icon={ShieldAlertIcon} title="Guarde o backup em lugar seguro">
-          O arquivo leva os <strong>tokens dos pixels</strong> (API de Conversões da Meta e Events API do TikTok) e a
-          chave que os protege, para funcionarem em outro Mac. Não envie o backup para ninguém.
+          O arquivo do backup leva os <strong>tokens dos pixels</strong>, a <strong>chave da Kyvo</strong> (pagamento na
+          página), a sua conta e a chave que protege tudo isso: guarde em lugar seguro e não envie para ninguém.
         </Callout>
       </div>
 

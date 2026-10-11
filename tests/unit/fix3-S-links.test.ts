@@ -186,6 +186,16 @@ describe("excluir link da oferta (#10)", () => {
     );
   });
 
+  it("link com checkout do Offer Studio (ou pagamento na página): a confirmação diz que o produto é apagado junto", () => {
+    expect(deleteDescription({ usage: 0, url: "", target: "CHECKOUT", checkout: {} })).toBe(
+      "Nenhum botão usa este link. Excluir o link apaga também o checkout do Offer Studio dele (produto, order bumps, frete, aparência e textos), e não dá para desfazer. Para guardar, troque o destino para “Endereço” em vez de excluir.",
+    );
+    // Destino já em "Endereço" com o checkout guardado: só o aviso (nada de "troque o destino").
+    expect(deleteDescription({ usage: 0, url: "https://x.com", target: "URL", checkout: {}, payment: {} })).toBe(
+      "Nenhum botão usa este link. Excluir o link apaga também o checkout do Offer Studio dele (produto, order bumps, frete, aparência e textos) e o produto do pagamento na página, e não dá para desfazer.",
+    );
+  });
+
   it("link usado como prêmio da roleta: a aba diz “Prêmio da roleta” e a exclusão diz que a fatia fica sem desconto", () => {
     expect(usageLabel({ usage: 0, prizes: 1 })).toBe("Prêmio da roleta");
     expect(usageLabel({ usage: 0, prizes: 2 })).toBe("Prêmio de 2 fatias da roleta");
@@ -250,10 +260,14 @@ describe("excluir página com links de outras páginas para ela (#22)", () => {
         { id: f.home.id, name: "Página principal" },
         { id: f.thanks.id, name: "Obrigado" },
       ],
+      products: [],
     });
-    expect(await pageReferences(f.lone.id)).toEqual({ count: 0, pages: [] });
+    expect(await pageReferences(f.lone.id)).toEqual({ count: 0, pages: [], products: [] });
     const res = await pageReferencesAction({ pageId: f.thanks.id });
-    expect(res).toEqual({ ok: true, data: { count: 1, pages: [{ id: f.home.id, name: "Página principal" }] } });
+    expect(res).toEqual({
+      ok: true,
+      data: { count: 1, pages: [{ id: f.home.id, name: "Página principal" }], products: [] },
+    });
     const missing = await pageReferencesAction({ pageId: "nao-existe" });
     expect(missing).toEqual({ ok: false, error: "Página não encontrada." });
   });

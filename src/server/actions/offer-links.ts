@@ -22,7 +22,7 @@ const url = z
     if (problem) ctx.addIssue({ code: "custom", message: problem });
   });
 const kind = z.enum(links.OFFER_LINK_KINDS);
-const target = z.enum(["URL", "PAYMENT"]);
+const target = z.enum(["URL", "PAYMENT", "CHECKOUT"]);
 
 function refresh() {
   revalidatePath("/", "layout");

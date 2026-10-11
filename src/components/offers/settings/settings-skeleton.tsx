@@ -2,7 +2,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 
 const FIELDS = ["a", "b", "c", "d"];
 
-/** Esqueleto da aba "Empresa e SEO" enquanto os dados carregam. */
+/** Esqueleto da aba "Moeda, empresa e SEO" enquanto os dados carregam. */
 export function OfferSettingsSkeleton() {
   return (
     <div className="flex max-w-5xl flex-col gap-6" aria-busy="true">

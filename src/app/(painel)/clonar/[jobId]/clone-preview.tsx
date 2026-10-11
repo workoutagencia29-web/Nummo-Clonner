@@ -93,7 +93,7 @@ export function ClonePreview({
           <ToggleGroupItem value="EDITABLE">
             Editável{suggestedMode === "EDITABLE" && <span className="size-1.5 rounded-full bg-primary" aria-hidden />}
           </ToggleGroupItem>
-          <ToggleGroupItem value="PRESERVE_JS" title="Mantém os scripts do site original (modo “Preservar JS”)">
+          <ToggleGroupItem value="PRESERVE_JS" title="Mantém os scripts do site original">
             Com scripts
             {suggestedMode === "PRESERVE_JS" && <span className="size-1.5 rounded-full bg-primary" aria-hidden />}
           </ToggleGroupItem>
@@ -120,7 +120,7 @@ export function ClonePreview({
       <p className="text-xs text-muted-foreground">
         {mode === "EDITABLE"
           ? "Editável: página estática, 100% editável. Scripts do site original foram removidos (os players de vídeo continuam)."
-          : "Com scripts (“Preservar JS”): mantém o funcionamento do site original, como quiz e calculadora (menos os rastreadores); a edição visual fica limitada."}{" "}
+          : "Com scripts: mantém o funcionamento do site original, como quiz e calculadora (menos os rastreadores); a edição visual fica limitada."}{" "}
         O ponto azul indica o modo recomendado.
       </p>
 
@@ -131,7 +131,7 @@ export function ClonePreview({
             <img
               src={`/api/files/${shot}`}
               alt="Print da página original"
-              className={cn("mx-auto block", device === "mobile" ? "w-[390px]" : "w-full")}
+              className={cn("mx-auto block", device === "mobile" ? "w-[390px] max-w-full" : "w-full")}
             />
           </div>
         ) : src ? (
@@ -153,7 +153,7 @@ export function ClonePreview({
                 title="Prévia da cópia (celular)"
                 src={src}
                 sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-popups-to-escape-sandbox"
-                className="h-full w-[390px] rounded-2xl border-4 border-foreground/80 bg-white shadow-lg"
+                className="h-full w-[390px] max-w-full rounded-2xl border-4 border-foreground/80 bg-white shadow-lg"
               />
             </div>
           )

@@ -375,9 +375,12 @@ describe("#35 elemento ligado a um link da oferta", () => {
       traits = await traitsShown(s.page);
       expect(traits.find((t) => t.label === "Endereço do link")?.input).toBe("https://pay.hotmart.com/ORIGINAL");
       expect(traits.some((t) => t.label === "Vai para")).toBe(false);
-      // A ordem continua: o endereço volta no mesmo lugar.
+      // A ordem continua: o endereço volta no mesmo lugar (logo abaixo do "Link da oferta",
+      // que vem primeiro), e a "Dica ao passar o mouse" fica por último.
       const order = traits.map((t) => t.label);
-      expect(order.indexOf("Endereço do link")).toBeLessThan(order.indexOf("Link da oferta"));
+      expect(order[0]).toBe("Link da oferta");
+      expect(order.indexOf("Endereço do link")).toBe(1);
+      expect(order[order.length - 1]).toBe("Dica ao passar o mouse");
 
       // Botão do Offer Studio: o campo de endereço dele (que desliga o link ao digitar) volta igual.
       await select(s.page, "#b");
@@ -553,6 +556,8 @@ describe("#36/#37/#38 blocos, camadas e barra do elemento", () => {
           ?.components()
           .map((c: Component) => c.getName());
         ed.getWrapper()?.find("#s3")[0].set("custom-name", "Minha seção");
+        // Camadas só são desenhadas quando a aba abre.
+        (window as unknown as E2Window).OS.showLayers(ed);
         ed.select(ed.getWrapper()?.find("#h")[0] as Component);
         await new Promise((r) => setTimeout(r, 150));
         return {

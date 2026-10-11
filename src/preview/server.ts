@@ -13,9 +13,10 @@
  *
  * Rotas comuns: /os-assets/<arquivo> (arquivos por hash), /os-runtime.js (script do
  * Offer Studio), /os-tracking.js (script de rastreamento), /os-pagamento.js
- * (janela de pagamento), POST /__os/pagamento (pagamento na página, SEMPRE
- * simulado na prévia) e, no modo "Preservar
- * JS", os arquivos nos caminhos originais.
+ * (janela de pagamento), POST /__os/pagamento (pagamento na página e checkout
+ * do Offer Studio, SEMPRE simulados na prévia), /checkout/<chave do link>
+ * (página de checkout do Offer Studio, com o script /os-checkout.js) e, no
+ * modo "Preservar JS", os arquivos nos caminhos originais.
  *
  * Rastreamento (Fase 4): páginas de oferta/documento recebem a configuração de
  * pixels da oferta no modo "preview" (pixels NÃO carregam; só aparecem no
@@ -28,12 +29,13 @@
  * O token da prévia no nome do host continua indo para as plataformas: é da
  * arquitetura da prévia (e só abre neste Mac).
  *
- * SEO (Empresa e SEO / SEO da página) e idioma entram no <head> das páginas de
+ * SEO (Moeda, empresa e SEO / SEO da página) e idioma entram no <head> das páginas de
  * oferta e documentos.
  */
 import "dotenv/config";
 import { createReadStream } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
+import { previewCheckoutPath } from "@/lib/checkout/page";
 import { prisma } from "@/lib/db";
 import { parseByteRange } from "@/lib/http-range";
 import { effectiveSeo, parseOfferSettings, parsePageSeo } from "@/lib/offer-settings";
@@ -42,9 +44,15 @@ import { type CategorizedCode, isMobileUserAgent, renderPageHtml, type TrackingR
 import { PAYMENT_MAX_BODY, PREVIEW_PAYMENT_ENDPOINT, paymentError } from "@/lib/payments/contract";
 import { type PreviewTarget, resolvePreviewToken } from "@/lib/preview";
 import {
+  CHECKOUT_SCRIPT_PATH,
+  CHECKOUT_SCRIPT_TAG,
+  checkoutScript,
   PAYMENT_SCRIPT_PATH,
   PAYMENT_SCRIPT_TAG,
+  PRODUCT_SCRIPT_PATH,
+  PRODUCT_SCRIPT_TAG,
   paymentScript,
+  productScript,
   runtimeScript,
   TRACKING_SCRIPT_PATH,
   TRACKING_SCRIPT_TAG,
@@ -55,6 +63,7 @@ import { getObject, mimeFromKey, objectInfo, storagePath } from "@/lib/storage";
 import { loadTracking } from "@/lib/tracking/config";
 import { PIXEL_TEST_ENDPOINT, PIXEL_TEST_MAX_BODY, PIXEL_TEST_PARAM } from "@/lib/tracking/runtime-config";
 import { explicitPageCodeCategory } from "@/lib/tracking/schema";
+import { checkoutProductByKey, renderCheckoutPage } from "@/server/services/checkout/page";
 import { loadRenderLinks, offerPaymentRender } from "@/server/services/payments/products";
 import { handleSimulatedPayment } from "@/server/services/payments/simulation";
 import { findActivePixelTestSession, PIXEL_TEST_HTTP_STATUS, recordPixelTestEvent } from "@/server/services/pixel-test";
@@ -65,6 +74,10 @@ import { findMappedAsset } from "./asset-map";
 const PORT = Number(process.env.PREVIEW_PORT || 3001);
 const PANEL_PORT = Number(process.env.PORT || 3000);
 const RUNTIME_TAG = '<script src="/os-runtime.js" data-os-runtime></script>';
+/** Página de checkout do Offer Studio: /checkout/<chave do link>. */
+const CHECKOUT_PATH_RE = /^\/checkout\/([a-z0-9-]{1,80})\/?$/;
+/** Links da oferta na prévia: os de checkout do Offer Studio levam à página de checkout. */
+const PREVIEW_LINKS = { checkoutHref: previewCheckoutPath };
 const STORAGE_KEY_RE = /^a\/[a-f0-9]{2}\/[a-f0-9]{64}\.[a-z0-9]{1,8}$/;
 /** Cookie (da origem da prévia) que mantém o modo "Testar pixels" ao navegar pelo funil. */
 const TEST_COOKIE = "os_teste";
@@ -291,7 +304,34 @@ async function resolve(
     const assetMap = "assetMap" in out ? (out.assetMap as Record<string, string>) : {};
     if (!isRoot) return { html: null, assetMap };
     const html = (await getObject(out.htmlKey)).toString("utf8");
-    return { html: renderPageHtml(html, { links: [], pageHref: () => "#", runtimeTag: RUNTIME_TAG }), assetMap };
+    return {
+      html: renderPageHtml(html, {
+        links: [],
+        pageHref: () => "#",
+        runtimeTag: RUNTIME_TAG,
+        productScriptTag: PRODUCT_SCRIPT_TAG,
+      }),
+      assetMap,
+    };
+  }
+
+  const checkoutMatch = CHECKOUT_PATH_RE.exec(pathname);
+  const checkoutOffer = checkoutMatch ? await offerIdOf(target) : null;
+  if (checkoutMatch && checkoutOffer && (await checkoutProductByKey(checkoutOffer, checkoutMatch[1]))) {
+    const offerId = checkoutOffer;
+    const test = await testModeFor(req, url, offerId);
+    if (test.kind === "invalid") return { html: TEST_EXPIRED_PAGE(), assetMap: {}, status: 410 };
+    if (test.kind === "enter") return { html: null, assetMap: {}, cookies: test.cookies, redirect: test.redirect };
+    // Prévia de uma página só: não há funil para ir à página de obrigado.
+    const pageHref = target.kind === "offer" ? (id: string) => `/p/${id}` : () => "#";
+    const html = await renderCheckoutPage(offerId, checkoutMatch[1], {
+      endpoint: PREVIEW_PAYMENT_ENDPOINT,
+      simulation: true,
+      pageHref,
+      scriptTag: CHECKOUT_SCRIPT_TAG,
+      tracking: await trackingFor(offerId, null, test, pageHref),
+    });
+    if (html !== null) return { html, assetMap: {}, cookies: test.cookies };
   }
 
   if (target.kind === "document") {
@@ -318,21 +358,23 @@ async function resolve(
     const test = await testModeFor(req, url, page.offerId);
     if (test.kind === "invalid") return { html: TEST_EXPIRED_PAGE(), assetMap, status: 410 };
     if (test.kind === "enter") return { html: null, assetMap, cookies: test.cookies, redirect: test.redirect };
-    const links = await loadRenderLinks(page.offerId);
+    const links = await loadRenderLinks(page.offerId, prisma, PREVIEW_LINKS);
     const html = renderPageHtml(doc.html ?? "", {
       links,
       wheel: await offerWheelRender(page.offerId, links),
-      payments: await offerPaymentRender(page.offerId, {
-        endpoint: PREVIEW_PAYMENT_ENDPOINT,
-        simulation: true,
-        pageHref: () => "#",
-        scriptTag: PAYMENT_SCRIPT_TAG,
-      }),
+      payments: await offerPaymentRender(
+        page.offerId,
+        { endpoint: PREVIEW_PAYMENT_ENDPOINT, simulation: true, pageHref: () => "#", scriptTag: PAYMENT_SCRIPT_TAG },
+        prisma,
+        true,
+      ),
       pageHref: () => "#",
       runtimeTag: RUNTIME_TAG,
+      productScriptTag: PRODUCT_SCRIPT_TAG,
       customCode: pageCodeOf(page.customCode),
       tracking: await trackingFor(page.offerId, page.id, test, () => "#", doc.variant.id),
       company: parseOfferSettings(page.offer.settings).company,
+      currency: parseOfferSettings(page.offer.settings).currency,
       seo: seoOf(page.offer.settings, page.seo),
     });
     return { html, assetMap, cookies: test.cookies };
@@ -364,15 +406,15 @@ async function resolve(
   if (test.kind === "enter") return { html: null, assetMap, cookies: test.cookies, redirect: test.redirect };
   const pageHref = (id: string) => `/p/${id}`;
   const [links, offer, payments] = await Promise.all([
-    loadRenderLinks(target.offerId),
+    loadRenderLinks(target.offerId, prisma, PREVIEW_LINKS),
     prisma.offer.findUnique({ where: { id: target.offerId }, select: { settings: true } }),
     // Prévia: pagamento SEMPRE simulado (nada é cobrado a partir do app).
-    offerPaymentRender(target.offerId, {
-      endpoint: PREVIEW_PAYMENT_ENDPOINT,
-      simulation: true,
-      pageHref,
-      scriptTag: PAYMENT_SCRIPT_TAG,
-    }),
+    offerPaymentRender(
+      target.offerId,
+      { endpoint: PREVIEW_PAYMENT_ENDPOINT, simulation: true, pageHref, scriptTag: PAYMENT_SCRIPT_TAG },
+      prisma,
+      true,
+    ),
   ]);
   return {
     html: renderPageHtml(doc.html ?? "", {
@@ -381,9 +423,11 @@ async function resolve(
       payments,
       pageHref,
       runtimeTag: RUNTIME_TAG,
+      productScriptTag: PRODUCT_SCRIPT_TAG,
       customCode: doc.customCode,
       tracking: await trackingFor(target.offerId, doc.pageId, test, pageHref, doc.variantId),
       company: parseOfferSettings(offer?.settings).company,
+      currency: parseOfferSettings(offer?.settings).currency,
       seo: seoOf(offer?.settings, doc.seo),
     }),
     assetMap,
@@ -574,6 +618,16 @@ async function handle(req: IncomingMessage, res: ServerResponse) {
 
   if (pathname === PAYMENT_SCRIPT_PATH) {
     sendText(res, 200, paymentScript(), "text/javascript; charset=utf-8");
+    return;
+  }
+
+  if (pathname === CHECKOUT_SCRIPT_PATH) {
+    sendText(res, 200, checkoutScript(), "text/javascript; charset=utf-8");
+    return;
+  }
+
+  if (pathname === PRODUCT_SCRIPT_PATH) {
+    sendText(res, 200, productScript(), "text/javascript; charset=utf-8");
     return;
   }
 

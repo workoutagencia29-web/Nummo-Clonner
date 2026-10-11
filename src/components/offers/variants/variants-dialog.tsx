@@ -37,6 +37,7 @@ import { RadioGroup as RadioGroupPrimitive } from "radix-ui";
 import { useCallback, useEffect, useId, useLayoutEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { ConfirmDialog } from "@/components/app/confirm-dialog";
+import { LegalTemplateNote, TextPricesNote } from "@/components/offers/currency-picker";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -73,6 +74,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { isTemplateId, TEMPLATE_SUMMARIES, templateSummary, thumbnailUrl } from "@/editor/templates/catalog";
 import { useAction } from "@/hooks/use-action";
 import { timeAgo } from "@/lib/format";
+import { DEFAULT_CURRENCY, type StoreCurrency } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import {
   createVariantAction,
@@ -178,7 +180,16 @@ function splitText(total: number, paused: number) {
 /** Aviso depois de uma ação que esbarrou numa mudança feita em outra aba. */
 const STALE_DESCRIPTION = "A lista de versões foi atualizada com o que está salvo agora.";
 
-export function VariantsDialog({ page, onClose }: { page: VariantsDialogPage | null; onClose: () => void }) {
+export function VariantsDialog({
+  page,
+  onClose,
+  offerCurrency = DEFAULT_CURRENCY,
+}: {
+  page: VariantsDialogPage | null;
+  onClose: () => void;
+  /** Moeda da oferta: modelo com preço escrito em R$ avisa quando ela não é o real. */
+  offerCurrency?: StoreCurrency;
+}) {
   const [view, setView] = useState<PageVariantsView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   /** Página a que `view`/`loadError` se referem (evita mostrar a anterior por um instante). */
@@ -512,6 +523,7 @@ export function VariantsDialog({ page, onClose }: { page: VariantsDialogPage | n
         {ready && mode === "create" && (
           <CreateVariantForm
             view={view}
+            offerCurrency={offerCurrency}
             onCancel={() => setMode("list")}
             onStale={handleStale}
             onCreated={(next, info) => {
@@ -1130,11 +1142,13 @@ function SourceOption({
 
 function CreateVariantForm({
   view,
+  offerCurrency,
   onCancel,
   onStale,
   onCreated,
 }: {
   view: PageVariantsView;
+  offerCurrency: StoreCurrency;
   onCancel: () => void;
   /** Erro de lista desatualizada: recarrega (e avisa, sem `quiet`); true = era isso. */
   onStale: (message: string, opts?: { quiet?: boolean }) => boolean;
@@ -1272,6 +1286,12 @@ function CreateVariantForm({
             </RadioGroupPrimitive.Item>
           ))}
         </RadioGroupPrimitive.Root>
+      )}
+      {source === "template" && (
+        <>
+          <TextPricesNote currency={offerCurrency} templateId={templateId} withCurrency className="-mt-2" />
+          <LegalTemplateNote currency={offerCurrency} templateId={templateId} withCurrency className="-mt-2" />
+        </>
       )}
       {source === "template" && selected?.notice && (
         <p role="note" className="rounded-md border border-warning/40 bg-warning/10 p-3 text-sm">

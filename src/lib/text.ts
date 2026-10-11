@@ -13,6 +13,18 @@ export function nameKey(value: string) {
 }
 
 /**
+ * Os primeiros `max` caracteres do texto (contados como no JavaScript e no
+ * zod, em unidades UTF-16), sem cortar um emoji ao meio: meio emoji vira "�"
+ * ao gravar no banco.
+ */
+export function cutText(text: string, max: number): string {
+  if (text.length <= max) return text;
+  const cut = text.slice(0, Math.max(0, max));
+  const last = cut.charCodeAt(cut.length - 1);
+  return last >= 0xd800 && last <= 0xdbff ? cut.slice(0, -1) : cut;
+}
+
+/**
  * Pastas usadas pelo ZIP exportado ou pelo app; uma página não pode ter esses
  * endereços para não colidir com elas: assets/, eventos-dados/ (tokens do
  * eventos.php), as pastas das versões A/B da página inicial (oferta-a/ a

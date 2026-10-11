@@ -21,6 +21,12 @@ export interface TemplateSummary {
   thumbnail: string;
   /** Aviso mostrado no painel ao escolher o modelo (ex.: textos jurídicos). */
   notice?: string;
+  /**
+   * O modelo tem preços escritos como texto ("De R$ 297,00 por…"): eles não
+   * acompanham a moeda da oferta (a "Nova oferta" avisa numa moeda que não é o
+   * real). Os modelos da loja montam os preços na moeda (templateHtmlFor).
+   */
+  textPrices?: boolean;
 }
 
 /** Modelo completo: resumo + documento HTML. */

@@ -18,7 +18,7 @@ import { getObject, mimeFromKey, objectExists, putObject, storagePath } from "@/
 import { buildClone } from "./build";
 import { type CaptureResult, CloneCanceledError, capturePage, type LogFn, type VirtualSite } from "./capture";
 import { decodeText } from "./charset";
-import { createFetcher, isBlockedAddress, matchHostMap, parseHostMap } from "./fetcher";
+import { createFetcher, type Fetcher, isBlockedAddress, matchHostMap, parseHostMap } from "./fetcher";
 import { IMPORT_ORIGIN, PASTE_ORIGIN } from "./synthetic";
 import type { CloneWarning, Device } from "./types";
 import { safeDecode } from "./urls";
@@ -42,6 +42,66 @@ export { IMPORT_ORIGIN, PASTE_ORIGIN };
 
 const INTERNAL_NETWORK_MESSAGE = "Esse endereço aponta para a rede interna e foi bloqueado por segurança.";
 const CANCELED_MESSAGE = "Clonagem cancelada.";
+
+// ─── Prazos ──────────────────────────────────────────────────────────────────
+
+/**
+ * Prazos da clonagem. Uma página com um script em laço prende o navegador (o
+ * Playwright não tem prazo para ler a página) e, sem eles, a clonagem ficava
+ * "Abrindo a página" para sempre — e a fila inteira (clonagens, ZIPs e a
+ * restauração de backup) esperando atrás. Os padrões ficam bem acima do tempo
+ * de uma clonagem normal (a soma das esperas de uma captura lenta passa pouco
+ * de 2,5 min).
+ *
+ * A montagem da cópia (baixar os arquivos e vídeos) não tem prazo fixo: numa
+ * internet lenta, uma página pesada pode levar mais que qualquer prazo e mesmo
+ * assim terminar — e a página já capturada não pode se perder por isso. Cada
+ * download já tem prazo próprio (fetcher: 20 s sem resposta, ~3 min no total),
+ * então ali o vigia é outro: a clonagem só para se nenhum download terminar
+ * (nem der erro) por `buildIdleMs`.
+ */
+export interface CloneLimits {
+  /** Captura de um aparelho: abrir, rolar, ler a página e tirar o print. */
+  captureMs: number;
+  /** Do começo até a página aberta nos aparelhos (antes de baixar os arquivos). */
+  totalMs: number;
+  /** Montagem da cópia: tempo máximo sem nenhum download terminar (bem acima do prazo de um download). */
+  buildIdleMs: number;
+  /** Espera do DOMContentLoaded e do "load" (ver CaptureOptions); só os testes mudam. */
+  domReadyMs?: number;
+  loadMs?: number;
+}
+
+export const DEFAULT_CLONE_LIMITS: CloneLimits = {
+  captureMs: 5 * 60_000,
+  totalMs: 15 * 60_000,
+  buildIdleMs: 6 * 60_000,
+};
+
+/** Código gravado na clonagem que passou do prazo. */
+export const CLONE_TIMEOUT_CODE = "TIMEOUT";
+
+/** A clonagem passou do prazo: o motivo do `abort` (separa de "Clonagem cancelada"). */
+export class CloneTimeoutError extends UserError {
+  constructor(
+    readonly stage: "capture" | "total",
+    imported: boolean,
+  ) {
+    super(cloneTimeoutMessage(stage, imported));
+    this.name = "CloneTimeoutError";
+  }
+}
+
+export function cloneTimeoutMessage(stage: "capture" | "total", imported: boolean): string {
+  if (stage === "capture") {
+    return imported
+      ? "A página importada travou o navegador do Offer Studio (um script dela não para de rodar). Tente de novo."
+      : "A página travou o navegador do Offer Studio (um script dela não para de rodar). Tente de novo ou importe o HTML/ZIP salvo pelo navegador.";
+  }
+  return imported
+    ? "A clonagem demorou demais e foi interrompida. Tente de novo."
+    : "A clonagem demorou demais e foi interrompida (a página ou os arquivos dela não terminaram de carregar). Tente de novo ou importe o HTML/ZIP salvo pelo navegador.";
+}
 
 /** Código de erro das importações cujo conteúdo é o problema (a tela esconde "Tentar de novo"). */
 export const IMPORT_INVALID_CODE = "IMPORT_INVALID";
@@ -126,6 +186,14 @@ export async function assertPublicUrl(url: string, hostMap: Record<string, strin
  * de cada captura; QUIC e WebRTC usariam UDP direto, fora do proxy.
  */
 const CHROMIUM_ARGS = ["--disable-quic", "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"];
+
+/**
+ * Como o Chromium da clonagem é aberto. Ele roda o JavaScript de qualquer
+ * página clonada: o sandbox (que o Playwright desliga por padrão) isola cada
+ * página do Mac — uma falha do navegador explorada por um site não chega aos
+ * arquivos, ao banco, aos backups nem às chaves guardadas.
+ */
+export const CLONE_BROWSER_OPTIONS = { headless: true, chromiumSandbox: true, args: CHROMIUM_ARGS };
 
 /** Tipos de texto servidos a partir do ZIP (convertidos para UTF-8). */
 const ZIP_TEXT_MIME: Record<string, string> = {
@@ -343,14 +411,39 @@ function captureWarnings(captures: CaptureResult[], imported: boolean): CloneWar
 
 // ─── Execução ────────────────────────────────────────────────────────────────
 
-export async function runCloneJob(jobId: string) {
-  const { log, flush } = createJobLogger(jobId);
+export async function runCloneJob(jobId: string, limitsOverride: Partial<CloneLimits> = {}) {
+  const limits: CloneLimits = { ...DEFAULT_CLONE_LIMITS, ...limitsOverride };
+  const { log: writeLog, flush } = createJobLogger(jobId);
   const controller = new AbortController();
   const startedAt = Date.now();
+  /** Último sinal de que a clonagem anda (download terminado, linha no log): o vigia da montagem olha isso. */
+  let lastActivity = startedAt;
+  const touch = () => {
+    lastActivity = Date.now();
+  };
+  const log: LogFn = (level, message, url) => {
+    touch();
+    writeLog(level, message, url);
+  };
   let lastProgress = 0;
   /** O estado final já foi gravado (ou a clonagem não é mais deste worker). */
   let settled = false;
   let cancelWatcher: NodeJS.Timeout | null = null;
+  /** Vigias dos prazos (apagados no fim). */
+  const deadlines = new Set<NodeJS.Timeout>();
+  /** Passado `ms`, interrompe a clonagem como "passou do prazo" (fecha o navegador, para os downloads). */
+  const deadline = (ms: number, reason: () => CloneTimeoutError) => {
+    const timer = setTimeout(() => {
+      deadlines.delete(timer);
+      if (!controller.signal.aborted) controller.abort(reason());
+    }, ms);
+    deadlines.add(timer);
+    return timer;
+  };
+  const clearDeadline = (timer: NodeJS.Timeout) => {
+    clearTimeout(timer);
+    deadlines.delete(timer);
+  };
 
   const setProgress = async (progress: number, step: string) => {
     const p = Math.max(lastProgress, Math.min(99, Math.round(progress)));
@@ -369,7 +462,13 @@ export async function runCloneJob(jobId: string) {
 
   const hostMap = parseHostMap(process.env.OS_CLONE_HOST_MAP);
   const allowPrivate = process.env.OS_CLONE_ALLOW_PRIVATE === "1";
-  const fetcher = createFetcher({ hostMap, allowPrivate, maxBytes: 25 * 1024 * 1024, signal: controller.signal });
+  const network = createFetcher({ hostMap, allowPrivate, maxBytes: 25 * 1024 * 1024, signal: controller.signal });
+  // Cada download que termina (ou falha) mostra que a montagem anda.
+  const fetcher: Fetcher = {
+    fetchResource: (url, init) => network.fetchResource(url, init).finally(touch),
+    downloadToFile: (url, dest, max, init) => network.downloadToFile(url, dest, max, init).finally(touch),
+    close: () => network.close(),
+  };
   let browser: Browser | null = null;
 
   try {
@@ -396,6 +495,12 @@ export async function runCloneJob(jobId: string) {
     }, 1500);
 
     const options = CloneOptionsSchema.parse(job.options ?? {});
+    const imported = job.source !== "URL";
+    // Prazo até a página aberta nos aparelhos (a montagem tem o vigia dela, mais abaixo).
+    const opening = deadline(
+      Math.max(0, startedAt + limits.totalMs - Date.now()),
+      () => new CloneTimeoutError("total", imported),
+    );
     await setProgress(2, "Preparando");
 
     let url: string;
@@ -429,7 +534,7 @@ export async function runCloneJob(jobId: string) {
     }
     if (controller.signal.aborted) throw new CloneCanceledError();
 
-    browser = await chromium.launch({ headless: true, args: CHROMIUM_ARGS });
+    browser = await chromium.launch(CLONE_BROWSER_OPTIONS);
     // Desktop e celular são capturados ao mesmo tempo (contextos separados).
     const deviceList = options.devices as Device[];
     const labels = deviceList.map(deviceLabel);
@@ -437,16 +542,25 @@ export async function runCloneJob(jobId: string) {
     let finishedCaptures = 0;
     const captures: CaptureResult[] = await Promise.all(
       deviceList.map(async (device) => {
-        const capture = await capturePage({
-          browser: browser as Browser,
-          device,
-          url,
-          log,
-          hostMap,
-          allowPrivate,
-          signal: controller.signal,
-          virtualSite,
-        });
+        // Script da página em laço: a leitura da página nunca volta. O vigia fecha o navegador.
+        const watchdog = deadline(limits.captureMs, () => new CloneTimeoutError("capture", imported));
+        let capture: CaptureResult;
+        try {
+          capture = await capturePage({
+            browser: browser as Browser,
+            device,
+            url,
+            log,
+            hostMap,
+            allowPrivate,
+            signal: controller.signal,
+            virtualSite,
+            domReadyTimeoutMs: limits.domReadyMs,
+            loadTimeoutMs: limits.loadMs,
+          });
+        } finally {
+          clearDeadline(watchdog);
+        }
         finishedCaptures++;
         await setProgress(5 + (finishedCaptures / deviceList.length) * 50, "Abrindo a página");
         const summary = `${capture.responses.size} arquivos carregados, ${capture.blocked.length} rastreador(es) bloqueado(s)`;
@@ -477,6 +591,23 @@ export async function runCloneJob(jobId: string) {
       return;
     }
 
+    // Montagem: sem prazo fixo (internet lenta não derruba a cópia já capturada); só para se
+    // nada andar por buildIdleMs — cada download tem prazo próprio, então algum sempre termina.
+    clearDeadline(opening);
+    touch();
+    const idleWatch = () => {
+      const idle = Date.now() - lastActivity;
+      if (idle >= limits.buildIdleMs) {
+        if (!controller.signal.aborted) controller.abort(new CloneTimeoutError("total", imported));
+        return;
+      }
+      const timer = setTimeout(() => {
+        deadlines.delete(timer);
+        idleWatch();
+      }, limits.buildIdleMs - idle);
+      deadlines.add(timer);
+    };
+    idleWatch();
     await setProgress(55, "Baixando arquivos e montando a cópia");
     const result = await buildClone({
       jobId,
@@ -488,7 +619,10 @@ export async function runCloneJob(jobId: string) {
       startedAt,
       virtualSite,
       fileName: options.fileName,
-      onProgress: (f) => void setProgress(55 + f * 40, "Baixando arquivos e montando a cópia"),
+      onProgress: (f) => {
+        touch();
+        void setProgress(55 + f * 40, "Baixando arquivos e montando a cópia");
+      },
     });
     if (controller.signal.aborted) throw new CloneCanceledError();
     // Avisos que antes só apareciam no log (que some quando a revisão abre).
@@ -511,7 +645,21 @@ export async function runCloneJob(jobId: string) {
       log("WARN", CANCELED_MESSAGE);
     }
   } catch (err) {
-    if (err instanceof CloneCanceledError || controller.signal.aborted) {
+    const timeout = controller.signal.reason instanceof CloneTimeoutError ? controller.signal.reason : null;
+    if (timeout) {
+      // Passou do prazo: falha com explicação (não é "cancelada" — ninguém cancelou).
+      console.error(
+        `[clone ${jobId}] passou do prazo (${timeout.stage === "capture" ? "captura" : "clonagem inteira"}).`,
+      );
+      log("ERROR", timeout.message);
+      await settleJob(jobId, {
+        status: "FAILED",
+        errorCode: CLONE_TIMEOUT_CODE,
+        errorMessage: timeout.message,
+        finishedAt: new Date(),
+      });
+      settled = true;
+    } else if (err instanceof CloneCanceledError || controller.signal.aborted) {
       log("WARN", CANCELED_MESSAGE);
       settled = true;
       const data: FinalState = { status: "CANCELED", finishedAt: new Date() };
@@ -530,6 +678,8 @@ export async function runCloneJob(jobId: string) {
     }
   } finally {
     if (cancelWatcher) clearInterval(cancelWatcher);
+    for (const timer of deadlines) clearTimeout(timer);
+    deadlines.clear();
     if (!settled) deferJobFailure(jobId);
     await flush();
     await browser?.close().catch(() => {});

@@ -4,11 +4,14 @@ import { ImageIcon, RefreshCwIcon, Trash2Icon, UploadIcon } from "lucide-react";
 import { useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Spinner } from "@/components/ui/spinner";
+import { ICO_MAX_BYTES, ICO_NOT_FOR_SHARING, isIcoFile } from "@/lib/ico";
 import { cn } from "@/lib/utils";
 
 /** Mesmo limite do envio de imagens do editor (IMAGE_UPLOAD_LIMITS em src/server/services/assets.ts). */
 const MAX_BYTES = 15 * 1024 * 1024;
 const ACCEPT = "image/png,image/jpeg,image/webp,image/gif,image/avif,image/svg+xml";
+/** Ícone da aba também aceita .ico. */
+const ACCEPT_WITH_ICON = `${ACCEPT},image/x-icon,image/vnd.microsoft.icon,.ico`;
 
 /**
  * Envia uma imagem para a biblioteca da oferta (/api/assets/upload, a mesma
@@ -16,6 +19,9 @@ const ACCEPT = "image/png,image/jpeg,image/webp,image/gif,image/avif,image/svg+x
  */
 export async function uploadOfferImage(offerId: string, file: File): Promise<{ src: string } | { error: string }> {
   if (file.size > MAX_BYTES) return { error: "A imagem passou de 15 MB. Escolha uma imagem menor." };
+  if (isIcoFile(file) && file.size > ICO_MAX_BYTES) {
+    return { error: "O ícone .ico passou de 1 MB. Ícones de aba costumam ter poucos KB: exporte de novo, menor." };
+  }
   const form = new FormData();
   form.append("offerId", offerId);
   form.append("files", file);
@@ -39,7 +45,8 @@ export async function uploadOfferImage(offerId: string, file: File): Promise<{ s
 /**
  * Campo de imagem (favicon ou imagem de compartilhamento): prévia, enviar,
  * trocar e remover. `inheritedSrc` mostra a imagem que vale quando este campo
- * está vazio (a da oferta, no SEO de uma página).
+ * está vazio (a da oferta, no SEO de uma página). `icon` aceita também .ico (só
+ * o ícone da aba: nos outros campos o .ico é recusado com o motivo).
  */
 export function ImageUploadField({
   offerId,
@@ -52,6 +59,7 @@ export function ImageUploadField({
   inheritedSrc,
   inheritedLabel = "Usando a da oferta",
   disabled,
+  icon = false,
 }: {
   offerId: string;
   label: string;
@@ -63,6 +71,7 @@ export function ImageUploadField({
   inheritedSrc?: string | null;
   inheritedLabel?: string;
   disabled?: boolean;
+  icon?: boolean;
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [uploading, setUploading] = useState(false);
@@ -75,10 +84,16 @@ export function ImageUploadField({
   async function send(file: File | undefined) {
     if (!file) return;
     setUploadError(null);
+    if (!icon && isIcoFile(file)) {
+      setUploadError(ICO_NOT_FOR_SHARING);
+      return;
+    }
     setUploading(true);
     const result = await uploadOfferImage(offerId, file);
     setUploading(false);
     if ("error" in result) setUploadError(result.error);
+    // Um .ico com outro nome (ex.: "logo.png") só se revela no servidor.
+    else if (!icon && /\.ico$/i.test(result.src)) setUploadError(ICO_NOT_FOR_SHARING);
     else onChange(result.src);
   }
 
@@ -160,7 +175,7 @@ export function ImageUploadField({
       <input
         ref={input}
         type="file"
-        accept={ACCEPT}
+        accept={icon ? ACCEPT_WITH_ICON : ACCEPT}
         className="sr-only"
         tabIndex={-1}
         aria-label={`${label}: escolher arquivo`}

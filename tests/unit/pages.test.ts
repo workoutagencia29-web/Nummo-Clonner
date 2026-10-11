@@ -14,7 +14,7 @@ import {
 import { resetDatabase } from "../setup/per-file";
 import { expectUserError } from "./helpers";
 
-const DUPLICATE_SLUG = "Já existe uma página com esse endereço (slug) nesta oferta.";
+const DUPLICATE_SLUG = "Já existe uma página com esse endereço nesta oferta.";
 const BAD_CHARS = "Use só letras minúsculas, números e hífen (ex.: pagina-de-vendas).";
 
 beforeEach(async () => {

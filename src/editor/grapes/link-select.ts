@@ -14,10 +14,16 @@
  *
  * Só vale para links/botões "de botão": texto curto e ícones, sem seções,
  * títulos, listas ou formulários dentro (um <a> que envolve um cartão inteiro
- * continua deixando escolher o que está dentro).
+ * continua deixando escolher o que está dentro). Elemento com a propriedade
+ * `osClickSelf` (CLICK_SELF_PROP) é selecionado ele mesmo: o logo do cabeçalho
+ * de loja (o que se muda nele é a imagem; o link fica no atalho "Configurar o
+ * link" do painel).
  */
 import type { Component, Editor } from "grapesjs";
 import { isClickableElement } from "./components";
+
+/** Propriedade do componente: o clique seleciona ele mesmo, nunca o link/botão em volta. */
+export const CLICK_SELF_PROP = "osClickSelf";
 
 /** Quantos níveis acima do elemento clicado o link/botão pode estar. */
 const MAX_DEPTH = 4;
@@ -82,7 +88,7 @@ export function isButtonLike(component: Component): boolean {
  * null. O elemento e o caminho até o link precisam ser conteúdo de botão.
  */
 export function clickableAncestor(component: Component): Component | null {
-  if (!BUTTON_CONTENT_TAGS.has(tagOf(component))) return null;
+  if (!BUTTON_CONTENT_TAGS.has(tagOf(component)) || component.get(CLICK_SELF_PROP)) return null;
   let current = component.parent();
   for (let depth = 0; current && depth < MAX_DEPTH; depth++, current = current.parent()) {
     if (current.get("type") === "wrapper") return null;

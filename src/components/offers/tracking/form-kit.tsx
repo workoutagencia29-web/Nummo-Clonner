@@ -51,15 +51,22 @@ export function SaveBar({
   onReset,
   saveLabel = "Salvar",
   className,
+  guard,
 }: {
   dirty: boolean;
   pending: boolean;
   onReset: () => void;
   saveLabel?: string;
   className?: string;
+  /**
+   * O ponto na aba e a pergunta ao sair (padrão: `dirty`). Falso quando a
+   * barra fica ligada sem nada mudado (ex.: link de checkout ainda sem
+   * produto: dá para salvar, mas sair não perde nada).
+   */
+  guard?: boolean;
 }) {
   // A aba ganha o ponto de "não salvo" e sair da tela pergunta antes.
-  useUnsavedChanges(dirty);
+  useUnsavedChanges(guard ?? dirty);
   return (
     <div
       className={cn(

@@ -119,7 +119,7 @@ describe("POST /api/assets/upload", () => {
     expect(body.errors).toEqual([
       {
         name: "notas.txt",
-        error: '"notas.txt" não é uma imagem aceita. Envie JPG, PNG, WebP, GIF, AVIF ou SVG.',
+        error: '"notas.txt" não é uma imagem aceita. Envie JPG, PNG, WebP, GIF, AVIF, SVG ou ICO.',
         status: 415,
       },
     ]);
@@ -133,7 +133,7 @@ describe("POST /api/assets/upload", () => {
     const res = await POST(uploadRequest(one));
     expect(res.status).toBe(415);
     expect(await res.json()).toMatchObject({
-      error: '"notas.txt" não é uma imagem aceita. Envie JPG, PNG, WebP, GIF, AVIF ou SVG.',
+      error: '"notas.txt" não é uma imagem aceita. Envie JPG, PNG, WebP, GIF, AVIF, SVG ou ICO.',
     });
 
     const two = new FormData();
@@ -144,7 +144,7 @@ describe("POST /api/assets/upload", () => {
     expect(res2.status).toBe(400);
     const body2 = (await res2.json()) as { error: string; errors: unknown[] };
     expect(body2.error).toBe(
-      'Nenhuma das 2 imagens foi enviada. "notas.txt" não é uma imagem aceita. Envie JPG, PNG, WebP, GIF, AVIF ou SVG.',
+      'Nenhuma das 2 imagens foi enviada. "notas.txt" não é uma imagem aceita. Envie JPG, PNG, WebP, GIF, AVIF, SVG ou ICO.',
     );
     expect(body2.errors).toHaveLength(2);
   });

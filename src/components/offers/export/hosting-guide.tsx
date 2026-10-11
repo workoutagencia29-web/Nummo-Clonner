@@ -16,6 +16,11 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
+/** "da Kyvo", "da Kyvo e da FlevoPay", "da Kyvo, da FlevoPay e da BlackCat". */
+function joinPt(items: string[]): string {
+  return items.length < 2 ? (items[0] ?? "") : `${items.slice(0, -1).join(", ")} e ${items[items.length - 1]}`;
+}
+
 const Code = ({ children }: { children: ReactNode }) => (
   <code className="rounded bg-muted px-1 py-0.5 font-mono text-[12px] text-foreground">{children}</code>
 );
@@ -53,14 +58,19 @@ export function HostingGuide({
   onOpenChange,
   preserveJsPages = [],
   hasPayments = false,
+  paymentGateways = [],
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Páginas no modo "Preservar JS" (só funcionam na raiz do domínio). */
   preserveJsPages?: string[];
-  /** O ZIP leva o pagamento.php (pagamento na página). */
+  /** O ZIP leva o pagamento.php (pagamento na página ou checkout do Offer Studio). */
   hasPayments?: boolean;
+  /** Gateways com chave na pasta pagamento-dados ("Kyvo", "FlevoPay", "BlackCat"). */
+  paymentGateways?: string[];
 }) {
+  const gateways = paymentGateways.length ? paymentGateways : ["Kyvo"];
+  const keys = `${gateways.length === 1 ? "a chave" : "as chaves"} ${joinPt(gateways.map((g) => `da ${g}`))}`;
   return (
     <Collapsible open={open} onOpenChange={onOpenChange} className="rounded-lg border">
       <CollapsibleTrigger className="group flex w-full items-center gap-2 rounded-lg px-4 py-3 text-left font-medium text-sm outline-none hover:bg-accent/50 focus-visible:ring-[3px] focus-visible:ring-ring/50">
@@ -138,7 +148,7 @@ export function HostingGuide({
           {preserveJsPages.length > 0 && (
             <p>
               Exceção: {preserveJsPages.length === 1 ? "a página" : "as páginas"}{" "}
-              <strong>{preserveJsPages.join(", ")}</strong> (modo Preservar JS) só{" "}
+              <strong>{preserveJsPages.join(", ")}</strong> (modo “Com scripts”) só{" "}
               {preserveJsPages.length === 1 ? "funciona" : "funcionam"} na raiz do domínio.
             </p>
           )}
@@ -152,9 +162,10 @@ export function HostingGuide({
           </p>
           {hasPayments && (
             <p>
-              O pagamento na página <strong>não funciona</strong> nessas hospedagens: ele precisa de PHP e HTTPS. Não
-              envie para lá o <Code>{PAGAMENTO_FILE}</Code> nem a pasta <Code>{PAGAMENTO_CONFIG_DIR}</Code> (ela guarda
-              a chave da Kyvo).
+              O pagamento <strong>não funciona</strong> nessas hospedagens: o <Code>{PAGAMENTO_FILE}</Code> precisa de
+              PHP e HTTPS. Não envie para lá o <Code>{PAGAMENTO_FILE}</Code> nem a pasta{" "}
+              <Code>{PAGAMENTO_CONFIG_DIR}</Code> (ela guarda {keys}, que{" "}
+              {gateways.length === 1 ? "ficaria visível" : "ficariam visíveis"}).
             </p>
           )}
         </Section>
@@ -177,9 +188,10 @@ export function HostingGuide({
             </li>
             {hasPayments && (
               <li>
-                Abra <strong>seudominio.com.br/{PAGAMENTO_FILE}</strong>: deve aparecer “funcionando”, com a chave da
-                Kyvo cadastrada e HTTPS “sim”. Depois faça uma compra de teste com um valor baixo (o LEIA-ME.txt explica
-                o passo a passo) e confira a venda no painel da Kyvo.
+                Abra <strong>seudominio.com.br/{PAGAMENTO_FILE}</strong>: deve aparecer “funcionando”, com {keys}{" "}
+                {gateways.length === 1 ? "cadastrada" : "cadastradas"} e HTTPS “sim”. Depois faça uma compra de teste
+                com um valor baixo (o LEIA-ME.txt explica o passo a passo) e confira a venda no painel{" "}
+                {gateways.length === 1 ? `da ${gateways[0]}` : "do gateway"}.
               </li>
             )}
           </ul>

@@ -47,6 +47,50 @@ test.describe("clonar oferta", () => {
     await expect(page.getByText("/upsell/")).toBeVisible();
   });
 
+  test("funil marcado sem clonar: 'Salvar oferta' pergunta e 'Clonar e salvar junto' leva as páginas", async ({
+    page,
+  }) => {
+    await page.goto("/clonar");
+    await page.getByLabel("Link da página").fill(FIXTURE("vendas"));
+    await page.getByRole("button", { name: "Clonar página" }).click();
+    await expect(page.getByRole("heading", { name: "Revisar cópia" })).toBeVisible({ timeout: 120_000 });
+
+    // Marca o obrigado e o upsell, mas não clica em "Clonar páginas selecionadas".
+    await page.getByRole("checkbox", { name: /^Obrigado · / }).click();
+    await page.getByRole("checkbox", { name: /^Upsell · Kit Festas Lucrativas/ }).click();
+    const name = `Funil junto ${Date.now()}`;
+    await page.getByLabel("Nome da oferta").fill(name);
+    await page.getByRole("button", { name: "Salvar oferta" }).click();
+    const ask = page.getByRole("alertdialog", { name: "2 páginas do funil marcadas ainda não foram clonadas" });
+    await expect(ask).toBeVisible();
+    await ask.getByRole("button", { name: "Clonar e salvar junto" }).click();
+    await expect(page.getByRole("button", { name: "Aguardando páginas do funil…" })).toBeVisible();
+
+    // Salva sozinha quando as duas terminam.
+    await expect(page).toHaveURL(/\/ofertas\/[a-z0-9]+$/, { timeout: 180_000 });
+    await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+    await expect(page.getByText("3 páginas", { exact: true })).toBeVisible();
+    await expect(page.getByText("/upsell/")).toBeVisible();
+    await expect(page.getByText("/obrigado/")).toBeVisible();
+  });
+
+  test("funil marcado sem clonar: 'Salvar sem elas' salva só a página principal", async ({ page }) => {
+    await page.goto("/clonar");
+    await page.getByLabel("Link da página").fill(FIXTURE("vendas"));
+    await page.getByRole("button", { name: "Clonar página" }).click();
+    await expect(page.getByRole("heading", { name: "Revisar cópia" })).toBeVisible({ timeout: 120_000 });
+
+    await page.getByRole("checkbox", { name: /^Obrigado · / }).click();
+    await page.getByRole("checkbox", { name: /^Upsell · Kit Festas Lucrativas/ }).click();
+    const name = `Sem funil ${Date.now()}`;
+    await page.getByLabel("Nome da oferta").fill(name);
+    await page.getByRole("button", { name: "Salvar oferta" }).click();
+    await page.getByRole("alertdialog").getByRole("button", { name: "Salvar sem elas" }).click();
+    await expect(page).toHaveURL(/\/ofertas\/[a-z0-9]+$/, { timeout: 30_000 });
+    await expect(page.getByRole("heading", { level: 1, name })).toBeVisible();
+    await expect(page.getByText("1 página", { exact: true })).toBeVisible();
+  });
+
   test("página protegida: mensagem clara, print e 'Tentar de novo'", async ({ page }) => {
     await page.goto("/clonar");
     await page.getByLabel("Link da página").fill(FIXTURE("protegido"));

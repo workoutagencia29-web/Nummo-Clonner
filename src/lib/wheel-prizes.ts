@@ -17,10 +17,12 @@ import {
   offerScope,
   PRIZE_MAP_ID,
   PRIZE_SHOW_ATTR,
+  type PrizeInfo,
   type PrizeMap,
   parseSlices,
   prizeId,
   SCOPE_ATTR,
+  SITE_PATH_RE,
   WHEEL_DAYS,
   WHEEL_MINUTES,
   type WheelSlice,
@@ -70,15 +72,29 @@ function safeHref(url: string): string | null {
   }
 }
 
-/** Link que pode ser prêmio: endereço http(s) ou pagamento na página. */
-type PrizeLink = { key: string; url: string; pay?: boolean };
+/**
+ * Link que pode ser prêmio: endereço http(s), pagamento na página ou
+ * "Checkout do Offer Studio" (`checkout === true`, como no RenderLink: a
+ * página de checkout no próprio site, no `url` — a prévia e o ZIP dão; quem
+ * renderiza sem dizer o endereço, não). Outro valor em `checkout` (o produto
+ * guardado de um OfferLinkView) não conta: só o destino da hora.
+ */
+type PrizeLink = { key: string; url: string; pay?: boolean; checkout?: unknown };
 
-/** Destino do prêmio de cada link: { u: endereço } ou { p: chave do produto de pagamento }. */
-function prizeTargets(links: PrizeLink[]): Map<string, { u: string } | { p: string }> {
-  const out = new Map<string, { u: string } | { p: string }>();
+type PrizeTarget = Pick<PrizeInfo, "u" | "o" | "p">;
+
+/**
+ * Destino do prêmio de cada link: { u: endereço }, { p: chave do produto de
+ * pagamento } ou { u: página de checkout do site, o: chave do link }.
+ */
+function prizeTargets(links: PrizeLink[]): Map<string, PrizeTarget> {
+  const out = new Map<string, PrizeTarget>();
   for (const l of links) {
     if (l.pay) out.set(l.key, { p: l.key });
-    else {
+    else if (l.checkout === true) {
+      const u = l.url.trim();
+      if (u && SITE_PATH_RE.test(u)) out.set(l.key, { u, o: l.key });
+    } else {
       const u = safeHref(l.url);
       if (u) out.set(l.key, { u });
     }
@@ -121,7 +137,7 @@ export interface WheelRender {
 /** Dados do render a partir do HTML das páginas e dos links da oferta (com o tipo). */
 export function wheelRenderData(
   htmls: (string | null | undefined)[],
-  links: { key: string; url: string; kind?: string | null; pay?: boolean }[],
+  links: { key: string; url: string; kind?: string | null; pay?: boolean; checkout?: unknown }[],
   offerId?: string,
 ): WheelRender {
   return {
@@ -188,28 +204,75 @@ export function applyWheelPrizes(html: string, wheel: WheelRender | null | undef
   return out;
 }
 
-/**
- * Prêmios sem link de checkout numa página, sem repetir o texto. `linked`: a
- * fatia já está ligada a um link da oferta que existe, só falta o endereço
- * dele (a aba "Links e checkouts" resolve; o funil em 1 clique cria assim).
- */
-export function prizeGaps(html: string | null | undefined, links: PrizeLink[]): { text: string; linked: boolean }[] {
+/** Prêmio sem destino (prizeGaps). */
+export interface PrizeGap {
+  text: string;
+  /**
+   * A fatia já está ligada a um link da oferta que existe, só falta o
+   * endereço dele (a aba "Links e checkouts" resolve; o funil em 1 clique cria assim).
+   */
+  linked: boolean;
+  /**
+   * Ligada a um link "Checkout do Offer Studio" sem o endereço da página de
+   * checkout (o produto ainda não foi salvo, ou quem renderiza não o deu):
+   * não é falta de endereço do link.
+   */
+  own: boolean;
+}
+
+/** Prêmios sem link de checkout numa página, sem repetir o texto. */
+export function prizeGaps(html: string | null | undefined, links: PrizeLink[]): PrizeGap[] {
   const ok = new Set(prizeTargets(links).keys());
   const known = new Set(links.map((l) => l.key));
-  const out: { text: string; linked: boolean }[] = [];
+  const own = new Set(links.filter((l) => l.checkout === true).map((l) => l.key));
+  const out: PrizeGap[] = [];
   for (const wheel of wheelsIn(html)) {
     for (const s of wheel.slices) {
       if (s.lose || (s.link && ok.has(s.link))) continue;
       const linked = Boolean(s.link && known.has(s.link));
+      const isOwn = Boolean(s.link && own.has(s.link));
       const seen = out.find((g) => g.text === s.text);
-      if (!seen) out.push({ text: s.text, linked });
-      else seen.linked &&= linked;
+      if (!seen) out.push({ text: s.text, linked, own: isOwn });
+      else {
+        seen.linked &&= linked;
+        seen.own &&= isOwn;
+      }
     }
   }
   return out;
 }
 
-/** Prêmios sem link de checkout numa página ("30% OFF", …), sem repetir. */
+/**
+ * Prêmios sem link de checkout numa página ("30% OFF", …), sem repetir. Os
+ * ligados a um "Checkout do Offer Studio" sem o endereço da página ficam de
+ * fora (ownCheckoutPrizes: o aviso é outro).
+ */
 export function prizesWithoutLink(html: string | null | undefined, links: PrizeLink[]): string[] {
-  return prizeGaps(html, links).map((g) => g.text);
+  return prizeGaps(html, links)
+    .filter((g) => !g.own)
+    .map((g) => g.text);
+}
+
+/** Prêmios ligados a um "Checkout do Offer Studio" sem o endereço da página de checkout (o produto ainda não foi salvo). */
+export function ownCheckoutPrizes(html: string | null | undefined, links: PrizeLink[]): string[] {
+  return prizeGaps(html, links)
+    .filter((g) => g.own)
+    .map((g) => g.text);
+}
+
+/**
+ * Prêmios com cupom ligados a um "Checkout do Offer Studio" (sem repetir): a
+ * página de checkout não tem campo de cupom — quem ganha paga o valor do
+ * produto do link do prêmio. `checkoutKeys`: chaves dos links desse destino.
+ */
+export function ownCheckoutCoupons(html: string | null | undefined, checkoutKeys: Iterable<string>): string[] {
+  const keys = new Set(checkoutKeys);
+  const out: string[] = [];
+  for (const wheel of wheelsIn(html)) {
+    for (const s of wheel.slices) {
+      if (s.lose || !s.coupon.trim() || !keys.has(s.link) || out.includes(s.text)) continue;
+      out.push(s.text);
+    }
+  }
+  return out;
 }

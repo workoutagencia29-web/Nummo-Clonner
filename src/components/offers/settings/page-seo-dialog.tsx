@@ -5,7 +5,7 @@
  * "aparecer no Google"). Campo vazio = usa o SEO padrão da oferta.
  *
  * Carrega sozinho pelo id da página: pode ser aberto da lista de páginas do
- * funil ou da aba "Empresa e SEO".
+ * funil ou da aba "Moeda, empresa e SEO".
  *   <PageSeoDialog offerId={offerId} page={seoPage} onClose={() => setSeoPage(null)} />
  */
 import { RotateCcwIcon } from "lucide-react";
@@ -167,7 +167,7 @@ export function PageSeoDialog({
       <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-3xl">
         <DialogHeader>
           <DialogTitle>SEO da página “{page?.name ?? ""}”</DialogTitle>
-          <DialogDescription>Campos vazios usam o SEO padrão da oferta (aba “Empresa e SEO”).</DialogDescription>
+          <DialogDescription>Campos vazios usam o SEO padrão da oferta (aba “Moeda, empresa e SEO”).</DialogDescription>
         </DialogHeader>
 
         {loadedFor === pageId && loadError ? (
@@ -265,6 +265,7 @@ export function PageSeoDialog({
                   offerId={offerId}
                   label="Ícone da aba (favicon)"
                   shape="square"
+                  icon
                   value={draft.faviconSrc}
                   inheritedSrc={offerFavicon}
                   error={errors.faviconKey}

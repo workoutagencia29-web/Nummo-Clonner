@@ -19,10 +19,26 @@
  *   passam a levar ao link do prêmio — também na página que tem a roleta (o
  *   bloco solto na página de vendas, ou o "Resgatar" ligado a um checkout). O
  *   data-os-link continua: o repasse de UTMs, a marca da versão A/B e o
- *   InitiateCheckout (src/runtime/tracking) tratam o botão como checkout, como antes;
+ *   InitiateCheckout (src/runtime/tracking) tratam o botão como checkout, como antes.
+ *   Prêmio "Checkout do Offer Studio" (`o` no mapa): o botão leva à página de
+ *   checkout do link do prêmio (endereço do próprio site, já com a versão A/B
+ *   posta pelo render) e passa a ser desse link (data-os-link = `o`): o
+ *   rastreamento o trata como o botão de checkout do Offer Studio (sem
+ *   InitiateCheckout no clique — a página conta ao abrir — e com as UTMs como
+ *   num link do funil);
  * - e, fora da página da roleta (lá o prêmio aparece na própria roleta), se a
  *   roleta pede, a faixa fixa no topo com o prêmio, o cupom (copiar) e o contador
- *   de N minutos. Ao zerar, o desconto continua: a faixa só muda o texto.
+ *   de N minutos, no visual da "Contagem no topo (barra)" ("30% OFF aplicado
+ *   automaticamente! TERMINA EM 00:09:59"; com cupom, "30% OFF liberado! Use
+ *   o cupom no pagamento", porque o cupom é digitado no checkout). Ao zerar, o
+ *   desconto continua: a faixa só muda o texto ("…continua reservado").
+ *   Enquanto a faixa está aberta, ela substitui a "Contagem no topo (barra)"
+ *   da página (classe os-pz-on no <html>; a regra que esconde as barras vem no
+ *   PRIZE_CSS): nada de dois descontos e dois prazos diferentes. Fechada a
+ *   faixa, a barra da página volta.
+ *
+ * Textos da faixa no idioma da página (espanhol/inglês pelo #os-textos, ver
+ * ./texts); o padrão é o português.
  *
  * Sem prêmio (veio direto do anúncio), nada muda. O prêmio guardado é separado
  * por oferta (código data-os-oferta posto pelo render): duas ofertas no mesmo
@@ -31,16 +47,21 @@
 import { PAY_ATTR } from "@/lib/payments/contract";
 import {
   LINK_KIND_ATTR,
+  PRIZE_LINK_KEY_RE,
   PRIZE_MAP_ID,
   PRIZE_PARAM,
   type PrizeInfo,
   type PrizeMap,
   parsePrizeParam,
   SCOPE_ATTR,
+  SITE_PATH_RE,
   scopedKey,
 } from "@/lib/wheel";
 import { copyText } from "./copy";
 import { PRIZE_CSS } from "./css";
+import { pad2, splitTime } from "./options";
+import { t, tf } from "./texts";
+import { fitTop, pinTop, unpinTop } from "./top";
 import { load, save } from "./util";
 
 /** Código da oferta posto pelo render no mapa de prêmios (ou na roleta); "" = sem código. */
@@ -54,6 +75,8 @@ const key = () => scopedKey("os_premio", prizeScope());
 /** Faixa fechada nesta sessão (chave do prêmio). */
 const closedKey = () => scopedKey("os_premio_x", prizeScope());
 const DAY = 864e5;
+/** Faixa do prêmio aberta (esconde as barras de contagem da página: PRIZE_CSS). */
+const PZ_ON = "os-pz-on";
 
 /**
  * Prêmio guardado: identificador (prizeId), validade, quando ganhou, o fim do
@@ -69,7 +92,10 @@ export interface PrizeRecord {
   c?: string;
 }
 
-/** Mapa de prêmios embutido na página (só entradas com endereço http/https). */
+/**
+ * Mapa de prêmios embutido na página (só entradas com endereço http/https, com
+ * produto de pagamento ou com a página de checkout do Offer Studio no próprio site).
+ */
 export function prizeMap(): PrizeMap {
   const out: PrizeMap = {};
   let raw: unknown = null;
@@ -82,9 +108,11 @@ export function prizeMap(): PrizeMap {
   for (const k of Object.keys(raw)) {
     const p = (raw as Record<string, PrizeInfo>)[k];
     if (!p || typeof p.t !== "string") continue;
-    const url = typeof p.u === "string" && /^https?:\/\//i.test(p.u);
-    const pay = typeof p.p === "string" && /^[a-z0-9-]{1,80}$/.test(p.p);
-    if (url || pay) out[k] = p;
+    const u = typeof p.u === "string" ? p.u : "";
+    // Chave de link de pagamento e a do link de checkout: a mesma regra (PRIZE_LINK_KEY_RE).
+    const pay = typeof p.p === "string" && PRIZE_LINK_KEY_RE.test(p.p);
+    const own = typeof p.o === "string" && PRIZE_LINK_KEY_RE.test(p.o) && SITE_PATH_RE.test(u);
+    if (/^https?:\/\//i.test(u) || pay || own) out[k] = p;
   }
   return out;
 }
@@ -159,9 +187,11 @@ export function markPrizeOn() {
  * embutido): ao endereço do link do prêmio ou, quando o prêmio é um link de
  * "Pagamento na página", à janela de pagamento do produto do prêmio
  * (data-os-pay). Um botão de pagamento que ganha um prêmio com endereço deixa
- * de abrir a janela e passa a levar ao endereço.
+ * de abrir a janela e passa a levar ao endereço. Prêmio "Checkout do Offer
+ * Studio" (`o`): leva à página de checkout e o botão passa a ser do link dele
+ * (e perde a marca data-os-checkout do clonador, como no render).
  */
-export function swapCheckouts(info: Pick<PrizeInfo, "u" | "p">) {
+export function swapCheckouts(info: Pick<PrizeInfo, "u" | "p" | "o">) {
   for (const el of Array.from(document.querySelectorAll(`[${LINK_KIND_ATTR}="checkout"]`))) {
     const tag = el.tagName;
     const anchor = tag === "A" || tag === "AREA";
@@ -172,6 +202,11 @@ export function swapCheckouts(info: Pick<PrizeInfo, "u" | "p">) {
     } else if (info.u) {
       el.removeAttribute(PAY_ATTR);
       el.setAttribute(anchor ? "href" : tag === "FORM" ? "action" : "data-os-href", info.u);
+      if (info.o) {
+        el.setAttribute("data-os-link", info.o);
+        // Botão clonado: sem a marca de checkout de fora (a página de checkout conta o InitiateCheckout).
+        el.removeAttribute("data-os-checkout");
+      }
     }
   }
 }
@@ -183,16 +218,6 @@ function make<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?:
   if (cls) el.className = cls;
   if (text) el.textContent = text;
   return el;
-}
-
-const two = (n: number) => (n < 10 ? `0${n}` : String(n));
-
-/** "09:59" (ou "1:09:59" com mais de uma hora). */
-function clock(ms: number) {
-  const s = Math.max(0, Math.ceil(ms / 1000));
-  const h = Math.floor(s / 3600);
-  const m = Math.floor((s % 3600) / 60);
-  return `${h ? `${h}:${two(m)}` : two(m)}:${two(s % 60)}`;
 }
 
 /** Faixa no topo: prêmio, contador (o desconto continua depois de zerar) e cupom. */
@@ -208,63 +233,76 @@ function banner(cur: { key: string; info: PrizeInfo; rec: PrizeRecord }) {
   style.id = "os-premio-css";
   document.head.appendChild(style);
 
+  // Mesmo visual da "Contagem no topo (barra)": "30% OFF aplicado
+  // automaticamente!  TERMINA EM [00]:[09]:[59]".
   const bar = make("div", "os-pz");
   bar.setAttribute("role", "region");
-  bar.setAttribute("aria-label", "Seu desconto");
+  bar.setAttribute("aria-label", t("pzRegion", "Seu desconto"));
   const msg = make("p", "os-pz-msg");
-  const prize = () => make("b", "", info.t);
-  const time = make("b", "os-pz-t");
+  /** Frase com o prêmio em negrito no lugar do {p} (no idioma da página: #os-textos). */
+  const say = (text: string) => {
+    const parts = text.split("{p}");
+    msg.append(parts[0], make("b", "", info.t), parts[1] || "");
+  };
+  const clock = make("p", "os-pz-tm");
+  const time = make("span", "os-pz-t");
+  time.setAttribute("role", "timer");
+  clock.append(make("span", "os-pz-l", t("pzEnds", "Termina em")), time);
   const render = (left: number | null) => {
     msg.textContent = "";
     if (left !== null && left <= 0) {
-      msg.append("🎉 Seu desconto de ", prize(), " continua reservado — aproveite agora");
+      say(t("pzKept", "Seu desconto de {p} continua reservado — aproveite agora"));
+      clock.remove();
       return;
     }
-    msg.append("🎉 Você ganhou ", prize(), " — seu desconto está reservado");
-    if (left !== null) {
-      time.textContent = clock(left);
-      msg.append(" por ", time);
-    }
+    // Com cupom, o desconto não está aplicado: a pessoa digita o cupom no checkout.
+    say(
+      info.c ? t("pzCoupon", "{p} liberado! Use o cupom no pagamento") : t("pzAuto", "{p} aplicado automaticamente!"),
+    );
+    if (left === null) return;
+    // HH : MM : SS (arredonda para cima: começa em 00:10:00, não 00:09:59).
+    const hms = splitTime(Math.ceil(left / 1000) * 1000);
+    time.textContent = "";
+    [hms.h + hms.d * 24, hms.m, hms.s].forEach((n, i) => {
+      if (i) time.append(":");
+      time.appendChild(make("b", "", pad2(n)));
+    });
   };
   bar.appendChild(msg);
+  if (rec.te) bar.appendChild(clock);
   if (info.c) {
-    const chip = make("p", "os-pz-cp", "Cupom ");
+    const chip = make("p", "os-pz-cp", t("pzCode", "Cupom "));
     const code = make("code", "", info.c);
-    const copy = make("button", "", "Copiar");
+    const copy = make("button", "", t("pzCopy", "Copiar"));
     copy.type = "button";
-    copy.setAttribute("aria-label", `Copiar o cupom ${info.c}`);
+    copy.setAttribute("aria-label", tf("pzCopyLabel", "Copiar o cupom {c}", { c: info.c }));
     copy.addEventListener("click", () => copyText(info.c, copy));
     chip.append(code, copy);
     bar.appendChild(chip);
   }
   const close = make("button", "os-pz-x", "×");
   close.type = "button";
-  close.setAttribute("aria-label", "Fechar o aviso do desconto");
+  close.setAttribute("aria-label", t("pzClose", "Fechar o aviso do desconto"));
   bar.appendChild(close);
 
-  // Espaço do tamanho da faixa no começo da página: ela não cobre o topo.
-  const spacer = make("div", "os-pz-sp");
-  spacer.setAttribute("aria-hidden", "true");
-  const fit = () => {
-    spacer.style.height = `${bar.offsetHeight}px`;
-  };
-  document.body.insertBefore(spacer, document.body.firstChild);
-  document.body.insertBefore(bar, spacer);
+  // Presa no topo no lugar da "Contagem no topo" da página (escondida enquanto
+  // a faixa está aberta); a página ganha espaço do tamanho dela (não cobre o topo).
+  document.documentElement.classList.add(PZ_ON);
+  pinTop(bar, true);
 
   let ticker: ReturnType<typeof setInterval> | undefined;
   const tick = () => {
     const left = rec.te ? rec.te - Date.now() : null;
     render(left);
     if (left !== null && left <= 0) clearInterval(ticker);
-    fit();
+    fitTop();
   };
   tick();
   if (rec.te && rec.te > Date.now()) ticker = setInterval(tick, 1000);
-  addEventListener("resize", fit);
   close.addEventListener("click", () => {
     clearInterval(ticker);
-    bar.remove();
-    spacer.remove();
+    document.documentElement.classList.remove(PZ_ON);
+    unpinTop(bar);
     save(closedKey(), cur.key, true);
   });
 }

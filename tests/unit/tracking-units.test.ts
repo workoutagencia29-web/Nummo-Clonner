@@ -12,6 +12,9 @@ import {
 } from "@/lib/tracking/compose";
 import { checkConversionLabel, checkPixelId, normalizePixelId } from "@/lib/tracking/ids";
 import {
+  CONSENT_TEXT_PRESETS,
+  consentLanguageHint,
+  consentPreset,
   consentTextFor,
   DEFAULT_CONSENT_TEXT,
   DEFAULT_NOTICE_TEXT,
@@ -130,7 +133,8 @@ describe("contrato (schema)", () => {
 
   it("regra de evento: PageView não vira regra; valor/seletor exigidos por gatilho", () => {
     expect(RULE_EVENTS).not.toContain("PAGE_VIEW");
-    expect(TRACKING_EVENTS.filter((e) => e !== "PAGE_VIEW")).toEqual([...RULE_EVENTS]);
+    // AddPaymentInfo só sai da página de checkout do Offer Studio: não vira regra.
+    expect(TRACKING_EVENTS.filter((e) => e !== "PAGE_VIEW" && e !== "ADD_PAYMENT_INFO")).toEqual([...RULE_EVENTS]);
     const issue = (input: unknown) => EventRuleInputSchema.safeParse(input).error?.issues[0]?.message;
     expect(issue({ event: "PAGE_VIEW", trigger: "PAGE_LOAD" })).toMatch(/PageView já dispara sozinho/);
     expect(issue({ event: "VIEW_CONTENT", trigger: "TIME_ON_PAGE" })).toBe("Informe quantos segundos.");
@@ -326,6 +330,34 @@ describe("composeTrackingConfig (configuração pública da página)", () => {
     expect(config.forwarding.params).toEqual(["utm_source", "sck"]);
     expect(config.forwarding.persistDays).toBe(7);
     expect(config.value).toEqual({ currency: "USD", amount: 97 });
+  });
+
+  it("textos prontos do aviso em espanhol/inglês: o padrão de cada modo acompanha no mesmo idioma", () => {
+    for (const lang of ["es", "en"] as const) {
+      const p = CONSENT_TEXT_PRESETS[lang];
+      expect(consentTextFor("NOTICE", p.text)).toBe(p.noticeText);
+      expect(consentTextFor("OPT_IN", p.noticeText)).toBe(p.text);
+      expect(consentTextFor("OPT_IN", p.text)).toBe(p.text);
+      expect(consentPreset(lang, "NOTICE").text).toBe(p.noticeText);
+      expect(consentPreset(lang, "OPT_IN")).toEqual({
+        text: p.text,
+        acceptLabel: p.acceptLabel,
+        rejectLabel: p.rejectLabel,
+        noticeLabel: p.noticeLabel,
+        policyLabel: p.policyLabel,
+      });
+      // Cabem nos limites do formulário (e passam pelo esquema).
+      const parsed = parseTrackingSettings({ consent: { mode: "OPT_IN", ...consentPreset(lang, "OPT_IN") } });
+      expect(parsed.consent.acceptLabel).toBe(p.acceptLabel);
+      expect(parsed.consent.text).toBe(p.text);
+    }
+    expect(consentLanguageHint("es", "BRL")).toBe("es");
+    expect(consentLanguageHint("en", "MXN")).toBe("en");
+    expect(consentLanguageHint("", "MXN")).toBe("es");
+    expect(consentLanguageHint("pt-BR", "USD")).toBe("both");
+    expect(consentLanguageHint("", "EUR")).toBe("both");
+    expect(consentLanguageHint("", "BRL")).toBeNull();
+    expect(consentLanguageHint("pt-BR", "BRL")).toBeNull();
   });
 
   it("texto do aviso: o padrão acompanha o modo; texto escrito pela pessoa fica igual", () => {

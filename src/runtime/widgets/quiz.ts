@@ -29,7 +29,8 @@
  * pergunta ainda conta e o quiz é dado como concluído; a tela "Analisando" no
  * fim devolve o "Voltar" em vez de prender a pessoa.
  */
-import { flag, markAutoScroll, num, opt, widgets } from "./util";
+import { tf } from "./texts";
+import { flag, markAutoScroll, num, opt, reducedMotion, widgets } from "./util";
 
 const STEP = "[data-os-qz-step]";
 /** Pausa depois de marcar a opção (escolha única), para ver a marcação (ms). */
@@ -70,7 +71,7 @@ function setup(quiz: HTMLElement, position: number) {
   const fill = own("[data-os-qz-fill]")[0];
   const bar = own("[data-os-qz-bar]")[0];
   const doc = document;
-  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const reduced = reducedMotion();
 
   const live = doc.createElement("p");
   live.className = "os-qz-sr";
@@ -167,7 +168,7 @@ function setup(quiz: HTMLElement, position: number) {
     if (bar) bar.setAttribute("aria-valuenow", String(progress));
     quiz.classList.toggle("os-qz-noback", !trail.length || kind === "loading" || kind === "final");
     const n = questions.indexOf(step) + 1;
-    live.textContent = n ? `Pergunta ${n} de ${questions.length}` : "";
+    live.textContent = n ? tf("qzStep", "Pergunta {n} de {t}", { n, t: questions.length }) : "";
     syncNext(step);
     if (kind === "loading") analyze(step);
     if (kind === "final" && !finished) {
@@ -182,8 +183,11 @@ function setup(quiz: HTMLElement, position: number) {
     } catch {
       title.focus();
     }
-    // O topo do quiz saiu da tela (celular, pergunta comprida): volta para ele.
-    const top = quiz.getBoundingClientRect().top;
+    // O topo do quiz saiu da tela (celular, pergunta comprida) ou ficou embaixo
+    // de uma barra presa no topo: volta para ele, logo abaixo das barras (a
+    // altura delas fica no scroll-padding-top do <html>, src/runtime/widgets/top.ts).
+    const pad = parseFloat(getComputedStyle(document.documentElement).scrollPaddingTop) || 0;
+    const top = quiz.getBoundingClientRect().top - pad;
     if (top < 0) {
       // O popup de saída não confunde essa subida com a pessoa saindo da página.
       markAutoScroll();

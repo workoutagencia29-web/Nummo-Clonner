@@ -30,6 +30,7 @@ const CSS =
   ".b{position:fixed;z-index:2147483647;left:12px;right:12px;bottom:12px;margin:auto;max-width:720px;display:flex;flex-wrap:wrap;align-items:center;gap:12px;padding:14px;border-radius:12px;font:14px/1.45 system-ui,sans-serif;background:#111827;color:#fff;box-shadow:0 8px 30px #0005}" +
   ".l{background:#fff;color:#111827;border:1px solid #ddd}.bl,.br{max-width:380px}.bl{right:auto}.br{left:auto}" +
   "p{margin:0;flex:1 1 240px}a{color:inherit}.a{display:flex;gap:8px;margin-left:auto}" +
+  ".s{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}" +
   "button{font:inherit;font-weight:600;cursor:pointer;border-radius:8px;padding:9px 16px;border:1px solid #fff;background:#fff;color:#111827}" +
   ".l button{border-color:#111827;background:#111827;color:#fff}" +
   "button:focus-visible,a:focus-visible{outline:2px solid #fff;outline-offset:2px}.l button:focus-visible,.l a:focus-visible{outline-color:#111827}" +
@@ -64,10 +65,13 @@ export function showBanner(cfg: Cfg, notice: boolean, onChoice: (c: Choice) => v
     const c = cfg.consent;
     const back = doc.activeElement as HTMLElement | null;
     const pos = c.position === "bottom-left" ? "bl" : c.position === "bottom-right" ? "br" : "";
-    // Textos da configuração entram por textContent/href (nunca como HTML).
+    // Textos da configuração entram por textContent/href (nunca como HTML). Tudo
+    // já no tamanho final (nada cresce depois de aparecer); o leitor de tela ouve
+    // o texto pela região .s (escondida na tela), preenchida logo depois — o
+    // texto à mostra fica fora da leitura para não ser lido duas vezes.
     const root = shadowHost(
       "os-consent",
-      `<div class="b ${c.theme === "light" ? "l " : ""}${pos}" role="region" aria-label="Aviso de cookies"><p aria-live="polite"><span></span> <a target="_blank" rel="noopener"></a></p><div class="a"><button type="button"></button><button type="button"></button></div></div>`,
+      `<div class="b ${c.theme === "light" ? "l " : ""}${pos}" role="region" aria-label="Aviso de cookies"><p><span aria-hidden="true"></span><span class="s" aria-live="polite"></span> <a target="_blank" rel="noopener"></a></p><div class="a"><button type="button"></button><button type="button"></button></div></div>`,
     );
     const el = root.host as HTMLElement;
     host = el;
@@ -82,10 +86,11 @@ export function showBanner(cfg: Cfg, notice: boolean, onChoice: (c: Choice) => v
     reject.textContent = c.rejectLabel || "Recusar";
     accept.textContent = notice ? c.noticeLabel || "Entendi" : c.acceptLabel || "Aceitar";
     if (notice) reject.remove();
-    // O texto entra depois da região existir: assim o leitor de tela anuncia.
     const text = c.text || "";
+    q("span").textContent = text;
+    // Na região de anúncio, o texto entra depois de ela existir: assim o leitor de tela anuncia.
     setTimeout(() => {
-      q("span").textContent = text;
+      q(".s").textContent = text;
     });
     const choose = (choice: Choice) => () => {
       el.remove();

@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { z } from "zod";
+import { STORE_CURRENCY_IDS } from "@/lib/store";
 import { protectedAction } from "@/server/action";
 import * as offers from "@/server/services/offers";
 import { PAGE_TEMPLATE_IDS } from "@/server/services/page-templates";
@@ -30,6 +31,8 @@ export const createOfferAction = protectedAction(
     tagIds: z.array(id).max(30).default([]),
     notes: z.string().trim().max(2000).nullish(),
     templateId: z.enum(PAGE_TEMPLATE_IDS, "Modelo de página inválido.").optional(),
+    /** "Em qual moeda essa oferta vai rodar?" (fica marcada na próxima). */
+    currency: z.enum(STORE_CURRENCY_IDS, "Escolha a moeda da oferta.").optional(),
   }),
   async (input) => {
     const offer = await offers.createOffer(input);

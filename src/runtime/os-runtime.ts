@@ -8,7 +8,9 @@
  *   aparecem depois do tempo configurado. Na prévia, ?os_mostrar_delay=1 mostra tudo.
  * - Widgets dos blocos do editor (data-os-widget): contador, barra de escassez,
  *   notificação de compra, popup de saída, formulário de captura, player VTurb,
- *   quiz e roleta de desconto (src/runtime/widgets). Nada disso roda dentro do editor.
+ *   quiz, roleta de desconto e loja — busca do cabeçalho de loja, setas do
+ *   carrossel de produtos e cabeçalho fixo (src/runtime/widgets). Nada disso
+ *   roda dentro do editor.
  * - Prêmio da roleta nas outras páginas da oferta (src/runtime/widgets/prize.ts):
  *   botões de checkout com o link do desconto, faixa com o contador e
  *   visibilidade "só para quem ganhou".
@@ -32,6 +34,7 @@ import { initPrize } from "./widgets/prize";
 import { initQuizzes } from "./widgets/quiz";
 import { initSalesNotifications } from "./widgets/sales-notification";
 import { initScarcity } from "./widgets/scarcity";
+import { initStore } from "./widgets/store";
 import { addCss, isPreview, navigate } from "./widgets/util";
 import { initVturb } from "./widgets/vturb";
 import { initWheels, keepWheelHrefs } from "./widgets/wheel";
@@ -189,6 +192,8 @@ interface OsWindow extends Window {
       initVturb,
       initQuizzes,
       initWheels,
+      // Depois dos contadores: o cabeçalho fixo fica embaixo da "Contagem no topo (barra)".
+      initStore,
     ]) {
       try {
         init();

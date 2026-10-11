@@ -30,11 +30,17 @@ export interface PaymentRender {
    * Sem ela, o script vai embutido na página.
    */
   scriptTag?: string;
+  /**
+   * A oferta tem checkout do Offer Studio: mesmo sem produto de "Pagamento na
+   * página", a página leva o #os-pagamento e o script (o bloco "Acesso ao
+   * produto" da página de obrigado pergunta ao endpoint pelo pedido pago).
+   */
+  checkout?: boolean;
 }
 
-/** Configuração embutida na página (null = a oferta não tem produto de pagamento). */
+/** Configuração embutida na página (null = a oferta não tem produto de pagamento nem checkout). */
 export function paymentPageConfig(render: PaymentRender | null | undefined): PaymentPageConfig | null {
-  if (!render || !Object.keys(render.products).length) return null;
+  if (!render || (!Object.keys(render.products).length && !render.checkout)) return null;
   return {
     v: PAYMENT_CONFIG_VERSION,
     endpoint: render.endpoint,

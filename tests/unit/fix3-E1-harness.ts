@@ -87,7 +87,13 @@ const stubs: Plugin = {
         loader: "js",
         contents: `
           const calls = (window.__toasts = []);
-          const rec = (type) => (message, opts) => { calls.push({ type, message, id: opts && opts.id, description: opts && opts.description }); return (opts && opts.id) || calls.length; };
+          const clicks = (window.__toastActions = []);
+          const rec = (type) => (message, opts) => {
+            const action = opts && opts.action;
+            calls.push({ type, message, id: opts && opts.id, description: opts && opts.description, action: action ? action.label : undefined });
+            clicks.push(action ? action.onClick : null);
+            return (opts && opts.id) || calls.length;
+          };
           export const toast = Object.assign(rec("default"), { success: rec("success"), error: rec("error"), warning: rec("warning"), info: rec("info"), loading: rec("loading"), dismiss: (id) => calls.push({ type: "dismiss", id }) });`,
       };
     });
@@ -119,6 +125,8 @@ const stubs: Plugin = {
       ],
       // "Adicionar funil Quiz → Roleta" na lista de páginas (Fase 2B do funil com quiz).
       funnel: ["createQuizWheelFunnelAction"],
+      // "＋ Criar página deste produto" / "Criar as páginas que faltam" (vitrine de produtos).
+      store: ["createProductPagesAction"],
     };
     b.onLoad({ filter: /.*/, namespace: "action" }, (args) => {
       const names = ACTIONS[args.path];
@@ -177,6 +185,8 @@ export interface Put {
   status: number;
   html: string;
   css: string;
+  /** Moeda da oferta que o editor conhecia ao gravar. */
+  currency?: string;
 }
 
 export type LogEntry =
@@ -199,6 +209,13 @@ export class FakeServer {
   putDelayMs = 0;
   versions: unknown[] = [];
   restores = 0;
+  /**
+   * Moeda da oferta "agora" (trocada com o editor aberto): o 409 e o 200
+   * respondem com ela, como saveEditorDocument. null = não responde moeda.
+   */
+  offerCurrency: string | null = null;
+  /** Vitrines e caixas que cada gravação passa para offerCurrency quando o editor manda outra moeda. */
+  currencySwitchedOnPut = 0;
 
   get puts(): Put[] {
     return this.log.flatMap((e) => (e.kind === "put" ? [e.put] : []));
@@ -264,10 +281,23 @@ export class FakeServer {
         });
       }
       if (req.method() === "PUT" && doc) {
-        const body = JSON.parse(req.postData() ?? "{}") as { revision: number; html: string; css: string };
+        const body = JSON.parse(req.postData() ?? "{}") as {
+          revision: number;
+          html: string;
+          css: string;
+          currency?: string;
+        };
         if (this.putDelayMs) await new Promise((r) => setTimeout(r, this.putDelayMs));
         const fail = this.failNext.shift();
-        const put: Put = { id: m[1], revision: body.revision, status: 0, html: body.html, css: body.css };
+        const put: Put = {
+          id: m[1],
+          revision: body.revision,
+          status: 0,
+          html: body.html,
+          css: body.css,
+          ...(body.currency && { currency: body.currency }),
+        };
+        const currency = this.offerCurrency ? { currency: this.offerCurrency } : {};
         if (fail === "abort") {
           put.status = -1;
           this.log.push({ kind: "put", put });
@@ -288,15 +318,25 @@ export class FakeServer {
           return route.fulfill({
             status: 409,
             contentType: "application/json",
-            body: JSON.stringify({ revision: doc.revision, error: "Esta página foi alterada em outra aba ou janela." }),
+            body: JSON.stringify({
+              revision: doc.revision,
+              error: "Esta página foi alterada em outra aba ou janela.",
+              ...currency,
+            }),
           });
         }
         doc.revision++;
         put.status = 200;
         this.log.push({ kind: "put", put });
+        const switched = this.offerCurrency && body.currency && body.currency !== this.offerCurrency;
         return route.fulfill({
           contentType: "application/json",
-          body: JSON.stringify({ revision: doc.revision, savedAt: new Date().toISOString() }),
+          body: JSON.stringify({
+            revision: doc.revision,
+            savedAt: new Date().toISOString(),
+            ...currency,
+            ...(this.offerCurrency && { currencySwitched: switched ? this.currencySwitchedOnPut : 0 }),
+          }),
         });
       }
     }
@@ -459,7 +499,19 @@ export function setActionResult(s: Session, name: string, fn: string) {
 export function toasts(s: Session) {
   return s.page.evaluate(
     () =>
-      (window as unknown as { __toasts: { type: string; message: string; id?: string; description?: string }[] })
-        .__toasts,
+      (
+        window as unknown as {
+          __toasts: { type: string; message: string; id?: string; description?: string; action?: string }[];
+        }
+      ).__toasts,
   );
+}
+
+/** Clica no botão de ação ("Abrir"…) do n-ésimo toast. */
+export function clickToastAction(s: Session, index: number) {
+  return s.page.evaluate((i) => {
+    const fn = (window as unknown as { __toastActions: (null | (() => void))[] }).__toastActions[i];
+    if (!fn) throw new Error(`toast ${i} sem ação`);
+    fn();
+  }, index);
 }

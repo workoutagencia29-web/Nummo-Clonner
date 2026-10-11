@@ -8,6 +8,8 @@
  *   WebP animado é reprocessado mantendo os quadros.
  * - SVG passa por uma limpeza: sem <script>, sem atributos on*, sem links
  *   javascript:, sem <foreignObject>.
+ * - Ícone .ico (favicon) não passa pelo sharp (ele não lê ICO): é conferido
+ *   pelos bytes (src/lib/ico.ts), com limite de 1 MB, e guardado como veio.
  * - Arquivos são guardados pelo hash (src/lib/storage.ts) e ligados à oferta
  *   por uma linha Asset. O editor recebe no formato do GrapesJS:
  *   { type: "image", src: "/os-assets/<sha>.<ext>", name, width, height }.
@@ -16,7 +18,9 @@ import { load } from "cheerio";
 import type { AnyNode, Element } from "domhandler";
 import sharp, { type Metadata } from "sharp";
 import { prisma } from "@/lib/db";
+import { xmlProlog } from "@/lib/doctype";
 import { UserError, uniqueViolationFields } from "@/lib/errors";
+import { ICO_MAX_BYTES, looksLikeIco, readIco } from "@/lib/ico";
 import { putContentAddressed } from "@/lib/storage";
 import { createFetcher, type Fetcher } from "@/worker/clone/fetcher";
 
@@ -24,6 +28,8 @@ import { createFetcher, type Fetcher } from "@/worker/clone/fetcher";
 export const IMAGE_UPLOAD_LIMITS = {
   /** Tamanho máximo de cada arquivo enviado. */
   maxFileBytes: 15 * 1024 * 1024,
+  /** Tamanho máximo de um ícone .ico (guardado como veio, sem conversão). */
+  maxIconBytes: ICO_MAX_BYTES,
   /** Quantidade máxima de arquivos por envio. */
   maxFiles: 20,
   /** Pixels máximos na entrada (protege contra "bombas" de descompressão). */
@@ -37,11 +43,11 @@ export const IMAGE_UPLOAD_LIMITS = {
 } as const;
 
 /** Formatos aceitos (detectados pelo conteúdo, não pelo nome). */
-export type ImageFormat = "jpeg" | "png" | "webp" | "gif" | "avif" | "svg";
+export type ImageFormat = "jpeg" | "png" | "webp" | "gif" | "avif" | "svg" | "ico";
 
 const ASSET_PREFIX = "/os-assets/";
 const STORAGE_KEY_RE = /^a\/[0-9a-f]{2}\/([0-9a-f]{64}\.[a-z0-9]{1,8})$/;
-const ACCEPTED_TEXT = "JPG, PNG, WebP, GIF, AVIF ou SVG";
+const ACCEPTED_TEXT = "JPG, PNG, WebP, GIF, AVIF, SVG ou ICO";
 
 /** Erro com mensagem para o usuário e o status HTTP adequado. */
 export class AssetError extends UserError {
@@ -63,7 +69,7 @@ export interface ImageUploadInput {
 
 export interface ProcessedImage {
   data: Uint8Array;
-  ext: "webp" | "gif" | "avif" | "svg";
+  ext: "webp" | "gif" | "avif" | "svg" | "ico";
   mime: string;
   width: number | null;
   height: number | null;
@@ -119,6 +125,16 @@ const tooLarge = (name: string, bytes: number) =>
 const unsupported = (name: string) => new AssetError(`"${name}" não é uma imagem aceita. Envie ${ACCEPTED_TEXT}.`, 415);
 const unreadable = (name: string) =>
   new AssetError(`Não foi possível ler "${name}". O arquivo pode estar corrompido.`, 422);
+const iconTooLarge = (name: string, bytes: number) =>
+  new AssetError(
+    `"${name}" tem ${formatMb(bytes)}. Um ícone .ico pode ter no máximo 1 MB (ícones de aba costumam ter poucos KB).`,
+    413,
+  );
+const badIcon = (name: string) =>
+  new AssetError(
+    `"${name}" não é um ícone .ico válido: o arquivo pode estar corrompido. Exporte o ícone de novo ou envie um PNG.`,
+    422,
+  );
 const tooManyPixels = (name: string) =>
   new AssetError(
     `"${name}" tem resolução grande demais (acima de 50 megapixels). Reduza a imagem e envie de novo.`,
@@ -140,9 +156,17 @@ function decodeText(data: Uint8Array): string {
   return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }
 
-/** Início típico de um SVG: declaração XML, comentários e DOCTYPE opcionais e <svg. */
-const SVG_START =
-  /^\s*(?:<\?xml[\s\S]*?\?>\s*)?(?:(?:<!--[\s\S]*?-->|<!DOCTYPE[^[>]*(?:\[[\s\S]*?\])?\s*>|<\?[\s\S]*?\?>)\s*)*<(?:[a-z_][\w.-]*:)?svg[\s>/]/i;
+/** Elemento raiz de um SVG (com ou sem prefixo), logo depois do prólogo. */
+const SVG_ROOT_RE = /<(?:[a-z_][\w.-]*:)?svg[\s>/]/iy;
+
+/**
+ * Início típico de um SVG: declaração XML, comentários, instruções e DOCTYPE
+ * opcionais (lidos por `xmlProlog`, em tempo linear) e <svg.
+ */
+function startsLikeSvg(text: string): boolean {
+  SVG_ROOT_RE.lastIndex = xmlProlog(text).end;
+  return SVG_ROOT_RE.test(text);
+}
 
 /** Descobre o formato pelos primeiros bytes. null = não é um formato aceito. */
 export function sniffImageFormat(data: Uint8Array): ImageFormat | null {
@@ -151,8 +175,9 @@ export function sniffImageFormat(data: Uint8Array): ImageFormat | null {
   if (data.length >= 6 && /^GIF8[79]a$/.test(ascii(data, 0, 6))) return "gif";
   if (data.length >= 12 && ascii(data, 0, 4) === "RIFF" && ascii(data, 8, 12) === "WEBP") return "webp";
   if (ftypBrands(data).some((b) => b === "avif" || b === "avis")) return "avif";
+  if (looksLikeIco(data)) return "ico";
   if (data[0] === 0x3c || data[0] === 0xef || data[0] === 0xff || data[0] === 0xfe || data[0] <= 0x20) {
-    if (SVG_START.test(decodeText(data.subarray(0, 8192)))) return "svg";
+    if (startsLikeSvg(decodeText(data.subarray(0, 8192)))) return "svg";
   }
   return null;
 }
@@ -200,11 +225,31 @@ const BLOCKED_ELEMENTS = new Set([
   "audio",
   "video",
 ]);
+/**
+ * Limpeza leve (SVGs baixados na clonagem): só sai o que roda código ou abre
+ * outro documento na origem do site — o desenho (foreignObject, <style>,
+ * @import de fontes) fica como veio.
+ */
+const ACTIVE_ELEMENTS = new Set([
+  "script",
+  "handler",
+  "listener",
+  "iframe",
+  "frame",
+  "frameset",
+  "embed",
+  "object",
+  "applet",
+  "base",
+  "meta",
+]);
 const ANIMATION_ELEMENTS = new Set(["animate", "set", "animatetransform", "animatemotion", "animatecolor"]);
 /** Atributos que carregam endereços (href, xlink:href, valores animados…). */
 const URL_ATTRIBUTES = new Set(["href", "src", "action", "formaction", "from", "to", "values", "by"]);
 /** data: permitido só para imagens comuns embutidas. */
 const SAFE_DATA_URL = /^data:image\/(?:png|jpe?g|gif|webp|avif);/;
+/** Na limpeza leve: qualquer imagem embutida (dentro de uma imagem, um SVG não roda scripts). */
+const IMAGE_DATA_URL = /^data:image\//;
 const DANGEROUS_CSS = /expression\s*\(|javascript:|vbscript:|-moz-binding|behavior\s*:/i;
 
 const localName = (name: string) => (name.split(":").pop() ?? name).toLowerCase();
@@ -219,14 +264,16 @@ const compact = (value: string) => value.replace(/[\x00-\x20\x7f-\xa0\u200b-\u20
  * entidades aninhadas — nada de expansão exponencial.
  */
 function expandSimpleEntities(text: string): string {
-  const doctype = /<!DOCTYPE[^[>]*\[([\s\S]*?)\]\s*>/i.exec(text);
-  if (!doctype) return text;
+  // Só o DOCTYPE do prólogo (antes do <svg>), lido em tempo linear.
+  const doctype = xmlProlog(text).doctypes.find((d) => d.subset !== null);
+  if (!doctype?.subset) return text;
+  const subset = doctype.subset;
   const entities = new Map<string, string>();
   const re = /<!ENTITY\s+([A-Za-z_][\w.-]*)\s+(?:"([^"%&<]{0,2000})"|'([^'%&<]{0,2000})')\s*>/g;
-  for (let m = re.exec(doctype[1]); m && entities.size < 100; m = re.exec(doctype[1])) {
+  for (let m = re.exec(subset); m && entities.size < 100; m = re.exec(subset)) {
     entities.set(m[1], m[2] ?? m[3] ?? "");
   }
-  const body = text.slice(0, doctype.index) + text.slice(doctype.index + doctype[0].length);
+  const body = text.slice(0, doctype.start) + text.slice(doctype.end);
   if (!entities.size) return body;
   return body.replace(/&([A-Za-z_][\w.-]*);/g, (all, name: string) => {
     const value = entities.get(name);
@@ -246,6 +293,18 @@ export interface SanitizedSvg {
   svg: string;
   width: number | null;
   height: number | null;
+  /** Quantos elementos/atributos/instruções que rodam código saíram. */
+  removed: number;
+}
+
+export interface SanitizeSvgOptions {
+  /**
+   * Limpeza leve (SVGs baixados na clonagem): tira só o que executa código —
+   * scripts, handler/listener, atributos on*, endereços javascript:, data: que
+   * não seja imagem, iframes/objetos e animações que trocam href/on* — e mantém
+   * foreignObject, HTML dentro dele e <style> como vieram.
+   */
+  keepContent?: boolean;
 }
 
 /**
@@ -253,7 +312,10 @@ export interface SanitizedSvg {
  * <svg> raiz (declarações, DOCTYPE e instruções de processamento — inclusive
  * <?xml-stylesheet?> — ficam de fora). Lança AssetError se não houver <svg>.
  */
-export function sanitizeSvg(text: string, name = "imagem.svg"): SanitizedSvg {
+export function sanitizeSvg(text: string, name = "imagem.svg", options: SanitizeSvgOptions = {}): SanitizedSvg {
+  const keep = options.keepContent === true;
+  // <?xml-stylesheet?> pode trazer XSLT (que monta scripts): fica de fora da saída.
+  let removed = /<\?xml-stylesheet\b/i.test(text) ? 1 : 0;
   const $ = load(expandSimpleEntities(text), { xml: true });
   const root = $.root()
     .children()
@@ -288,8 +350,10 @@ export function sanitizeSvg(text: string, name = "imagem.svg"): SanitizedSvg {
     const animatesDangerous =
       ANIMATION_ELEMENTS.has(local) &&
       /^(?:on|href$)/.test(localName(el.attribs.attributeName ?? el.attribs.attributename ?? ""));
-    if (BLOCKED_ELEMENTS.has(local) || isHtml || animatesDangerous) {
+    const blocked = keep ? ACTIVE_ELEMENTS.has(local) : BLOCKED_ELEMENTS.has(local) || isHtml;
+    if (blocked || animatesDangerous) {
       $(el).remove();
+      removed++;
       return;
     }
     for (const [attr, value] of Object.entries(el.attribs)) {
@@ -298,11 +362,14 @@ export function sanitizeSvg(text: string, name = "imagem.svg"): SanitizedSvg {
       const bad =
         attrLocal.startsWith("on") ||
         /(?:java|vb|live)script:/.test(v) ||
-        (URL_ATTRIBUTES.has(attrLocal) && v.startsWith("data:") && !SAFE_DATA_URL.test(v)) ||
-        (attrLocal === "style" && DANGEROUS_CSS.test(value));
-      if (bad) $(el).removeAttr(attr);
+        (URL_ATTRIBUTES.has(attrLocal) && v.startsWith("data:") && !(keep ? IMAGE_DATA_URL : SAFE_DATA_URL).test(v)) ||
+        (!keep && attrLocal === "style" && DANGEROUS_CSS.test(value));
+      if (bad) {
+        $(el).removeAttr(attr);
+        removed++;
+      }
     }
-    if (local === "style") {
+    if (local === "style" && !keep) {
       const css = $(el).text();
       if (DANGEROUS_CSS.test(css)) {
         $(el).remove();
@@ -334,7 +401,36 @@ export function sanitizeSvg(text: string, name = "imagem.svg"): SanitizedSvg {
       height = Math.round(viewBox[3]);
     }
   }
-  return { svg: $.xml(root), width: width || null, height: height || null };
+  return { svg: $.xml(root), width: width || null, height: height || null, removed };
+}
+
+/**
+ * SVG baixado na clonagem: no ZIP ele vai para o domínio do usuário, e abrir o
+ * endereço do arquivo direto rodaria os scripts do dono da página copiada.
+ * Passa pela limpeza leve (`keepContent`) — como imagem ou fundo os scripts
+ * nunca rodam, então o desenho não muda. SVG sem nada que rode código fica
+ * byte a byte igual.
+ *
+ * Só fica como veio o que a limpeza leu do mesmo jeito que o navegador lê:
+ * - DOCTYPE com declarações entre colchetes (entidades): o navegador expande
+ *   `&x;` em marcação — um <script> escondido numa entidade não aparece para a
+ *   limpeza. Sai sempre a versão limpa (sem o DOCTYPE, com as entidades simples
+ *   já trocadas pelo valor);
+ * - o que não é um SVG (outra raiz, como <html> ou <g>, ou um arquivo que não dá
+ *   para ler): null — não pode ir como .svg (quem chama guarda com outra extensão;
+ *   como imagem ele já não aparecia).
+ */
+export function cleanClonedSvg(data: Buffer): Buffer | null {
+  try {
+    const text = decodeText(data);
+    if (!startsLikeSvg(text)) return null;
+    const clean = sanitizeSvg(text, "imagem.svg", { keepContent: true });
+    const entities = xmlProlog(text).doctypes.some((d) => d.subset !== null);
+    if (!clean.removed && !entities) return data;
+    return Buffer.from(`<?xml version="1.0" encoding="UTF-8"?>\n${clean.svg}`, "utf8");
+  } catch {
+    return null;
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -360,6 +456,8 @@ export async function processImage(input: { name: string; data: Uint8Array }): P
 
   const format = sniffImageFormat(data);
   if (!format) {
+    // ".ico" que não passa nem pelo cabeçalho: ícone estragado (não "formato errado").
+    if (/\.ico$/i.test(name) && data[0] === 0 && data[1] === 0) throw badIcon(name);
     if (/\.(heic|heif)$/i.test(name) || ftypBrands(data).some((b) => HEIC_BRANDS.has(b))) {
       throw new AssetError(
         `"${name}" está no formato HEIC (fotos do iPhone). Exporte como JPG ou PNG e envie de novo.`,
@@ -367,6 +465,13 @@ export async function processImage(input: { name: string; data: Uint8Array }): P
       );
     }
     throw unsupported(name);
+  }
+
+  if (format === "ico") {
+    if (data.byteLength > L.maxIconBytes) throw iconTooLarge(name, data.byteLength);
+    const icon = readIco(data);
+    if (!icon) throw badIcon(name);
+    return { data, ext: "ico", mime: "image/x-icon", width: icon.width, height: icon.height };
   }
 
   if (format === "svg") {
@@ -585,7 +690,7 @@ export async function importOfferImageFromUrl(
     } catch (err) {
       if (err instanceof AssetError && err.status === 415) {
         throw new AssetError(
-          'Esse link não é de uma imagem (JPG, PNG, WebP, GIF, AVIF ou SVG). Abra a imagem no navegador, clique com o botão direito e use "Copiar endereço da imagem".',
+          `Esse link não é de uma imagem (${ACCEPTED_TEXT}). Abra a imagem no navegador, clique com o botão direito e use "Copiar endereço da imagem".`,
           415,
         );
       }

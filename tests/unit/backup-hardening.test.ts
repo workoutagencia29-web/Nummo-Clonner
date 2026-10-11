@@ -5,6 +5,8 @@
  * linha gigante, chave "/."), limpeza que apagaria o backup escolhido, pasta
  * escolhida dentro da pasta de dados, dois pedidos de restauração ao mesmo
  * tempo, backup trocado depois da confirmação e dois workers no mesmo banco.
+ * Também: pasta ou arquivo do storage sem permissão de leitura (o backup
+ * termina, avisa e registra o que ficou de fora — antes sumia calado).
  */
 import { createHash } from "node:crypto";
 import { chmod, copyFile, mkdir, readdir, readFile, rm, stat, symlink, truncate, writeFile } from "node:fs/promises";
@@ -26,6 +28,8 @@ import {
   READ_IO_MESSAGE,
   READ_STALLED_MESSAGE,
   RESTORE_NO_SPACE_MESSAGE,
+  UNREADABLE_FILES_RE,
+  unreadableFilesWarning,
 } from "@/server/services/backup/format";
 import {
   BACKUP_CHANGED_MESSAGE,
@@ -392,6 +396,98 @@ describe("arquivo de backup forjado", () => {
       edit: (name, buf) => (name === `storage/${hashKeys[0]}` ? null : buf),
     });
     await expectUserError(readBackupManifest(missing), DAMAGED_MESSAGE);
+  });
+});
+
+describe("arquivos sem permissão de leitura no storage", () => {
+  it("pasta e arquivos que não abrem: o backup termina, avisa e registra o que ficou de fora", async () => {
+    // Cópia própria do storage (o chmod nunca toca a pasta de dados compartilhada dos testes).
+    const root = path.join(work, "storage-sem-permissao");
+    const keys = (await indexLines(backup.filePath)).map((l) => l.key);
+    for (const key of keys) {
+      const dest = path.join(root, ...key.split("/"));
+      await mkdir(path.dirname(dest), { recursive: true });
+      await copyFile(storagePath(key), dest);
+    }
+    const prefixOf = (key: string) => key.split("/")[1];
+    // Um PNG citado direto no banco (a cópia é que não abre), um HTML de clonagem
+    // (lido atrás de referências) e uma pasta a/<xx> inteira.
+    const deniedFile = data.hidden.inProject;
+    const deniedText = data.hidden.cloneHtml;
+    const folderPrefix = [data.hidden.inVersion, ...hashKeys]
+      .map(prefixOf)
+      .find((p) => p !== prefixOf(deniedFile) && p !== prefixOf(data.hidden.inClone)) as string;
+    const folder = path.join(root, "a", folderPrefix);
+    const locked = [path.join(root, ...deniedFile.split("/")), path.join(root, ...deniedText.split("/")), folder];
+    for (const target of locked) await chmod(target, 0o000);
+    let created: CreatedBackup;
+    try {
+      created = await createBackupArchive({
+        folder: path.join(work, "sem-permissao"),
+        kind: "AUTO",
+        installId: "os-teste",
+        storageRoot: root,
+      });
+    } finally {
+      await chmod(folder, 0o755);
+      for (const file of locked.slice(0, 2)) await chmod(file, 0o644);
+    }
+
+    expect(created.warnings).toContain(unreadableFilesWarning(2, 1));
+    expect(unreadableFilesWarning(2, 1)).toBe(
+      "2 arquivos não puderam ser lidos (sem permissão) e ficaram de fora do backup. 1 pasta de arquivos não pôde ser lida (sem permissão) e o que estava nela ficou de fora do backup.",
+    );
+    expect(created.manifest.storage.missing).toEqual(
+      expect.arrayContaining([deniedFile, deniedText, `a/${folderPrefix}/`]),
+    );
+    const lines = (await indexLines(created.filePath)).map((l) => l.key);
+    expect(lines).not.toContain(deniedFile);
+    expect(lines).not.toContain(deniedText);
+    expect(lines.filter((k) => k.startsWith(`a/${folderPrefix}/`))).toEqual([]);
+    // O que só o HTML ilegível citava também ficou de fora; o resto foi.
+    expect(lines).not.toContain(data.hidden.inClone);
+    expect(lines).toContain(data.hidden.version);
+    expect(lines).toContain(data.hidden.cloneShot);
+    expect(lines.length).toBeGreaterThan(2);
+
+    // O backup continua restaurável, com o que deu para ler.
+    const fresh = path.join(work, "storage-restaurado-sem-permissao");
+    const result = await restoreBackup({
+      filePath: created.filePath,
+      storageRoot: fresh,
+      tmpRoot: path.join(work, "tmp"),
+    });
+    expect(result.filesCopied).toBe(created.manifest.storage.files);
+    expect(result.warnings.some((w) => /não estavam no backup/.test(w))).toBe(true);
+
+    // A saúde do backup mostra o aviso (o automático não tem toast).
+    const health = backupHealth(
+      {
+        now: new Date(),
+        auto: true,
+        running: false,
+        lastSuccessAt: new Date(),
+        lastFailure: null,
+        folderProblem: null,
+        lastWarning: created.warnings.find((w) => UNREADABLE_FILES_RE.test(w)),
+      },
+      () => "agora",
+    );
+    expect(health.level).toBe("warn");
+    expect(health.title).toBe("Último backup com arquivos de fora");
+    expect(health.detail).toContain("sem permissão");
+  }, 120_000);
+
+  it("textos do aviso (singular, plural e erro que não é de permissão)", () => {
+    expect(unreadableFilesWarning(1, 0)).toBe("1 arquivo não pôde ser lido (sem permissão) e ficou de fora do backup.");
+    expect(unreadableFilesWarning(0, 2)).toBe(
+      "2 pastas de arquivos não puderam ser lidas (sem permissão) e o que estava nelas ficou de fora do backup.",
+    );
+    expect(unreadableFilesWarning(3, 0, false)).toBe("3 arquivos não puderam ser lidos e ficaram de fora do backup.");
+    for (const w of [unreadableFilesWarning(1, 0), unreadableFilesWarning(0, 2), unreadableFilesWarning(3, 0, false)]) {
+      expect(w).toMatch(UNREADABLE_FILES_RE);
+    }
+    expect(corruptFilesWarning(1)).not.toMatch(UNREADABLE_FILES_RE);
   });
 });
 

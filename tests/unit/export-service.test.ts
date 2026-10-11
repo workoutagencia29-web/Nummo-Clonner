@@ -99,12 +99,12 @@ describe("ZIP completo (A/B, celular, legal, Preservar JS, eventos.php)", () => 
     expect(view.step).toBe("Pronto para baixar");
     expect(view.fileName).toMatch(/^oferta-teste-exportacao-\d{4}-\d{2}-\d{2}-\d{4}\.zip$/);
     expect(view.bytes).toBeGreaterThan(1000);
-    expect(view.options).toEqual({ splitter: true, serverEvents: true, optimizeHtml: true });
+    expect(view.options).toEqual({ splitter: true, serverEvents: true, optimizeHtml: true, lighterImages: true });
     const warnings = view.warnings.join("\n");
-    expect(warnings).toContain("“Quiz” usa “Preservar JS”: suba a oferta na raiz do domínio");
+    expect(warnings).toContain("“Quiz” usa o modo “Com scripts”: suba a oferta na raiz do domínio");
     expect(warnings).toContain("O eventos.php só funciona em hospedagem com PHP");
     expect(warnings).toContain("preencha “Onde está no ar”");
-    expect(warnings).toContain("1 arquivo(s) do “Preservar JS” tinham o mesmo caminho");
+    expect(warnings).toContain("1 arquivo(s) das páginas “Com scripts” tinham o mesmo caminho");
     expect(warnings).not.toContain("não foram encontrados");
   });
 
@@ -299,7 +299,8 @@ describe("ZIP completo (A/B, celular, legal, Preservar JS, eventos.php)", () => 
     expect(readme).toContain("oferta-b/  →  versão B (Headline nova) (50% das visitas)");
     expect(readme).toContain("upsell/index.html  →  Upsell (com versão celular)");
     expect(readme).toContain("Meta (API de Conversões), TikTok (Events API)");
-    expect(readme).toContain('PÁGINAS "PRESERVAR JS"');
+    expect(readme).toContain('PÁGINAS "COM SCRIPTS"');
+    expect(readme).not.toContain("Preservar JS");
     expect(readme).toContain("AVISOS DESTA EXPORTAÇÃO");
   });
 
@@ -550,7 +551,9 @@ describe("prévia do ZIP (exportPlan)", () => {
     ]);
     expect(plan.tree[0].label).toBe("Divisor A/B de “Página principal” (A 50% · B 50%)");
     expect(plan.tree[2].label).toBe("Página principal — versão B (Headline nova) · 50%");
-    expect(plan.warnings.join("\n")).toContain("Preservar JS");
+    expect(plan.warnings.join("\n")).toContain("“Com scripts”");
+    expect(plan.warnings.join("\n")).not.toContain("Preservar JS");
+    expect(plan.tree.map((t) => t.label).join("\n")).not.toContain("Preservar JS");
   });
 
   it("opções padrão: sem eventos.php; sem divisor a raiz é a versão A", async () => {

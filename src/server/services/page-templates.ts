@@ -12,12 +12,14 @@ import {
   type TemplatePageType,
   type TemplateSummary,
   TODAY_MARKER,
+  templateHtmlFor,
   YEAR_MARKER,
 } from "@/editor/templates";
 import { THUMBNAILS } from "@/editor/templates/thumbnails";
 import type { PageType } from "@/generated/prisma/client";
 import { UserError } from "@/lib/errors";
 import { putContentAddressed } from "@/lib/storage";
+import { DEFAULT_CURRENCY, type StoreCurrency } from "@/lib/store";
 import { blankPageHtml } from "@/lib/templates";
 
 /** IDs aceitos (para validar com z.enum nas server actions). */
@@ -69,13 +71,19 @@ function yearOf(now: Date) {
 
 /**
  * HTML inicial de uma página criada a partir do modelo: o <title> vira o nome
- * da página e as datas (atualização, ano do rodapé) ficam com a data de hoje.
+ * da página, as datas (atualização, ano do rodapé) ficam com a data de hoje e
+ * os preços da loja (vitrines, caixa de compra) saem na moeda da oferta.
  */
-export function templateHtml(id: string, title: string, now = new Date()): string {
+export function templateHtml(
+  id: string,
+  title: string,
+  now = new Date(),
+  currency: StoreCurrency = DEFAULT_CURRENCY,
+): string {
   const template = getTemplate(id);
   if (!template) throw new UserError(NOT_FOUND);
   const safeTitle = escapeHtml(title.trim() || template.pageName);
-  return template.html
+  return templateHtmlFor(template.id as PageTemplateId, currency)
     .replace(/<title>[^<]*<\/title>/, `<title>${safeTitle}</title>`)
     .replaceAll(TODAY_MARKER, formatToday(now))
     .replaceAll(YEAR_MARKER, yearOf(now));
@@ -83,12 +91,17 @@ export function templateHtml(id: string, title: string, now = new Date()): strin
 
 /**
  * Como começa uma página nova: do modelo escolhido ou em branco.
- * Sem modelo, o tipo padrão é "Página de vendas".
+ * Sem modelo, o tipo padrão é "Página de vendas". `currency`: a moeda da
+ * oferta (os modelos da loja montam os preços nela).
  */
-export function pageStart(templateId: string | null | undefined, title: string): { html: string; type: PageType } {
+export function pageStart(
+  templateId: string | null | undefined,
+  title: string,
+  currency: StoreCurrency = DEFAULT_CURRENCY,
+): { html: string; type: PageType } {
   if (!templateId) return { html: blankPageHtml(title), type: "SALES" };
   if (!isTemplateId(templateId)) throw new UserError(NOT_FOUND);
   const template = getTemplate(templateId) as PageTemplate;
   const type: TemplatePageType = template.pageType;
-  return { html: templateHtml(templateId, title), type };
+  return { html: templateHtml(templateId, title, new Date(), currency), type };
 }

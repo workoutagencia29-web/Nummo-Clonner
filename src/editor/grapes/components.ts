@@ -10,7 +10,11 @@
  *   padrão do GrapesJS perde "muted" e força "controls", quebrando VSLs).
  * - Imagens ganham "Trocar imagem" (Configurações e barra do elemento).
  * - Links e botões ganham configurações de "Link da oferta", "Página do funil"
- *   e "Aparece depois de (s)" (delay de VSL).
+ *   e "Aparece depois de (s)" (delay de VSL). Cartões da vitrine de produtos
+ *   (a[data-os-product]) ganham a lista "Página do produto", sempre à vista,
+ *   com a opção "＋ Criar página deste produto…" (src/editor/grapes/product-pages.ts);
+ *   neles, no logo e nas categorias do cabeçalho de loja, "— nenhum —" no link
+ *   da oferta tira o atributo (não pede um checkout).
  *
  * Segurança: o HTML das páginas vem de sites de terceiros. Nada dele pode rodar
  * no painel — nem pelos recursos de "script de componente" do GrapesJS
@@ -19,14 +23,27 @@
  */
 import type { Component, Editor, Trait } from "grapesjs";
 import { esc } from "@/editor/blocks/shared";
+import { LEAD_LINK_TYPES } from "@/editor/link-target";
+import { CHECKOUT_UNSAVED_NOTE } from "@/lib/checkout/rules";
 import { pinnedId } from "@/lib/css-keep";
 import { CCID_ATTR, cssAttrValue, DUP_ID_ATTR, EID_ATTR, NOT_DUP } from "@/lib/dup-ids";
+import { PRODUCT_ATTR, STORE_NAV_CLASSES } from "@/lib/store";
 import { RULE_EVENTS, TRACKING_EVENT_LABEL } from "@/lib/tracking/schema";
 import { PRIZE_SHOW_ATTR } from "@/lib/wheel";
 import { withScheme } from "@/runtime/widgets/options";
 import { editorTimeout, isEditorClosed, watchEditor } from "./lifecycle";
 import { NEW_LINK_OPTION, newLinkOption } from "./new-link";
 import { originalUsesId } from "./original-css";
+import {
+  CREATE_PRODUCT_PAGE_TRAIT,
+  canCreateProductPages,
+  NEW_PRODUCT_PAGE_OPTION,
+  newProductPageOption,
+  requestProductPages,
+} from "./product-pages";
+
+/** Título do grupo "Ao clicar no produto" (cartão da vitrine): os campos de destino entram logo depois dele. */
+export const PRODUCT_DEST_HEADING = "os-h-pd-destino";
 
 export interface EditorLinkOption {
   key: string;
@@ -35,10 +52,21 @@ export interface EditorLinkOption {
   url?: string;
   /** "Pagamento na página" com produto: resumo ("Curso · MX$ 297,00"); o botão abre a janela de pagamento. */
   payment?: string | null;
+  /** "Checkout do Offer Studio": resumo do produto ("" = sem produto salvo); null/ausente = não é. */
+  checkout?: string | null;
 }
 
 /** Selo dos links de pagamento na página nas listas do editor. */
 export const PAYMENT_LINK_BADGE = "Pagamento na página";
+/** Selo dos links "Checkout do Offer Studio" nas listas do editor. */
+export const CHECKOUT_LINK_BADGE = "Checkout do Offer Studio";
+
+/** Nome do link nas listas do editor, com o selo do destino quando não é endereço. */
+export function linkOptionLabel(l: Pick<EditorLinkOption, "label" | "payment" | "checkout">, label = l.label): string {
+  if (l.payment) return `${label} · ${PAYMENT_LINK_BADGE}`;
+  if (l.checkout != null) return `${label} · ${CHECKOUT_LINK_BADGE}`;
+  return label;
+}
 export interface EditorPageOption {
   id: string;
   name: string;
@@ -521,7 +549,9 @@ function labelToolbar(editor: Editor) {
       const em = (this as unknown as { em?: { getIcon?: (n: string) => string } }).em;
       const arrowUp = em?.getIcon?.("arrowUp") ?? "";
       let items = current;
-      if (this.is("image") && this.get("editable") !== false && !items.some((i) => i.id === "os-swap-image")) {
+      // Também nos tipos que estendem a imagem (ex.: o logo do cabeçalho de loja).
+      const image = this.is("image") || this.isInstanceOf("image");
+      if (image && this.get("editable") !== false && !items.some((i) => i.id === "os-swap-image")) {
         const swap: ToolbarItem = {
           id: "os-swap-image",
           label: SWAP_IMAGE_ICON,
@@ -543,12 +573,54 @@ function labelToolbar(editor: Editor) {
   });
 }
 
+/**
+ * Elemento do canvas → view do GrapesJS (__gjsv) fica gravado no elemento. O
+ * Chrome segura para sempre os <img> com sizes/srcset (lista de mudanças de
+ * tela do documento): a view, o projeto e a página inteira ficavam na memória
+ * a cada abertura do editor. A view removida solta o elemento.
+ */
+function releaseRemovedViews(editor: Editor) {
+  const dc = editor.DomComponents as unknown as { ComponentView?: Patchable };
+  patchOnce(dc.ComponentView, "release-el", (proto) => {
+    const remove = proto.remove as (this: { el?: Record<string, unknown> }, ...a: unknown[]) => unknown;
+    proto.remove = function (this: { el?: Record<string, unknown> }, ...args: unknown[]) {
+      const out = remove.apply(this, args);
+      if (this.el && this.el.__gjsv === this) delete this.el.__gjsv;
+      return out;
+    };
+  });
+}
+
 // ─── Tipos ───────────────────────────────────────────────────────────────────
+
+/** O componente está dentro de um <a> (o próprio não conta)? */
+function insideLink(component: Component) {
+  for (let at = component.parent(); at; at = at.parent()) if (at.get("tagName") === "a") return true;
+  return false;
+}
+
+/**
+ * Texto de dentro de um link (nome do produto no cartão, "Entre" do cabeçalho
+ * de loja, texto de um botão): a barra de edição de texto esconde "Criar ou
+ * remover link" — um link dentro do outro quebraria a página publicada. (O
+ * HTML salvo também desfaz um link assim: toHTML do tipo "link".)
+ */
+function guardNestedLinks(editor: Editor) {
+  editor.on("rte:enable", (view: { el?: HTMLElement } | undefined, rte: unknown) => {
+    const actions = (rte as { getActions?: () => { name: string; btn?: HTMLElement }[] } | undefined)?.getActions?.();
+    const btn = actions?.find((a) => a.name === "link")?.btn;
+    if (!btn) return;
+    const nested = !!view?.el?.closest?.("a");
+    btn.style.display = nested ? "none" : "";
+  });
+}
 
 export function registerComponentTypes(editor: Editor) {
   const dc = editor.DomComponents;
 
   disableComponentScripts(editor);
+  releaseRemovedViews(editor);
+  guardNestedLinks(editor);
   installDuplicateIds(editor);
   nameSectionsByHeading(editor);
   labelToolbar(editor);
@@ -595,8 +667,21 @@ export function registerComponentTypes(editor: Editor) {
   });
 
   // Imagem: "Trocar imagem" à vista (antes só havia o duplo clique).
+  // O registro do Desfazer (toJSON com fromUndo) leva também o src: o GrapesJS tira o
+  // src quando é igual ao atributo, e o Refazer voltava só o atributo (o canvas mostrava a
+  // imagem nova e a página salva ficava com a antiga). Os tipos que estendem a imagem
+  // (produto, logo do cabeçalho e do rodapé, galeria) herdam.
+  const imageToJson = dc.getType("image")?.model.prototype.toJSON as
+    | ((this: Component, opts?: { fromUndo?: boolean }) => Record<string, unknown>)
+    | undefined;
   dc.addType("image", {
     model: {
+      toJSON(this: Component, opts?: { fromUndo?: boolean }) {
+        const obj = imageToJson ? imageToJson.call(this, opts) : {};
+        const src = this.get("src");
+        if (opts?.fromUndo && src) obj.src = src;
+        return obj;
+      },
       defaults: {
         traits: [
           {
@@ -613,9 +698,21 @@ export function registerComponentTypes(editor: Editor) {
   });
 
   // Link comum (os botões de páginas clonadas são <a>): o endereço digitado em
-  // "Endereço do link" ganha o https:// quando falta.
+  // "Endereço do link" ganha o https:// quando falta. Link dentro de outro link
+  // (criado pela barra de texto ou colado num texto de dentro de um <a>, como o
+  // nome do produto no cartão da vitrine) sai só com o conteúdo: <a> dentro de
+  // <a> não existe em HTML — o navegador fecharia o de fora no meio.
+  const linkToHtml = dc.getType("link")?.model.prototype.toHTML;
   dc.addType("link", {
-    model: { defaults: { traits: ["title", addressTrait("href"), "target"] } },
+    model: {
+      // "Dica ao passar o mouse" por último: o que importa num botão é o destino
+      // ("Link da oferta" e "Página do funil" entram antes de tudo: registerDynamicTraits).
+      defaults: { traits: [addressTrait("href"), "target", "title"] },
+      toHTML(this: Component, opts?: Record<string, unknown>) {
+        if (insideLink(this)) return this.getInnerHTML(opts as never);
+        return linkToHtml ? linkToHtml.call(this, opts as never) : "";
+      },
+    },
   });
 
   dc.addType("os-embed", {
@@ -775,23 +872,32 @@ function syncDestination(
           text: `${PAYMENT_LINK_BADGE}: ${link.payment}`,
           hint: "Ao clicar, abre a janela de pagamento. O produto, o valor e as formas de pagamento mudam em “Links e checkouts”, no topo.",
         }
-      : {
-          text: link ? link.url?.trim() || "Este link ainda não tem endereço" : "Link da oferta excluído",
-          hint: "O endereço dos links da oferta muda em “Links e checkouts”, no topo.",
-        };
+      : link?.checkout != null
+        ? {
+            text: `${CHECKOUT_LINK_BADGE}${link.checkout ? `: ${link.checkout}` : " (produto ainda não salvo)"}`,
+            hint: link.checkout
+              ? "Ao clicar, abre a página de checkout do Offer Studio. O produto, o valor, os order bumps e o frete mudam em “Links e checkouts”, no topo."
+              : `${CHECKOUT_UNSAVED_NOTE} Fica no topo do editor.`,
+          }
+        : {
+            text: link ? link.url?.trim() || "Este link ainda não tem endereço" : "Link da oferta excluído",
+            hint: "O endereço dos links da oferta muda em “Links e checkouts”, no topo.",
+          };
   } else if (href.startsWith(PAGE_PREFIX)) {
     const page = pages.find((p) => p.id === href.slice(PAGE_PREFIX.length));
+    // Cartão da vitrine: a lista se chama "Página do produto".
+    const list = PRODUCT_ATTR in attrs ? "Página do produto" : "Página do funil";
     let hint: string;
     if (pageSelect) {
       hint = page
-        ? "Para outro endereço, escolha “— nenhuma —” em Página do funil."
-        : "Essa página foi excluída. Escolha outra em Página do funil, ou “— nenhuma —” para digitar um endereço.";
+        ? `Para outro endereço, escolha “— nenhuma —” em ${list}.`
+        : `Essa página foi excluída. Escolha outra em ${list}, ou “— nenhuma —” para digitar um endereço.`;
     } else {
       hint = page
         ? "Para ir a outro endereço, troque o “Endereço do link” abaixo."
         : "Essa página foi excluída: troque o “Endereço do link” abaixo.";
     }
-    info = { text: page ? `Página do funil: ${page.name}` : "Página do funil excluída", hint };
+    info = { text: page ? `${list}: ${page.name}` : `${list} excluída`, hint };
   }
   // O campo de endereço sai só quando há outro jeito de trocar o destino ali.
   const hide: Record<AddressTrait, boolean> = {
@@ -964,6 +1070,19 @@ export function registerDynamicTraits(
 ) {
   // Sincronizando a lista "Página do funil" com o href (não é uma edição).
   let syncingPage = false;
+  /** A lista "Página do funil" mostra a página do href de agora (sem "silent": a lista acompanha). */
+  const syncPageSelect = (component: Component) => {
+    const href = String(component.getAttributes().href ?? "");
+    const current = href.startsWith(PAGE_PREFIX) ? href.slice(PAGE_PREFIX.length) : "";
+    if (String(component.get("os-page") ?? "") === current) return;
+    // Não conta como edição.
+    syncingPage = true;
+    try {
+      component.set("os-page", current, { avoidStore: true } as never);
+    } finally {
+      syncingPage = false;
+    }
+  };
 
   editor.on("component:selected", (component: Component) => {
     const attrs = component.getAttributes();
@@ -973,9 +1092,15 @@ export function registerDynamicTraits(
     const isAnchor = component.get("tagName") === "a" && !accessGo;
     const hasHref = "data-os-href" in attrs;
     const wanted: Record<string, unknown>[] = [];
+    // Cartão da vitrine de produtos: leva à página do produto (lista sempre à vista, no começo).
+    const productCard = isAnchor && PRODUCT_ATTR in attrs;
+    // Cartão, logo e categorias do cabeçalho de loja: o link da oferta é opcional.
+    const optionalLink =
+      productCard || (isAnchor && component.getClasses().some((c: string) => STORE_NAV_CLASSES.includes(c as never)));
 
+    let linkTrait: Record<string, unknown> | null = null;
     if (isAnchor || hasHref || ("data-os-link" in attrs && !accessGo)) {
-      wanted.push({
+      linkTrait = {
         type: "select",
         name: "data-os-link",
         label: "Link da oferta",
@@ -983,30 +1108,57 @@ export function registerDynamicTraits(
           { id: "", label: "— nenhum (usar o endereço) —" },
           ...links.map((l) => ({
             id: l.key,
-            label: l.payment ? `${esc(l.label)} · ${PAYMENT_LINK_BADGE}` : esc(l.label),
+            label: linkOptionLabel(l, esc(l.label)),
           })),
           newLinkOption,
         ],
-      });
+        // Cartão, logo e categorias: "— nenhum —" tira o atributo (data-os-link="" pediria
+        // um checkout; o cartão sem destino tem o aviso próprio, de escolher a página do
+        // produto; o logo, o da página da loja; a categoria sem destino busca o texto dela).
+        ...(optionalLink && {
+          setValue: ({ component: c, value }: { component: Component; value: unknown }) => {
+            const key = String(value ?? "");
+            if (key) c.addAttributes({ "data-os-link": key });
+            else if ("data-os-link" in c.getAttributes()) c.removeAttributes("data-os-link");
+          },
+        }),
+      };
+      if (!productCard) wanted.push(linkTrait);
     }
     // Botão de WhatsApp sempre abre o WhatsApp: não faz sentido apontar para uma página do funil.
-    if (isAnchor && pages.length > 1 && component.get("type") !== "os-whatsapp") {
+    if (isAnchor && (productCard || pages.length > 1) && component.get("type") !== "os-whatsapp") {
       const href = String(attrs.href ?? "");
       const current = href.startsWith(PAGE_PREFIX) ? href.slice(PAGE_PREFIX.length) : "";
       const options = [{ id: "", label: "— nenhuma —" }, ...pages.map((p) => ({ id: p.id, label: esc(p.name) }))];
       // Página excluída: aparece como opção (assim "— nenhuma —" ou outra página é uma troca de verdade).
       if (current && !pages.some((p) => p.id === current)) options.push({ id: current, label: "(página excluída)" });
-      wanted.push({ type: "select", name: "os-page", label: "Página do funil", changeProp: true, options });
-      if (String(component.get("os-page") ?? "") !== current) {
-        // Sem "silent": a lista mostrada acompanha o href real. Não conta como edição.
-        syncingPage = true;
-        try {
-          component.set("os-page", current, { avoidStore: true } as never);
-        } finally {
-          syncingPage = false;
-        }
-      }
+      const createPage = productCard && canCreateProductPages(editor);
+      if (createPage) options.push(newProductPageOption);
+      wanted.push({
+        type: "select",
+        name: "os-page",
+        label: productCard ? "Página do produto" : "Página do funil",
+        changeProp: true,
+        options,
+        // "＋ Criar página deste produto…": não grava nada (nem no Desfazer); a lista volta
+        // à página de agora e o diálogo abre.
+        ...(createPage && {
+          setValue: ({ component: c, value, trait }: { component: Component; value: unknown; trait: Trait }) => {
+            if (String(value ?? "") !== NEW_PRODUCT_PAGE_OPTION) {
+              trait.setTargetValue(value);
+              return;
+            }
+            editorTimeout(editor, () => {
+              trait.set({ value: String(c.get("os-page") ?? "") }, { fromTarget: 1 } as never);
+              requestProductPages(editor, { cards: [c] });
+            });
+          },
+        }),
+      });
+      syncPageSelect(component);
     }
+    // No cartão, o link da oferta vem depois da página do produto.
+    if (productCard && linkTrait) wanted.push(linkTrait);
     if (hasHref) wanted.push(addressTrait("data-os-href", { label: "Endereço ao clicar" }));
     if (isClickableElement(String(component.get("tagName") ?? ""), attrs)) {
       wanted.push(clickEventTrait(String(attrs[CLICK_EVENT_ATTR] ?? "").trim()));
@@ -1018,6 +1170,15 @@ export function registerDynamicTraits(
       wanted.push(prizeShowTrait);
     }
     const hidden = hiddenAddress.get(component);
+    // Cartão: página do produto e link da oferta entram logo depois de "Ao clicar no produto"
+    // (e do "＋ Criar página deste produto", quando há).
+    const destAt = productCard
+      ? Math.max(component.getTraitIndex(PRODUCT_DEST_HEADING), component.getTraitIndex(CREATE_PRODUCT_PAGE_TRAIT))
+      : -1;
+    // Link e botão comuns: "Link da oferta" e "Página do funil" primeiro (ligar ao
+    // checkout é o mais comum) e os outros campos antes da "Dica ao passar o mouse".
+    const leadLinks = !optionalLink && destAt < 0 && LEAD_LINK_TYPES.has(String(component.get("type") ?? ""));
+    let insertAt = destAt >= 0 ? destAt + 1 : leadLinks ? 0 : -1;
     for (const trait of wanted) {
       const name = String(trait.name);
       const existing = component.getTrait(name);
@@ -1028,20 +1189,28 @@ export function registerDynamicTraits(
         if (trait.options && !(existing.attributes as Record<string, unknown>).osOptions) {
           existing.set("options", trait.options);
         }
+        // "Página do funil" que aparece depois (página criada) entra logo abaixo do link.
+        if (leadLinks && name === "data-os-link") insertAt = component.getTraitIndex(name) + 1;
       } else if (!hidden?.has(name as AddressTrait)) {
         // Campo de endereço escondido (link da oferta ligado) volta pelo syncDestination.
-        component.addTrait(trait as never);
+        const first = insertAt >= 0 && (name === "os-page" || name === "data-os-link");
+        const tipAt = leadLinks && !first ? component.getTraitIndex("title") : -1;
+        component.addTrait(trait as never, first ? { at: insertAt++ } : tipAt >= 0 ? { at: tipAt } : undefined);
       }
     }
     if (isAnchor || "data-os-link" in attrs || hiddenAddress.has(component))
       syncDestination(component, { links, pages });
   });
 
-  // Ligou/desligou um link da oferta ou uma página: o campo de endereço acompanha.
+  // Ligou/desligou um link da oferta ou uma página: o campo de endereço acompanha. O href
+  // mudou por fora da lista (Desfazer, página do produto criada pelo diálogo): a lista
+  // "Página do funil" também — senão mostraria a página de antes, e escolher essa mesma
+  // página não religaria nada.
   editor.on("component:update:attributes", (component: Component) => {
     if (editor.getSelected() !== component) return;
     const attrs = component.getAttributes();
     if ("data-os-ac-go" in attrs) return;
+    if (component.getTrait("os-page")) syncPageSelect(component);
     if (component.get("tagName") !== "a" && !("data-os-link" in attrs) && !hiddenAddress.has(component)) return;
     syncDestination(component, getOptions());
   });

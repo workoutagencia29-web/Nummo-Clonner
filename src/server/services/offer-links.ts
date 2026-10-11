@@ -7,10 +7,17 @@ import type { OfferLinkKind, OfferLinkTarget } from "@/generated/prisma/client";
 import { type Db, prisma } from "@/lib/db";
 import { UserError } from "@/lib/errors";
 import { LINK_ATTR, linkKey } from "@/lib/offer-links";
+import { clonedCheckoutLinks } from "@/lib/readiness";
 import { wheelPrizeKeys } from "@/lib/wheel-prizes";
 import { bulkLinkChange } from "@/server/services/bulk-replace";
+import {
+  CHECKOUT_PRODUCT_SELECT,
+  type CheckoutProductView,
+  checkoutProductView,
+} from "@/server/services/checkout/products";
 import { relabelLatestVersions } from "@/server/services/documents";
 import {
+  NOT_CHECKOUT_KIND_MESSAGE,
   NOT_PAYMENT_KIND_MESSAGE,
   PAYMENT_LINK_KINDS,
   PAYMENT_PRODUCT_SELECT,
@@ -41,32 +48,52 @@ export interface OfferLinkView {
   label: string;
   url: string;
   kind: OfferLinkKind;
-  /** URL = leva ao endereço; PAYMENT = "Pagamento na página". */
+  /** URL = leva ao endereço; PAYMENT = "Pagamento na página"; CHECKOUT = "Checkout do Offer Studio". */
   target: OfferLinkTarget;
   /** Pagamento na página com o produto salvo (o botão abre a janela de pagamento). */
   pay: boolean;
   /** Produto de pagamento salvo (fica guardado mesmo voltando para endereço). */
   payment: PaymentProductView | null;
+  /** Produto do checkout do Offer Studio salvo (fica guardado mesmo trocando o destino). */
+  checkout: CheckoutProductView | null;
+  /**
+   * Ainda leva ao checkout encontrado na página original ao clonar (o dono
+   * dela é quem recebe): a aba mostra o selo "troque pelo seu".
+   */
+  fromClone: boolean;
+}
+
+/** Endereços de checkout encontrados nas páginas originais ao clonar (CheckoutLink). */
+export async function clonedCheckoutUrls(offerId: string): Promise<string[]> {
+  const rows = await prisma.checkoutLink.findMany({ where: { page: { offerId } }, select: { url: true } });
+  return rows.map((r) => r.url);
 }
 
 export async function listOfferLinks(offerId: string): Promise<OfferLinkView[]> {
-  const rows = await prisma.offerLink.findMany({
-    where: { offerId },
-    orderBy: [{ position: "asc" }, { createdAt: "asc" }],
-    select: {
-      id: true,
-      key: true,
-      label: true,
-      url: true,
-      kind: true,
-      target: true,
-      payment: { select: PAYMENT_PRODUCT_SELECT },
-    },
-  });
-  return rows.map((r) => {
+  const [rows, cloned] = await Promise.all([
+    prisma.offerLink.findMany({
+      where: { offerId },
+      orderBy: [{ position: "asc" }, { createdAt: "asc" }],
+      select: {
+        id: true,
+        key: true,
+        label: true,
+        url: true,
+        kind: true,
+        target: true,
+        payment: { select: PAYMENT_PRODUCT_SELECT },
+        checkout: { select: CHECKOUT_PRODUCT_SELECT },
+      },
+    }),
+    clonedCheckoutUrls(offerId),
+  ]);
+  const links = rows.map((r) => {
     const payment = r.payment ? paymentProductView(r.payment) : null;
-    return { ...r, payment, pay: r.target === "PAYMENT" && payment !== null };
+    const checkout = r.checkout ? checkoutProductView(r.checkout) : null;
+    return { ...r, payment, checkout, pay: r.target === "PAYMENT" && payment !== null };
   });
+  const fromClone = new Set(clonedCheckoutLinks(links, cloned).map((l) => l.id));
+  return links.map((l) => ({ ...l, fromClone: fromClone.has(l.id) }));
 }
 
 function isPaymentKind(kind: string) {
@@ -102,13 +129,18 @@ export interface LinkInput {
   label: string;
   url: string;
   kind: OfferLinkKind;
-  /** Padrão: URL (endereço). PAYMENT: o produto é preenchido depois (savePaymentProduct). */
+  /**
+   * Padrão: URL (endereço). PAYMENT/CHECKOUT: o produto é preenchido depois
+   * (savePaymentProduct/saveCheckoutProduct); até lá o link não leva a lugar
+   * nenhum (renderLinks).
+   */
   target?: OfferLinkTarget;
 }
 
 export async function createOfferLink(offerId: string, input: LinkInput, db: Db = prisma) {
   await offerOrThrow(offerId, db);
   if (input.target === "PAYMENT" && !isPaymentKind(input.kind)) throw new UserError(NOT_PAYMENT_KIND_MESSAGE, "kind");
+  if (input.target === "CHECKOUT" && !isPaymentKind(input.kind)) throw new UserError(NOT_CHECKOUT_KIND_MESSAGE, "kind");
   const existing = await db.offerLink.findMany({ where: { offerId }, select: { key: true, position: true } });
   const key = linkKey(
     input.label,
@@ -136,9 +168,11 @@ export async function updateOfferLink(id: string, input: Partial<Omit<LinkInput,
     select: { offerId: true, target: true },
   });
   if (!link) throw new UserError("Link não encontrado.");
-  if (input.kind && link.target === "PAYMENT" && !isPaymentKind(input.kind)) {
+  if (input.kind && (link.target === "PAYMENT" || link.target === "CHECKOUT") && !isPaymentKind(input.kind)) {
     throw new UserError(
-      "Um link de pagamento na página só pode ser do tipo checkout, upsell ou downsell. Para usar outro tipo, mude o destino para “Endereço” antes.",
+      link.target === "PAYMENT"
+        ? "Um link de pagamento na página só pode ser do tipo checkout, upsell ou downsell. Para usar outro tipo, mude o destino para “Endereço” antes."
+        : "Um link do checkout do Offer Studio só pode ser do tipo checkout, upsell ou downsell. Para usar outro tipo, mude o destino para “Endereço” antes.",
       "kind",
     );
   }
@@ -166,9 +200,9 @@ export async function deleteOfferLink(id: string) {
   if (!link) throw new UserError("Link não encontrado.");
   // Atalho: nenhuma página cita a chave (nada a gravar, nem a conferir).
   if (await mentionsKey(link.offerId, link.key)) {
-    // Pagamento na página: o endereço guardado não é para onde os botões levam hoje;
-    // eles voltam ao endereço que tinham antes de serem ligados.
-    const url = link.target === "PAYMENT" ? "" : link.url.trim();
+    // Pagamento na página e checkout do Offer Studio: o endereço guardado não é para onde
+    // os botões levam hoje; eles voltam ao endereço que tinham antes de serem ligados.
+    const url = link.target === "URL" ? link.url.trim() : "";
     const input = {
       offerId: link.offerId,
       match: { kind: "link", key: link.key },

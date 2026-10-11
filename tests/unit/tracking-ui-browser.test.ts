@@ -14,7 +14,7 @@ import sharp from "sharp";
 import { decryptSecret, maskSecret } from "@/lib/crypto";
 import { prisma } from "@/lib/db";
 import { parseOfferSettings, parsePageSeo } from "@/lib/offer-settings";
-import { DEFAULT_FORWARD_PARAMS, parseTrackingSettings } from "@/lib/tracking/schema";
+import { CONSENT_TEXT_PRESETS, DEFAULT_FORWARD_PARAMS, parseTrackingSettings } from "@/lib/tracking/schema";
 import { createOfferLink } from "@/server/services/offer-links";
 import { saveOfferSettings } from "@/server/services/offer-settings";
 import { createOffer } from "@/server/services/offers";
@@ -22,6 +22,7 @@ import { savePageCode } from "@/server/services/page-code";
 import { createPage } from "@/server/services/pages";
 import { applyRecommendedRules, createPixel } from "@/server/services/tracking";
 import { resetDatabase } from "../setup/per-file";
+import { sampleIcons } from "./ico-fixtures";
 import {
   callsOf,
   choose,
@@ -600,6 +601,66 @@ describe("privacidade (LGPD)", () => {
   });
 });
 
+describe("aviso de cookies em espanhol e inglês", () => {
+  it("os botões preenchem o rascunho (nada é salvo sozinho), o modo leva o texto no mesmo idioma e Descartar volta", async () => {
+    const { offerId } = await offerFixture();
+    // Oferta em peso: o espanhol fica em destaque.
+    await saveOfferSettings(offerId, { currency: "MXN" });
+    const s = await open("tracking", offerId, { initialSection: "privacidade" });
+    const p = s.page;
+    const box = p.getByTestId("consent-presets");
+    await box.getByText("Esta oferta é para fora do Brasil", { exact: false }).waitFor();
+    const es = box.getByRole("button", { name: "Usar textos em espanhol" });
+    const en = box.getByRole("button", { name: "Usar textos em inglês" });
+    expect(await es.getAttribute("data-variant")).toBe("default");
+    expect(await en.getAttribute("data-variant")).toBe("outline");
+
+    await es.click();
+    expect(await p.getByLabel("Texto do aviso").inputValue()).toBe(CONSENT_TEXT_PRESETS.es.text);
+    expect(await p.getByLabel("Botão de aceitar").inputValue()).toBe("Aceptar");
+    expect(await p.getByLabel("Botão de recusar").inputValue()).toBe("Rechazar");
+    expect(await p.getByLabel("Texto do link").inputValue()).toBe("Política de privacidad");
+    const banner = p.getByTestId("consent-preview-banner");
+    await banner.getByText("Aceptar", { exact: true }).waitFor();
+    const panel = p.getByRole("tabpanel", { name: /Privacidade/ });
+    await panel.getByText("Alterações não salvas").waitFor();
+    // Nada foi salvo.
+    expect((await tracking(offerId)).consent.acceptLabel).toBe("Aceitar");
+    // "Só avisar": o texto pronto vira o do aviso sem escolha, no mesmo idioma.
+    await p.getByRole("radio", { name: /^Só avisar/ }).check();
+    expect(await p.getByLabel("Texto do aviso").inputValue()).toBe(CONSENT_TEXT_PRESETS.es.noticeText);
+    expect(await p.getByLabel("Botão do aviso").inputValue()).toBe("Entendido");
+    await panel.getByRole("button", { name: "Descartar" }).click();
+    expect(await p.getByLabel("Texto do aviso").inputValue()).toMatch(/^Usamos cookies e tecnologias/);
+    expect(await p.getByLabel("Botão de aceitar").inputValue()).toBe("Aceitar");
+
+    // Inglês e salvar: o que vale é o que a pessoa salvou.
+    await en.click();
+    expect(await p.getByLabel("Texto do aviso").inputValue()).toBe(CONSENT_TEXT_PRESETS.en.text);
+    await p.getByRole("button", { name: "Salvar aviso" }).click();
+    await waitToast(s, "Aviso de cookies salvo.");
+    expect((await tracking(offerId)).consent).toMatchObject({
+      text: CONSENT_TEXT_PRESETS.en.text,
+      acceptLabel: "Accept",
+      rejectLabel: "Decline",
+      noticeLabel: "Got it",
+      policyLabel: "Privacy policy",
+    });
+    await expectNoErrors(s);
+  });
+
+  it("oferta em real: os botões ficam discretos (nenhum em destaque)", async () => {
+    const { offerId } = await offerFixture();
+    const s = await open("tracking", offerId, { initialSection: "privacidade" });
+    const box = s.page.getByTestId("consent-presets");
+    await box.getByText("Visitantes de fora do Brasil?", { exact: false }).waitFor();
+    for (const name of ["Usar textos em espanhol", "Usar textos em inglês"]) {
+      expect(await box.getByRole("button", { name }).getAttribute("data-variant")).toBe("outline");
+    }
+    await expectNoErrors(s);
+  });
+});
+
 describe("UTMs", () => {
   it("edita os parâmetros (chips), valida, salva e restaura o padrão", async () => {
     const { offerId } = await offerFixture();
@@ -772,6 +833,48 @@ describe("empresa e SEO", () => {
     await s.page.getByRole("alert").first().waitFor();
     expect(await s.page.getByRole("button", { name: "Enviar ícone da aba (favicon)" }).count()).toBe(1);
     expect(s.uploads).toBe(1);
+  });
+
+  it("favicon aceita .ico; a imagem de compartilhamento recusa .ico e diz o porquê", async () => {
+    const { offerId } = await offerFixture();
+    const icons = await sampleIcons();
+    const s = await open("settings", offerId);
+    const p = s.page;
+    await p.getByText("Imagem quadrada (de preferência 512×512) ou um arquivo .ico.").waitFor();
+    const faviconInput = p.getByLabel("Ícone da aba (favicon): escolher arquivo");
+    expect(await faviconInput.getAttribute("accept")).toContain(".ico");
+    expect(await p.getByLabel("Imagem de compartilhamento: escolher arquivo").getAttribute("accept")).not.toContain(
+      "ico",
+    );
+    await faviconInput.setInputFiles({ name: "favicon.ico", mimeType: "image/x-icon", buffer: icons.multi });
+    await p.getByRole("button", { name: "Trocar ícone da aba (favicon)" }).waitFor();
+    expect(s.uploads).toBe(1);
+
+    // .ico na imagem de compartilhamento: recusado antes de enviar, com o motivo.
+    await p.getByLabel("Imagem de compartilhamento: escolher arquivo").setInputFiles({
+      name: "favicon.ico",
+      mimeType: "image/x-icon",
+      buffer: icons.png,
+    });
+    await p.getByText("Arquivos .ico servem só para o ícone da aba").waitFor();
+    expect(s.uploads).toBe(1);
+    // .ico disfarçado de PNG: o servidor revela e o campo recusa do mesmo jeito.
+    await p.getByLabel("Imagem de compartilhamento: escolher arquivo").setInputFiles({
+      name: "capa.png",
+      mimeType: "image/png",
+      buffer: icons.png,
+    });
+    await p.waitForFunction(() => document.querySelectorAll('[role="alert"]').length > 0);
+    expect(s.uploads).toBe(2);
+    await p.getByText("Arquivos .ico servem só para o ícone da aba").waitFor();
+    expect(await p.getByRole("button", { name: "Enviar imagem de compartilhamento" }).count()).toBe(1);
+
+    await p.getByRole("button", { name: "Salvar SEO padrão" }).click();
+    await waitToast(s, "SEO padrão salvo.");
+    const settings = parseOfferSettings((await prisma.offer.findUniqueOrThrow({ where: { id: offerId } })).settings);
+    expect(settings.seo.faviconKey).toMatch(/^a\/[0-9a-f]{2}\/[0-9a-f]{64}\.ico$/);
+    expect(settings.seo.ogImageKey).toBeNull();
+    await expectNoErrors(s);
   });
 
   it("SEO de cada página: carrega, mostra o padrão da oferta e salva", async () => {

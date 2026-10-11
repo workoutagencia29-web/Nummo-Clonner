@@ -137,7 +137,7 @@ async function paymentOffer() {
   await prisma.pageDocument.updateMany({ where: { variant: { pageId: home.id } }, data: { html: HTML } });
   const mx = await createOfferLink(offer.id, { label: "Checkout", url: "", kind: "CHECKOUT" });
   const eu = await createOfferLink(offer.id, { label: "Europa", url: "", kind: "UPSELL" });
-  await savePaymentGatewayKey("KYVO", KYVO_KEY);
+  await savePaymentGatewayKey(offer.id, "KYVO", KYVO_KEY);
   await savePaymentProduct(mx.id, {
     name: "Curso México",
     amount: "297",

@@ -11,8 +11,11 @@ import { UserError } from "@/lib/errors";
 import { internalLink } from "@/lib/internal-links";
 import { bindUrlToLink, linkKey } from "@/lib/offer-links";
 import { deleteObject, getObject, objectExists, putObject } from "@/lib/storage";
+import type { StoreCurrency } from "@/lib/store";
 import { slugify, uniqueSlug } from "@/lib/text";
 import { keptNeedsConsent } from "@/lib/tracking/code-trackers";
+import { isWorkerOnline, WORKER_SILENT_MS } from "@/server/services/export";
+import { rememberOfferCurrency } from "@/server/services/preferences";
 import { cleanUrl } from "@/worker/clone/funnel";
 import { isSyntheticOrigin } from "@/worker/clone/synthetic";
 import type { CloneModeValue, CloneResult, Device, FunnelSuggestion } from "@/worker/clone/types";
@@ -248,11 +251,46 @@ export async function startFunnelClones(parentJobId: string, urls: string[]) {
 
 const LOG_PAGE = 200;
 
+/** Clonagem rodando sem nenhum sinal (progresso ou linha no log) há mais que isso: a tela avisa que pode ter travado. */
+export const CLONE_STALL_MS = 3 * 60_000;
+
+/**
+ * Para a tela de progresso, enquanto a clonagem espera ou roda: o robô de
+ * tarefas está vivo? Há outra clonagem rodando na frente desta (na fila)? Esta
+ * está parada há mais de CLONE_STALL_MS (rodando)?
+ */
+async function queueInfo(
+  job: { id: string; status: CloneJobStatus; updatedAt: Date },
+  now: number,
+): Promise<{ workerOnline: boolean | null; otherRunning: boolean; stalled: boolean }> {
+  if (job.status !== "QUEUED" && job.status !== "RUNNING") {
+    return { workerOnline: null, otherRunning: false, stalled: false };
+  }
+  const [workerOnline, others, lastLog] = await Promise.all([
+    isWorkerOnline(now),
+    job.status === "QUEUED" ? prisma.cloneJob.count({ where: { status: "RUNNING", id: { not: job.id } } }) : 0,
+    job.status === "RUNNING"
+      ? prisma.cloneLog.findFirst({ where: { jobId: job.id }, orderBy: { id: "desc" }, select: { at: true } })
+      : null,
+  ]);
+  const lastSign = Math.max(job.updatedAt.getTime(), lastLog?.at.getTime() ?? 0);
+  return {
+    // Clonagem que acabou de avançar prova que o robô está vivo (o sinal de vida
+    // dele pode atrasar enquanto ele processa uma página pesada).
+    workerOnline: workerOnline || (job.status === "RUNNING" && now - lastSign < WORKER_SILENT_MS),
+    otherRunning: others > 0,
+    stalled: job.status === "RUNNING" && now - lastSign > CLONE_STALL_MS,
+  };
+}
+
 /**
  * Progresso para a tela (polling). `tail`: as últimas linhas do log (tela de
  * falha, que mostra o fim — onde está o erro — e não consulta de novo).
+ * Na fila ou rodando, diz também se o robô está vivo (`workerOnline`; null nos
+ * outros estados), se outra clonagem está na frente (`otherRunning`) e se esta
+ * parou de avançar (`stalled`).
  */
-export async function getCloneStatus(jobId: string, afterLogId = 0, opts: { tail?: boolean } = {}) {
+export async function getCloneStatus(jobId: string, afterLogId = 0, opts: { tail?: boolean; now?: number } = {}) {
   const job = await prisma.cloneJob.findUnique({
     where: { id: jobId },
     select: {
@@ -263,6 +301,7 @@ export async function getCloneStatus(jobId: string, afterLogId = 0, opts: { tail
       errorMessage: true,
       sourceUrl: true,
       offerId: true,
+      updatedAt: true,
       logs: opts.tail
         ? { orderBy: { id: "desc" }, take: LOG_PAGE }
         : { where: { id: { gt: afterLogId } }, orderBy: { id: "asc" }, take: LOG_PAGE },
@@ -289,6 +328,7 @@ export async function getCloneStatus(jobId: string, afterLogId = 0, opts: { tail
     step: job.step,
     errorMessage: job.errorMessage,
     offerId: job.offerId,
+    ...(await queueInfo(job, opts.now ?? Date.now())),
     logs: logs.map((l) => ({ id: l.id, at: l.at.toISOString(), level: l.level, message: l.message, url: l.url })),
     children: job.children.map((c) => {
       const result = c.result as CloneResult | null;
@@ -322,6 +362,12 @@ export interface SaveCloneInput {
   keepRemoved: string[];
   /** Clonagens do funil (filhas) que entram como páginas. */
   childJobIds: string[];
+  /**
+   * Moeda em que a oferta vai rodar: fica nas configurações (vale para o que
+   * for criado depois: as páginas clonadas ficam como vieram) e vem marcada na
+   * próxima oferta. Sem ela: real (e a última escolhida não muda).
+   */
+  currency?: StoreCurrency;
 }
 
 function guessMainType(result: CloneResult): PageType {
@@ -560,9 +606,12 @@ export async function saveClone(input: SaveCloneInput) {
           // ZIP e HTML colado sem link não têm "página original".
           sourceUrl: main.sourceUrl ?? (isVirtualCloneUrl(mainResult.finalUrl) ? null : mainResult.finalUrl) ?? null,
           thumbnailKey: mainResult.thumbnailKey ?? null,
+          ...(input.currency ? { settings: { currency: input.currency } } : {}),
         },
         select: { id: true },
       });
+      // A moeda escolhida vem marcada na próxima oferta (clonada ou nova).
+      if (input.currency) await rememberOfferCurrency(input.currency, tx);
 
       // 1ª passada: páginas (para conhecer os IDs e ligar o funil).
       const takenSlugs: string[] = [];

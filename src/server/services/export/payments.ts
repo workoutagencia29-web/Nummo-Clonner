@@ -18,8 +18,11 @@ import {
   paymentRenderFor,
   type ServerPaymentProduct,
 } from "@/server/services/payments/products";
+import { type CheckoutExport, zipCheckoutKey, zipCheckouts } from "./checkout";
 
 export interface PaymentExport {
+  /** Oferta do ZIP: a chave do config.php é a dela. */
+  offerId: string;
   check: PaymentCheck;
   issues: PaymentIssue[];
   products: ServerPaymentProduct[];
@@ -29,7 +32,7 @@ export interface PaymentExport {
 export async function loadPaymentExport(offerId: string): Promise<PaymentExport | null> {
   const [check, products] = await Promise.all([offerPaymentCheck(offerId), offerPaymentProducts(offerId)]);
   if (!check || !products.length) return null;
-  return { check, issues: paymentIssues(check), products };
+  return { offerId, check, issues: paymentIssues(check), products };
 }
 
 /** Avisos do pagamento na página (o que falta e a hospedagem com PHP/HTTPS). */
@@ -53,42 +56,56 @@ export function paymentPlanFixes(payment: PaymentExport | null) {
   };
 }
 
-/** #os-pagamento de uma página do ZIP: pagamento.php e página de obrigado com caminhos relativos a ela. */
+/**
+ * #os-pagamento de uma página do ZIP: pagamento.php e página de obrigado com
+ * caminhos relativos a ela. Com checkout do Offer Studio, mesmo sem produto
+ * de pagamento na página: o bloco "Acesso ao produto" pergunta ao pagamento.php.
+ */
 export function zipPaymentRender(
   payment: PaymentExport | null,
-  opts: { rel: string; pageHref: (pageId: string) => string; scriptTag: string },
+  opts: { rel: string; pageHref: (pageId: string) => string; scriptTag: string; checkout?: boolean },
 ): PaymentRender | null {
-  if (!payment) return null;
-  return paymentRenderFor(payment.products, {
-    endpoint: `${opts.rel}${PAGAMENTO_FILE}`,
-    simulation: false,
-    pageHref: opts.pageHref,
-    scriptTag: opts.scriptTag,
-  });
+  if (!payment && !opts.checkout) return null;
+  return paymentRenderFor(
+    payment?.products ?? [],
+    {
+      endpoint: `${opts.rel}${PAGAMENTO_FILE}`,
+      simulation: false,
+      pageHref: opts.pageHref,
+      scriptTag: opts.scriptTag,
+    },
+    opts.checkout === true,
+  );
 }
 
 /**
- * pagamento-dados/config.php: a chave (lida aqui, no worker) e os produtos.
- * Chave ilegível, ausente, recusada ou sem transactions:read no último
- * "Testar conexão" vai vazia (o aviso já diz como resolver; o pagamento.php
- * responde "configuracao" em vez de cobrar — sem a consulta, quem pagasse não
+ * pagamento-dados/config.php: as chaves DA OFERTA (lidas aqui, no worker), os
+ * produtos do pagamento na página e os checkouts do Offer Studio. Chave
+ * ilegível, ausente, recusada ou sem permissão no último "Testar conexão" vai
+ * vazia (o aviso já diz como resolver; o pagamento.php responde
+ * "configuracao" em vez de cobrar — sem a consulta, quem pagasse não
  * receberia o acesso).
  */
 export async function zipPaymentConfig(
-  payment: PaymentExport,
+  payment: PaymentExport | null,
   pageDirs: Record<string, string>,
+  checkout: CheckoutExport | null = null,
 ): Promise<PagamentoConfig> {
   let apiKey = "";
-  if (payment.check.key === "ok") {
+  if (payment ? payment.check.key === "ok" : checkout?.check.keys.KYVO === "ok") {
     try {
-      apiKey = (await paymentGatewayKey(payment.check.provider)) ?? "";
+      apiKey = (await paymentGatewayKey(payment?.offerId ?? checkout?.offerId ?? "", "KYVO")) ?? "";
     } catch {
       apiKey = "";
     }
   }
   return {
     apiKey,
-    products: payment.products.map((p) => ({
+    keys: checkout
+      ? { flevopay: await zipCheckoutKey(checkout, "FLEVOPAY"), blackcat: await zipCheckoutKey(checkout, "BLACKCAT") }
+      : {},
+    checkouts: checkout ? zipCheckouts(checkout, pageDirs) : [],
+    products: (payment?.products ?? []).map((p) => ({
       key: p.key,
       code: orderProductCode(p.key, p.linkId),
       name: p.name,

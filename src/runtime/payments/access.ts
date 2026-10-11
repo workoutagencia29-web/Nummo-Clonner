@@ -8,7 +8,9 @@
  * Estados (classe no bloco; os textos são os do bloco, editáveis):
  * - os-ac-wait (começo; e enquanto o pagamento estiver pendente — continua
  *   conferindo por até 15 minutos; sem conexão, por até 3 minutos);
- * - os-ac-ok: o botão [data-os-ac-go] recebe o link de acesso e aparece;
+ * - os-ac-ok: o botão [data-os-ac-go] recebe o link de acesso e aparece; no
+ *   checkout do Offer Studio, cada order bump comprado ganha um botão igual
+ *   logo abaixo ([data-os-ac-extra], "Acessar “<bump>”"), com o link dele;
  * - os-ac-none: sem pedido, pedido não pago ou não encontrado ("Ainda não
  *   encontramos seu pagamento…").
  * O que aparece em cada estado vem do CSS do próprio bloco
@@ -18,7 +20,8 @@
  * com pagamento; sem ele, o script das páginas mostra a mensagem
  * (./click.ts, accessFallback).
  */
-import { ACCESS_TEXTS, type AccessTextKey } from "@/lib/payments/access-texts";
+import type { CheckoutExtraAccess } from "@/lib/checkout/contract";
+import { ACCESS_EXTRA_LABEL, ACCESS_TEXTS, type AccessTextKey } from "@/lib/payments/access-texts";
 import {
   ORDER_ID_RE,
   ORDER_PARAM,
@@ -47,9 +50,12 @@ function setState(els: HTMLElement[], state: "wait" | "ok" | "none") {
  * são os padrão do idioma do bloco pelos do produto — o que você editou fica
  * como está.
  */
-function matchLanguage(els: HTMLElement[], cfg: PaymentPageConfig | null, produto: string) {
-  const p = cfg && produto && Object.hasOwn(cfg.produtos, produto) ? cfg.produtos[produto] : null;
-  const to = p ? p.idioma : null;
+function matchLanguage(els: HTMLElement[], cfg: PaymentPageConfig | null, produto: string, idioma?: PayLocale) {
+  // Sem Object.hasOwn: não existe no Safari < 15.4 nem no Chrome < 93 (o script mira o Safari 13;
+  // sem ele o bloco ficava preso em "confirmando…") — e o biome troca hasOwnProperty.call por ele.
+  const p = cfg && produto && Object.getOwnPropertyDescriptor(cfg.produtos, produto) ? cfg.produtos[produto] : null;
+  // Checkout do Offer Studio: o servidor diz o idioma do produto (ele não está no #os-pagamento).
+  const to = idioma && ACCESS_TEXTS[idioma] ? idioma : p ? p.idioma : null;
   if (!to || !ACCESS_TEXTS[to]) return;
   for (const el of els) {
     const from = (el.getAttribute("data-os-lang") || "es") as PayLocale;
@@ -61,6 +67,35 @@ function matchLanguage(els: HTMLElement[], cfg: PaymentPageConfig | null, produt
     }
     el.setAttribute("lang", to);
     el.setAttribute("data-os-lang", to);
+  }
+}
+
+/**
+ * Um botão por order bump comprado (cópia do botão de acesso, com o link e o
+ * título dele), logo depois do botão do produto. Refeito a cada resposta.
+ */
+function showExtras(els: HTMLElement[], extras: CheckoutExtraAccess[] | undefined) {
+  for (const el of els) {
+    for (const old of Array.from(el.querySelectorAll("[data-os-ac-extra]"))) old.remove();
+    const go = el.querySelector<HTMLAnchorElement>("a[data-os-ac-go]");
+    if (!go || !extras || !extras.length) continue;
+    const lang = (el.getAttribute("data-os-lang") || "es") as PayLocale;
+    const label = ACCESS_EXTRA_LABEL[lang] || ACCESS_EXTRA_LABEL.es;
+    let after: Element = go;
+    for (const extra of extras) {
+      const url = extra && typeof extra.titulo === "string" ? accessUrl(extra.acesso) : null;
+      if (!url) continue;
+      const a = go.cloneNode(false) as HTMLAnchorElement;
+      a.removeAttribute("data-os-ac-go");
+      a.removeAttribute("data-os-ac-text");
+      a.removeAttribute("id");
+      a.setAttribute("data-os-ac-extra", "");
+      a.href = url;
+      if (a.target === "_blank") a.rel = "noopener";
+      a.textContent = label.replace("{nome}", extra.titulo.slice(0, 120));
+      after.parentNode?.insertBefore(a, after.nextSibling);
+      after = a;
+    }
   }
 }
 
@@ -127,7 +162,9 @@ export function initAccess() {
             if (go.target === "_blank") go.rel = "noopener";
           }
         }
-        matchLanguage(els, cfg, r.produto);
+        const reply = r as PaymentAccessResponse & { extras?: CheckoutExtraAccess[]; idioma?: PayLocale };
+        matchLanguage(els, cfg, r.produto, reply.idioma);
+        showExtras(els, Array.isArray(reply.extras) ? reply.extras : undefined);
         setState(els, "ok");
         return;
       }

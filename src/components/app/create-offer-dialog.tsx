@@ -1,7 +1,9 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect, useId, useState } from "react";
+import { SCROLL_DIALOG } from "@/components/app/scroll-dialog";
+import { CurrencyPicker, LegalTemplateNote, TextPricesNote } from "@/components/offers/currency-picker";
 import {
   BLANK_TEMPLATE,
   DEFAULT_OFFER_TEMPLATE,
@@ -23,6 +25,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Spinner } from "@/components/ui/spinner";
 import { isTemplateId } from "@/editor/templates/catalog";
 import { useAction } from "@/hooks/use-action";
+import { DEFAULT_CURRENCY, type StoreCurrency } from "@/lib/store";
+import { cn } from "@/lib/utils";
 import { createOfferAction } from "@/server/actions/offers";
 
 const NO_FOLDER = "__none__";
@@ -37,11 +41,14 @@ interface CreateOfferDialogProps {
   defaultFolderId?: string | null;
   /** Modelo já escolhido ao abrir (ex.: o cartão "Começar de um modelo" do painel vazio). */
   defaultTemplateId?: string | null;
+  /** Moeda que vem marcada: a última escolhida (real na primeira vez). */
+  defaultCurrency?: StoreCurrency;
 }
 
 /**
- * Nova oferta: nome, pasta e o modelo da primeira página, na mesma galeria do
- * "Nova página" (a página de vendas já vem escolhida). Abre a oferta criada.
+ * Nova oferta: nome, pasta, a moeda em que ela vai rodar (vem marcada a última
+ * escolhida) e o modelo da primeira página, na mesma galeria do "Nova página"
+ * (a página de vendas já vem escolhida). Abre a oferta criada.
  */
 export function CreateOfferDialog({
   open,
@@ -49,18 +56,22 @@ export function CreateOfferDialog({
   folders,
   defaultFolderId,
   defaultTemplateId,
+  defaultCurrency = DEFAULT_CURRENCY,
 }: CreateOfferDialogProps) {
   const router = useRouter();
   const { run, pending } = useAction(createOfferAction);
   const [name, setName] = useState("");
   const [folderId, setFolderId] = useState<string>(NO_FOLDER);
+  const [currency, setCurrency] = useState<StoreCurrency>(defaultCurrency);
   const [templateId, setTemplateId] = useState<string>(DEFAULT_OFFER_TEMPLATE);
   const [error, setError] = useState<string | null>(null);
+  const noteId = useId();
 
   useEffect(() => {
     if (open) {
       setName("");
       setError(null);
+      setCurrency(defaultCurrency);
       setTemplateId(
         defaultTemplateId && (defaultTemplateId === BLANK_TEMPLATE || isTemplateId(defaultTemplateId))
           ? defaultTemplateId
@@ -68,7 +79,7 @@ export function CreateOfferDialog({
       );
       setFolderId(defaultFolderId && folders.some((f) => f.id === defaultFolderId) ? defaultFolderId : NO_FOLDER);
     }
-  }, [open, defaultFolderId, defaultTemplateId, folders]);
+  }, [open, defaultFolderId, defaultTemplateId, defaultCurrency, folders]);
 
   function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -81,12 +92,17 @@ export function CreateOfferDialog({
       name: name.trim(),
       folderId: folderId === NO_FOLDER ? null : folderId,
       tagIds: [],
+      currency,
     };
     if (isTemplateId(templateId)) input.templateId = templateId;
     void run(input, {
       success: "Oferta criada.",
       silentError: true,
-      onError: (msg) => setError(msg),
+      onError: (msg) => {
+        setError(msg);
+        // O nome fica no alto do miolo, que pode ter rolado até a galeria.
+        document.getElementById("offer-name")?.focus();
+      },
       onSuccess: (offer) => {
         onOpenChange(false);
         router.push(`/ofertas/${offer.id}`);
@@ -96,15 +112,16 @@ export function CreateOfferDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[94vh] overflow-y-auto sm:max-w-4xl">
-        <form onSubmit={submit}>
-          <DialogHeader>
+      <DialogContent className={cn(SCROLL_DIALOG.content, "sm:max-w-4xl")}>
+        <form onSubmit={submit} className={SCROLL_DIALOG.form}>
+          <DialogHeader className={SCROLL_DIALOG.header}>
             <DialogTitle>Nova oferta</DialogTitle>
             <DialogDescription>
-              Dê um nome e escolha como a primeira página começa. Depois você adiciona as outras páginas do funil.
+              Dê um nome, escolha a moeda e como a primeira página começa. Depois você adiciona as outras páginas do
+              funil.
             </DialogDescription>
           </DialogHeader>
-          <div className="my-5 flex flex-col gap-5">
+          <div className={cn(SCROLL_DIALOG.body, "flex flex-col gap-5")}>
             <div className="grid gap-4 sm:grid-cols-[1fr_16rem]">
               <Field data-invalid={Boolean(error)}>
                 <FieldLabel htmlFor="offer-name">Nome da oferta</FieldLabel>
@@ -139,6 +156,14 @@ export function CreateOfferDialog({
                 </Select>
               </Field>
             </div>
+            <CurrencyPicker value={currency} onChange={setCurrency} disabled={pending} describedBy={noteId}>
+              <p id={noteId} className="text-xs text-muted-foreground">
+                Vitrines, caixa de compra e pagamento na página nascem nessa moeda. Dá para trocar depois, na aba
+                “Moeda, empresa e SEO” da oferta.
+              </p>
+              <TextPricesNote currency={currency} templateId={templateId} />
+              <LegalTemplateNote currency={currency} templateId={templateId} />
+            </CurrencyPicker>
             <div className="flex flex-col gap-2">
               <p className="text-sm font-medium">Primeira página</p>
               <TemplateGallery
@@ -150,7 +175,7 @@ export function CreateOfferDialog({
               />
             </div>
           </div>
-          <DialogFooter>
+          <DialogFooter className={SCROLL_DIALOG.footer}>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
               Cancelar
             </Button>

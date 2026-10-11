@@ -6,11 +6,9 @@ import { parseTheme, THEME_COOKIE } from "@/lib/theme";
 import { getWorkerStatus } from "@/server/queries";
 import { getBackupOverview, listBackups } from "@/server/services/backup";
 import { listTags } from "@/server/services/organize";
-import { listPaymentGateways } from "@/server/services/payments/gateways";
 import { requireSession } from "@/server/session";
 import { AccountForm, PasswordForm } from "./account-forms";
 import { BackupCard } from "./backup-card";
-import { PaymentsCard } from "./payments-card";
 import { SystemStatus } from "./system-status";
 import { TagsManager } from "./tags-manager";
 import { ThemePicker } from "./theme-picker";
@@ -19,13 +17,12 @@ export const metadata: Metadata = { title: "Configurações" };
 
 export default async function ConfiguracoesPage() {
   const session = await requireSession();
-  const [tags, worker, cookieStore, backup, backups, gateways] = await Promise.all([
+  const [tags, worker, cookieStore, backup, backups] = await Promise.all([
     listTags(),
     getWorkerStatus(),
     cookies(),
     getBackupOverview(),
     listBackups(),
-    listPaymentGateways(),
   ]);
 
   return (
@@ -77,20 +74,21 @@ export default async function ConfiguracoesPage() {
         </CardContent>
       </Card>
 
-      <Card id="pagamentos" className="scroll-mt-6">
+      <Card id="pagamentos" className="scroll-mt-20 md:scroll-mt-6">
         <CardHeader>
           <CardTitle>Pagamentos</CardTitle>
-          <CardDescription>
-            Para o comprador pagar dentro da página, sem ir para outro site. Cadastre aqui a chave do seu gateway e, na
-            aba “Links e checkouts” da oferta, crie um link do tipo “Pagamento na página”.
-          </CardDescription>
+          <CardDescription>Para o comprador pagar dentro da página, sem ir para outro site.</CardDescription>
         </CardHeader>
         <CardContent>
-          <PaymentsCard gateways={gateways} />
+          <p className="text-sm text-muted-foreground">
+            A chave da Kyvo agora fica em cada oferta (cada uma pode cobrar numa conta diferente): abra a oferta, aba{" "}
+            <strong className="text-foreground">“Links e checkouts”</strong>, cartão{" "}
+            <strong className="text-foreground">“Pagamento na página — conta da Kyvo desta oferta”</strong>.
+          </p>
         </CardContent>
       </Card>
 
-      <Card id="backup" className="scroll-mt-6">
+      <Card id="backup" className="scroll-mt-20 md:scroll-mt-6">
         <CardHeader>
           <CardTitle>Backup</CardTitle>
           <CardDescription>

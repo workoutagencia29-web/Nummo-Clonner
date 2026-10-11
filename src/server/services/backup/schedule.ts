@@ -103,7 +103,7 @@ export interface BackupHealthInput {
   lastFailure: { at: Date; message: string } | null;
   /** Pasta que não dá para usar (iCloud desligada…). */
   folderProblem: string | null;
-  /** Aviso importante do último backup que deu certo (arquivos estragados que ficaram de fora). */
+  /** Aviso importante do último backup que deu certo (arquivos estragados ou ilegíveis que ficaram de fora). */
   lastWarning?: string | null;
 }
 
@@ -148,7 +148,9 @@ export function backupHealth(s: BackupHealthInput, describeAgo: (d: Date) => str
   if (s.lastWarning) {
     return {
       level: "warn",
-      title: "Último backup com arquivos estragados",
+      title: /estragad/.test(s.lastWarning)
+        ? "Último backup com arquivos estragados"
+        : "Último backup com arquivos de fora",
       detail: `Último backup ${describeAgo(last)}. ${s.lastWarning}`,
     };
   }

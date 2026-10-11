@@ -16,18 +16,23 @@
  */
 import type { Asset, AssetProps, Component, Editor, UploadFileClb, UploadFileOptions } from "grapesjs";
 import { toast } from "sonner";
+import { ICO_MAX_BYTES, isIcoFile } from "@/lib/ico";
 
 export const UPLOAD_URL = "/api/assets/upload";
 
 /** Mesmos limites de IMAGE_UPLOAD_LIMITS (src/server/services/assets.ts). */
-export const CLIENT_UPLOAD_LIMITS = { maxFileBytes: 15 * 1024 * 1024, maxFiles: 20 } as const;
+export const CLIENT_UPLOAD_LIMITS = {
+  maxFileBytes: 15 * 1024 * 1024,
+  maxFiles: 20,
+  maxIconBytes: ICO_MAX_BYTES,
+} as const;
 
 /** Valor do atributo accept do campo de arquivo. */
 export const ACCEPTED_IMAGES =
-  "image/jpeg,image/png,image/webp,image/gif,image/avif,image/svg+xml,.jpg,.jpeg,.png,.webp,.gif,.avif,.svg";
+  "image/jpeg,image/png,image/webp,image/gif,image/avif,image/svg+xml,image/x-icon,image/vnd.microsoft.icon,.jpg,.jpeg,.png,.webp,.gif,.avif,.svg,.ico";
 
-const ACCEPTED_MIME = /^image\/(?:jpeg|pjpeg|png|webp|gif|avif|svg\+xml)$/i;
-const ACCEPTED_EXT = /\.(?:jpe?g|png|webp|gif|avif|svg)$/i;
+const ACCEPTED_MIME = /^image\/(?:jpeg|pjpeg|png|webp|gif|avif|svg\+xml|x-icon|vnd\.microsoft\.icon)$/i;
+const ACCEPTED_EXT = /\.(?:jpe?g|png|webp|gif|avif|svg|ico)$/i;
 const HEIC = /heic|heif/i;
 const STYLE_ID = "os-assets-style";
 const VIEW_MARK = "__osLibraryView";
@@ -41,8 +46,12 @@ const TEXTS = {
 const LOADING_HTML = '<div class="os-am-empty">Carregando as imagens da oferta…</div>';
 const EMPTY_HTML =
   '<div class="os-am-empty"><strong>Nenhuma imagem nesta oferta ainda.</strong><br>Arraste imagens para a área acima ou clique nela para escolher do computador.</div>';
-const HINT_TEXT =
-  "Clique numa imagem para usar. Dois cliques usam e fecham. JPG, PNG, WebP, GIF, AVIF ou SVG até 15 MB.";
+/** Limite em MB inteiros para os textos (ex.: "15 MB"). */
+const megabytes = (bytes: number) => `${Math.round(bytes / (1024 * 1024))} MB`;
+const MAX_FILE_TEXT = megabytes(CLIENT_UPLOAD_LIMITS.maxFileBytes);
+const MAX_ICON_TEXT = megabytes(CLIENT_UPLOAD_LIMITS.maxIconBytes);
+/** Dica do topo da janela: o .ico tem limite próprio, menor. */
+export const HINT_TEXT = `Clique numa imagem para usar. Dois cliques usam e fecham. JPG, PNG, WebP, GIF, AVIF ou SVG até ${MAX_FILE_TEXT}; ICO até ${MAX_ICON_TEXT}.`;
 
 /** Imagem no formato devolvido pelas rotas de imagens. */
 export interface LibraryImage {
@@ -132,11 +141,15 @@ export function checkFiles(files: readonly Pick<File, "name" | "size" | "type">[
     if (HEIC.test(file.type) || /\.(heic|heif)$/i.test(name)) {
       problems.push(`"${name}" está no formato HEIC (fotos do iPhone). Exporte como JPG ou PNG e envie de novo.`);
     } else if (file.type && !ACCEPTED_MIME.test(file.type) && !ACCEPTED_EXT.test(name)) {
-      problems.push(`"${name}" não é uma imagem aceita. Envie JPG, PNG, WebP, GIF, AVIF ou SVG.`);
+      problems.push(`"${name}" não é uma imagem aceita. Envie JPG, PNG, WebP, GIF, AVIF, SVG ou ICO.`);
     } else if (file.size === 0) {
       problems.push(`"${name}" está vazio.`);
     } else if (file.size > CLIENT_UPLOAD_LIMITS.maxFileBytes) {
-      problems.push(`"${name}" tem ${formatBytes(file.size)}. O limite é 15 MB por imagem.`);
+      problems.push(`"${name}" tem ${formatBytes(file.size)}. O limite é ${MAX_FILE_TEXT} por imagem.`);
+    } else if (isIcoFile(file) && file.size > CLIENT_UPLOAD_LIMITS.maxIconBytes) {
+      problems.push(
+        `"${name}" tem ${formatBytes(file.size)}. Um ícone .ico pode ter no máximo ${MAX_ICON_TEXT} (ícones de aba costumam ter poucos KB).`,
+      );
     } else {
       accepted.push(index);
     }
@@ -186,6 +199,12 @@ export function clearResponsiveSources(image: Component) {
 const UPLOAD_ICON =
   "url(\"data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4'/%3E%3Cpath d='m17 8-5-5-5 5'/%3E%3Cpath d='M12 3v12'/%3E%3C/svg%3E\")";
 
+/*
+ * Grade das imagens: a lista tem altura fixa e rola. As linhas são do tamanho do
+ * cartão (grid-auto-rows: max-content) — com linhas "auto", muitas imagens
+ * espremiam as linhas na altura da lista e os cartões ficavam um em cima do
+ * outro. A prévia tem proporção fixa e a imagem fica contida nela.
+ */
 const CSS = `
 .os-am{--os-am-upload-icon:${UPLOAD_ICON}}
 .gjs-mdl-dialog:has(.os-am){max-width:980px}
@@ -206,17 +225,17 @@ const CSS = `
 .os-am .gjs-am-add-field input{width:100%;box-sizing:border-box;padding:8px 10px;background:transparent;border:0;outline:0;color:var(--foreground);font:inherit;font-size:13px}
 .os-am .gjs-am-add-asset button{float:none;width:auto;padding:0 14px;border-radius:calc(var(--radius) - 4px);background:var(--primary);color:var(--primary-foreground);font:inherit;font-size:13px;font-weight:500;cursor:pointer}
 .os-am-hint{margin:0;font-size:12px;color:var(--muted-foreground)}
-.os-am .gjs-am-assets{height:min(52vh,460px);display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;align-content:start;overflow:auto;padding:2px}
+.os-am .gjs-am-assets{height:min(52vh,460px);display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));grid-auto-rows:max-content;gap:10px;align-content:start;overflow:auto;padding:2px}
 .os-am.os-am-loading .gjs-am-assets{opacity:.6}
-.os-am .gjs-am-asset{width:auto;padding:0;display:flex;flex-direction:column;border:1px solid var(--border);border-radius:calc(var(--radius) - 2px);overflow:hidden;background:var(--card);transition:border-color .15s,box-shadow .15s}
+.os-am .gjs-am-asset{width:auto;min-width:0;padding:0;display:flex;flex-direction:column;border:1px solid var(--border);border-radius:calc(var(--radius) - 2px);overflow:hidden;background:var(--card);transition:border-color .15s,box-shadow .15s}
 .os-am .gjs-am-asset:hover{border-color:color-mix(in oklch,var(--primary) 55%,var(--border))}
 .os-am .gjs-am-asset.gjs-am-highlight{border-color:var(--primary);box-shadow:0 0 0 2px color-mix(in oklch,var(--primary) 30%,transparent)}
-.os-am .gjs-am-preview-cont{float:none;width:100%;height:auto;aspect-ratio:4/3;border-radius:0;background-color:var(--muted)}
-.os-am .gjs-am-preview{background-size:contain}
+.os-am .gjs-am-preview-cont{float:none;flex:none;width:100%;height:auto;aspect-ratio:4/3;border-radius:0;background-color:var(--muted)}
+.os-am .gjs-am-preview{inset:6px;width:auto;height:auto;background-size:contain;background-position:center;background-repeat:no-repeat}
 .os-am .gjs-am-meta{float:none;width:100%;padding:6px 8px 8px;font-size:12px;box-sizing:border-box}
 .os-am .gjs-am-meta>div{margin:0}
 .os-am .gjs-am-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;color:var(--foreground)}
-.os-am .gjs-am-dimensions{opacity:1;margin-top:2px;font-size:11px;color:var(--muted-foreground)}
+.os-am .gjs-am-dimensions{opacity:1;margin-top:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--muted-foreground)}
 .os-am .gjs-am-close{display:none!important}
 .os-am-empty{grid-column:1/-1;padding:40px 16px;text-align:center;font-size:13px;line-height:1.6;color:var(--muted-foreground)}
 .os-am-empty strong{color:var(--foreground);font-weight:600}

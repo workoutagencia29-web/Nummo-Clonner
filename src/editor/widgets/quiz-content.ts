@@ -469,12 +469,20 @@ const VOID_TAGS = new Set(["img", "input", "br", "hr"]);
 
 const escAttr = (v: string) => v.replace(/[&<>"\n]/g, (c) => (c === "\n" ? "&#10;" : `&#${c.charCodeAt(0)};`));
 
-/** HTML de uma definição (só o que os quizzes usam: tag, atributos, classes e conteúdo). */
+/**
+ * HTML de uma definição (tag, atributos, classes, estilo próprio e conteúdo):
+ * quizzes, roletas e vitrines dos modelos de página. O estilo próprio vai no
+ * style="" (o editor o transforma na regra do elemento, como num bloco solto).
+ */
 export function defToHtml(def: Def | string): string {
   if (typeof def === "string") return def;
   const tag = def.tagName ?? (def.type === "image" ? "img" : "div");
   const attrs: Record<string, string | boolean> = { ...def.attributes };
   if (def.classes?.length) attrs.class = def.classes.join(" ");
+  const style = Object.entries(def.style ?? {})
+    .map(([k, v]) => `${k}:${v}`)
+    .join(";");
+  if (style && attrs.style === undefined) attrs.style = style;
   const attrHtml = Object.entries(attrs)
     .filter(([, v]) => v !== false)
     .map(([k, v]) => (v === true ? ` ${k}` : ` ${k}="${escAttr(String(v))}"`))

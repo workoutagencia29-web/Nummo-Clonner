@@ -14,6 +14,8 @@ import {
   CLIENT_UPLOAD_LIMITS,
   checkFiles,
   formatBytes,
+  HINT_TEXT,
+  type LibraryImage,
   parseAssetResponse,
 } from "@/editor/grapes/assets";
 import { IMAGE_UPLOAD_LIMITS } from "@/server/services/assets";
@@ -51,7 +53,7 @@ function boot(offerId, html) {
 Object.assign(window, { boot });
 `;
 
-const LIBRARY = [
+const LIBRARY: LibraryImage[] = [
   {
     type: "image",
     src: `/os-assets/${"a".repeat(64)}.webp`,
@@ -79,6 +81,8 @@ let browser: Browser;
 let bundle: string;
 let grapesCss: string;
 let png: Buffer;
+/** Imagens de proporções variadas (endereço → PNG) para o teste da grade. */
+const shapes = new Map<string, Buffer>();
 
 beforeAll(async () => {
   const stub: Plugin = {
@@ -111,11 +115,13 @@ afterAll(async () => {
 });
 
 let page: Page;
+let library: LibraryImage[];
 let listCalls: number;
 let uploads: PwRequest[];
 let uploadReply: UploadReply;
 
 beforeEach(async () => {
+  library = LIBRARY;
   listCalls = 0;
   uploads = [];
   uploadReply = { status: 200, body: { data: [] } };
@@ -136,7 +142,7 @@ beforeEach(async () => {
     if (url.pathname === "/bundle.js") return route.fulfill({ contentType: "text/javascript", body: bundle });
     if (url.pathname === `/api/offers/${OFFER}/assets`) {
       listCalls++;
-      return route.fulfill({ contentType: "application/json", body: JSON.stringify({ data: LIBRARY }) });
+      return route.fulfill({ contentType: "application/json", body: JSON.stringify({ data: library }) });
     }
     if (url.pathname === "/api/assets/upload") {
       uploads.push(req);
@@ -146,7 +152,10 @@ beforeEach(async () => {
         body: JSON.stringify(uploadReply.body),
       });
     }
-    if (/\.(png|webp|jpe?g|gif|svg)$/.test(url.pathname)) return route.fulfill({ contentType: "image/png", body: png });
+    const shaped = shapes.get(url.pathname);
+    if (shaped) return route.fulfill({ contentType: "image/png", body: shaped });
+    if (/\.(png|webp|jpe?g|gif|svg|ico)$/.test(url.pathname))
+      return route.fulfill({ contentType: "image/png", body: png });
     return route.fulfill({ status: 404, body: "" });
   });
   await page.goto(`${ORIGIN}/`);
@@ -188,7 +197,9 @@ describe("configureAssets no navegador", () => {
     expect(await page.locator(".os-am .gjs-am-dimensions").allTextContents()).toEqual(["1200 × 600 · 2 KB", "3,1 MB"]);
     expect(await page.locator(".gjs-mdl-title").textContent()).toBe("Escolher imagem");
     expect(await page.locator("#gjs-am-title").textContent()).toBe("Arraste imagens para cá ou clique para escolher");
-    expect(await page.locator(".os-am-hint").textContent()).toMatch(/^Clique numa imagem para usar/);
+    expect(await page.locator(".os-am-hint").textContent()).toBe(
+      "Clique numa imagem para usar. Dois cliques usam e fecham. JPG, PNG, WebP, GIF, AVIF ou SVG até 15 MB; ICO até 1 MB.",
+    );
     expect(await page.locator("#gjs-am-uploadFile").getAttribute("accept")).toBe(ACCEPTED_IMAGES);
     expect(await page.locator(".os-am .gjs-am-close").count()).toBe(0);
     const columns = await page
@@ -247,9 +258,12 @@ describe("configureAssets no navegador", () => {
     uploadReply = {
       status: 415,
       body: {
-        error: '"falsa.png" não é uma imagem aceita. Envie JPG, PNG, WebP, GIF, AVIF ou SVG.',
+        error: '"falsa.png" não é uma imagem aceita. Envie JPG, PNG, WebP, GIF, AVIF, SVG ou ICO.',
         errors: [
-          { name: "falsa.png", error: '"falsa.png" não é uma imagem aceita. Envie JPG, PNG, WebP, GIF, AVIF ou SVG.' },
+          {
+            name: "falsa.png",
+            error: '"falsa.png" não é uma imagem aceita. Envie JPG, PNG, WebP, GIF, AVIF, SVG ou ICO.',
+          },
         ],
       },
     };
@@ -263,7 +277,7 @@ describe("configureAssets no navegador", () => {
     const calls = await toasts();
     expect(calls.at(-1)).toEqual({
       type: "error",
-      message: '"falsa.png" não é uma imagem aceita. Envie JPG, PNG, WebP, GIF, AVIF ou SVG.',
+      message: '"falsa.png" não é uma imagem aceita. Envie JPG, PNG, WebP, GIF, AVIF, SVG ou ICO.',
     });
     expect(await assetNames()).toEqual(["capa-nova.webp", "selo.png"]);
     expect((await imageAttributes()).src).toBe("/old.png");
@@ -302,7 +316,7 @@ describe("configureAssets no navegador", () => {
       .setInputFiles({ name: "notas.txt", mimeType: "text/plain", buffer: Buffer.from("oi") });
     await page.waitForFunction(() => (window as unknown as { __toasts: unknown[] }).__toasts.length > 0);
     expect(await toasts()).toEqual([
-      { type: "error", message: '"notas.txt" não é uma imagem aceita. Envie JPG, PNG, WebP, GIF, AVIF ou SVG.' },
+      { type: "error", message: '"notas.txt" não é uma imagem aceita. Envie JPG, PNG, WebP, GIF, AVIF, SVG ou ICO.' },
     ]);
     expect(uploads).toHaveLength(0);
   });
@@ -404,10 +418,151 @@ describe("configureAssets no navegador", () => {
   });
 });
 
+describe("grade com muitas imagens", () => {
+  /** 40 imagens: quadradas, altas, largas, página inteira, faixa, ícone e transparentes; um nome bem comprido. */
+  async function bigLibrary(): Promise<LibraryImage[]> {
+    const sizes: [number, number][] = [
+      [1200, 1200],
+      [400, 1400],
+      [1600, 400],
+      [1200, 630],
+      [300, 3000],
+      [3000, 200],
+      [64, 64],
+      [800, 1000],
+    ];
+    const images: LibraryImage[] = [];
+    for (let i = 0; i < 40; i++) {
+      const [width, height] = sizes[i % sizes.length];
+      const transparent = i % 5 === 0;
+      const src = `/os-assets/${(i + 1).toString(16).padStart(2, "0").repeat(32)}.png`;
+      if (!shapes.has(src)) {
+        // Arquivo pequeno com a mesma proporção (a prévia só olha a proporção).
+        const scale = 200 / Math.max(width, height);
+        shapes.set(
+          src,
+          await sharp({
+            create: {
+              width: Math.max(1, Math.round(width * scale)),
+              height: Math.max(1, Math.round(height * scale)),
+              channels: 4,
+              background: transparent ? { r: 0, g: 0, b: 0, alpha: 0 } : { r: 40 + i * 5, g: 90, b: 200, alpha: 1 },
+            },
+          })
+            .png()
+            .toBuffer(),
+        );
+      }
+      const name =
+        i === 3 ? "nome-de-arquivo-muito-comprido-sem-espacos-que-precisa-ser-cortado.png" : `imagem-${i + 1}.png`;
+      images.push({ type: "image", src, name, width, height, bytes: 1000 + i });
+    }
+    return images;
+  }
+
+  /** Cartões que se cruzam (deveria ser nenhum) e medidas para conferir a grade. */
+  async function layout() {
+    return page.evaluate(() => {
+      const cards = Array.from(document.querySelectorAll<HTMLElement>(".os-am .gjs-am-asset"));
+      const rects = cards.map((c) => c.getBoundingClientRect());
+      const overlaps: string[] = [];
+      rects.forEach((a, i) => {
+        rects.slice(i + 1).forEach((b, k) => {
+          if (a.left < b.right - 1 && b.left < a.right - 1 && a.top < b.bottom - 1 && b.top < a.bottom - 1) {
+            overlaps.push(`${i}×${i + k + 1}`);
+          }
+        });
+      });
+      const contentFits = cards.every((card) => {
+        const box = card.getBoundingClientRect();
+        return Array.from(card.children).every((child) => child.getBoundingClientRect().bottom <= box.bottom + 0.5);
+      });
+      const preview = cards[0].querySelector<HTMLElement>(".gjs-am-preview") as HTMLElement;
+      const previewBox = cards[0].querySelector<HTMLElement>(".gjs-am-preview-cont") as HTMLElement;
+      const name = cards[3].querySelector<HTMLElement>(".gjs-am-name") as HTMLElement;
+      const list = document.querySelector<HTMLElement>(".os-am .gjs-am-assets") as HTMLElement;
+      return {
+        count: cards.length,
+        overlaps,
+        contentFits,
+        heightSpread: Math.max(...rects.map((r) => r.height)) - Math.min(...rects.map((r) => r.height)),
+        previewRatio: previewBox.getBoundingClientRect().width / previewBox.getBoundingClientRect().height,
+        previewSize: getComputedStyle(preview).backgroundSize,
+        nameCut: name.scrollWidth > name.clientWidth && getComputedStyle(name).textOverflow === "ellipsis",
+        nameInside: name.getBoundingClientRect().right <= rects[3].right + 0.5,
+        scrolls: list.scrollHeight > list.clientHeight,
+        pageScrollsSideways: document.documentElement.scrollWidth > window.innerWidth,
+      };
+    });
+  }
+
+  it("40 imagens de proporções diferentes: cartões lado a lado, sem encavalar, no computador e em janela estreita", async () => {
+    library = await bigLibrary();
+    for (const size of [
+      { width: 1400, height: 900 },
+      { width: 420, height: 800 },
+    ]) {
+      await page.setViewportSize(size);
+      await page.evaluate(() =>
+        (window as unknown as { editor: { runCommand(c: string): void } }).editor.runCommand("open-assets"),
+      );
+      await page.waitForFunction(() => document.querySelectorAll(".os-am .gjs-am-asset").length === 40);
+      const result = await layout();
+      expect(result).toMatchObject({
+        count: 40,
+        overlaps: [],
+        contentFits: true,
+        previewSize: "contain",
+        nameCut: true,
+        nameInside: true,
+        scrolls: true,
+        pageScrollsSideways: false,
+      });
+      // Todos os cartões com a mesma altura (fora frações de pixel), a prévia com proporção fixa (4:3).
+      expect(result.heightSpread).toBeLessThan(1.5);
+      expect(result.previewRatio).toBeCloseTo(4 / 3, 1);
+      // Rolando até o fim, o último cartão aparece inteiro.
+      await page.locator(".os-am .gjs-am-assets").evaluate((el) => {
+        el.scrollTop = el.scrollHeight;
+      });
+      const last = await page.evaluate(() => {
+        const list = document.querySelector(".os-am .gjs-am-assets") as HTMLElement;
+        const cards = list.querySelectorAll(".gjs-am-asset");
+        const box = (cards[cards.length - 1] as HTMLElement).getBoundingClientRect();
+        return box.bottom <= list.getBoundingClientRect().bottom + 0.5 && box.height > 100;
+      });
+      expect(last).toBe(true);
+      await page.locator(".gjs-mdl-btn-close").click();
+    }
+  });
+});
+
 describe("funções auxiliares do editor", () => {
   it("usa os mesmos limites do servidor", () => {
     expect(CLIENT_UPLOAD_LIMITS.maxFileBytes).toBe(IMAGE_UPLOAD_LIMITS.maxFileBytes);
     expect(CLIENT_UPLOAD_LIMITS.maxFiles).toBe(IMAGE_UPLOAD_LIMITS.maxFiles);
+    expect(CLIENT_UPLOAD_LIMITS.maxIconBytes).toBe(IMAGE_UPLOAD_LIMITS.maxIconBytes);
+  });
+
+  it("a dica da janela diz o limite de cada formato (o .ico tem o próprio, menor)", () => {
+    const mb = (bytes: number) => `${bytes / (1024 * 1024)} MB`;
+    expect(HINT_TEXT).toContain(`SVG até ${mb(IMAGE_UPLOAD_LIMITS.maxFileBytes)};`);
+    expect(HINT_TEXT).toContain(`ICO até ${mb(IMAGE_UPLOAD_LIMITS.maxIconBytes)}.`);
+    expect(HINT_TEXT).not.toMatch(/ICO até 15 MB|SVG ou ICO/);
+  });
+
+  it("aceita .ico (favicon), com o limite próprio de 1 MB", () => {
+    expect(ACCEPTED_IMAGES).toContain(".ico");
+    expect(ACCEPTED_IMAGES).toContain("image/x-icon");
+    const result = checkFiles([
+      { name: "favicon.ico", size: 4286, type: "image/x-icon" },
+      { name: "icone", size: 4286, type: "image/vnd.microsoft.icon" },
+      { name: "pesado.ico", size: 2 * 1024 * 1024, type: "image/x-icon" },
+    ]);
+    expect(result.accepted).toEqual([0, 1]);
+    expect(result.problems).toEqual([
+      '"pesado.ico" tem 2,0 MB. Um ícone .ico pode ter no máximo 1 MB (ícones de aba costumam ter poucos KB).',
+    ]);
   });
 
   it("checkFiles avisa antes de enviar, mas deixa arquivos sem tipo para o servidor", () => {
@@ -423,7 +578,7 @@ describe("funções auxiliares do editor", () => {
     expect(result.accepted).toEqual([0, 1, 6]);
     expect(result.problems).toEqual([
       '"IMG_1.HEIC" está no formato HEIC (fotos do iPhone). Exporte como JPG ou PNG e envie de novo.',
-      '"doc.pdf" não é uma imagem aceita. Envie JPG, PNG, WebP, GIF, AVIF ou SVG.',
+      '"doc.pdf" não é uma imagem aceita. Envie JPG, PNG, WebP, GIF, AVIF, SVG ou ICO.',
       '"grande.png" tem 16,0 MB. O limite é 15 MB por imagem.',
       '"vazia.png" está vazio.',
     ]);

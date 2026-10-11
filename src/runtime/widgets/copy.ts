@@ -1,16 +1,21 @@
 /**
  * Copiar texto com aviso no próprio botão (cupom da roleta, dados do SPEI na
- * janela de pagamento). Sem dependências: entra também no script da janela de
- * pagamento (src/runtime/payments).
+ * janela de pagamento). Sem dependências (só ./texts, que também não tem):
+ * entra também no script da janela de pagamento (src/runtime/payments), que
+ * passa os textos no idioma do produto.
  */
+import { t } from "./texts";
 
-/** Copia o texto (cupom; dados do SPEI na janela de pagamento) e avisa no botão. */
-export function copyText(text: string, button: HTMLElement, okLabel = "Copiado!", failLabel = "Copie o cupom") {
+/**
+ * Copia o texto (cupom; dados do SPEI na janela de pagamento) e avisa no botão.
+ * Sem os textos do aviso, os do cupom no idioma da página (#os-textos).
+ */
+export function copyText(text: string, button: HTMLElement, okLabel?: string, failLabel?: string) {
   // O texto original fica guardado: dois cliques seguidos não deixam o "Copiado!" no botão.
   const label = button.getAttribute("data-os-label") || button.textContent || "";
   button.setAttribute("data-os-label", label);
   const done = (ok: boolean) => {
-    button.textContent = ok ? okLabel : failLabel;
+    button.textContent = ok ? okLabel || t("copied", "Copiado!") : failLabel || t("copyFail", "Copie o cupom");
     setTimeout(() => {
       button.textContent = label;
     }, 2000);

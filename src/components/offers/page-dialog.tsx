@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { SCROLL_DIALOG } from "@/components/app/scroll-dialog";
+import { LegalTemplateNote, TextPricesNote } from "@/components/offers/currency-picker";
 import { BLANK_TEMPLATE, TemplateGallery } from "@/components/offers/template-gallery";
 import { Button } from "@/components/ui/button";
 import {
@@ -18,7 +20,9 @@ import { Spinner } from "@/components/ui/spinner";
 import { isTemplateId, templateSummary } from "@/editor/templates/catalog";
 import { useAction } from "@/hooks/use-action";
 import { PAGE_TYPE_LABEL } from "@/lib/labels";
+import { DEFAULT_CURRENCY, type StoreCurrency } from "@/lib/store";
 import { pageSlugProblem, RESERVED_SLUGS, slugify, uniqueSlug } from "@/lib/text";
+import { cn } from "@/lib/utils";
 import { createPageAction, updatePageAction } from "@/server/actions/pages";
 
 type PageType = keyof typeof PAGE_TYPE_LABEL;
@@ -45,6 +49,7 @@ export function PageDialog({
   offerId,
   page,
   existingSlugs,
+  offerCurrency = DEFAULT_CURRENCY,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -53,6 +58,8 @@ export function PageDialog({
   page?: PageDialogPage | null;
   /** Endereços já usados na oferta (para sugerir um livre ao escolher um modelo). */
   existingSlugs?: string[];
+  /** Moeda da oferta: modelo com preço escrito em R$ avisa quando ela não é o real. */
+  offerCurrency?: StoreCurrency;
 }) {
   const editing = Boolean(page);
   const [name, setName] = useState("");
@@ -95,6 +102,15 @@ export function PageDialog({
     }
   }
 
+  /**
+   * Leva ao campo com erro: na "Nova página" os campos ficam embaixo da galeria,
+   * que rola, e o botão de criar está sempre à vista — sem isso, o erro podia
+   * ficar fora da vista.
+   */
+  function showField(id: string) {
+    requestAnimationFrame(() => document.getElementById(id)?.focus());
+  }
+
   function submit(e: React.FormEvent) {
     e.preventDefault();
     const found: typeof errors = {};
@@ -104,12 +120,17 @@ export function PageDialog({
     const problem = pageSlugProblem(finalSlug, page?.slug);
     if (problem) found.slug = problem;
     setErrors(found);
-    if (Object.keys(found).length) return;
+    if (Object.keys(found).length) {
+      showField(found.name ? "page-name" : "page-slug");
+      return;
+    }
 
     const opts = {
       silentError: true,
-      onError: (msg: string, field?: string) =>
-        setErrors(field === "slug" ? { slug: msg } : field === "name" ? { name: msg } : { name: msg }),
+      onError: (msg: string, field?: string) => {
+        setErrors(field === "slug" ? { slug: msg } : { name: msg });
+        showField(field === "slug" ? "page-slug" : "page-name");
+      },
       onSuccess: () => onOpenChange(false),
     };
     if (page) {
@@ -197,9 +218,9 @@ export function PageDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={editing ? "sm:max-w-md" : "max-h-[94vh] overflow-y-auto sm:max-w-4xl"}>
-        <form onSubmit={submit}>
-          <DialogHeader>
+      <DialogContent className={editing ? "sm:max-w-md" : cn(SCROLL_DIALOG.content, "sm:max-w-4xl")}>
+        <form onSubmit={submit} className={editing ? undefined : SCROLL_DIALOG.form}>
+          <DialogHeader className={editing ? undefined : SCROLL_DIALOG.header}>
             <DialogTitle>{editing ? "Editar página" : "Nova página"}</DialogTitle>
             <DialogDescription>
               {editing
@@ -215,8 +236,10 @@ export function PageDialog({
               {typeField}
             </FieldGroup>
           ) : (
-            <div className="my-5 flex flex-col gap-5">
+            <div className={cn(SCROLL_DIALOG.body, "flex flex-col gap-5")}>
               <TemplateGallery value={templateId} onValueChange={chooseTemplate} label="Modelo da página" />
+              <TextPricesNote currency={offerCurrency} templateId={templateId} withCurrency className="-mt-2" />
+              <LegalTemplateNote currency={offerCurrency} templateId={templateId} withCurrency className="-mt-2" />
 
               <div className="grid gap-4 sm:grid-cols-2 md:grid-cols-[1fr_1fr_13rem]">
                 {nameField}
@@ -226,7 +249,7 @@ export function PageDialog({
             </div>
           )}
 
-          <DialogFooter>
+          <DialogFooter className={editing ? undefined : SCROLL_DIALOG.footer}>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
               Cancelar
             </Button>

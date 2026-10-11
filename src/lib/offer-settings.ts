@@ -3,6 +3,7 @@
  * (Page.seo). Usadas pelo painel, pela prévia e pelo ZIP.
  */
 import { z } from "zod";
+import { DEFAULT_CURRENCY, STORE_CURRENCY_IDS, type StoreCurrency } from "@/lib/store";
 
 const text = (max: number) => z.string().trim().max(max);
 
@@ -16,7 +17,7 @@ const storageKey = z
 
 export const CompanySchema = z.object({
   name: text(160).default(""),
-  /** CNPJ ou CPF, como o usuário digitar. */
+  /** CNPJ ou CPF (ou RFC, NIF… de fora do Brasil), como o usuário digitar. */
   document: text(40).default(""),
   email: text(160).default(""),
   phone: text(40).default(""),
@@ -45,6 +46,12 @@ export const OfferSettingsSchema = z.object({
    * idioma que já declara (uma página clonada em inglês continua "en").
    */
   language: z.enum(PAGE_LANGUAGES).default(""),
+  /**
+   * Moeda em que a oferta roda (src/lib/offer-currency.ts): o que nasce com
+   * preço (blocos e modelos da loja, produto do pagamento na página) começa
+   * nela. Ofertas de antes (sem a chave) e valor estranho: real.
+   */
+  currency: z.enum(STORE_CURRENCY_IDS).catch(DEFAULT_CURRENCY),
 });
 export type OfferSettings = z.infer<typeof OfferSettingsSchema>;
 
@@ -84,8 +91,31 @@ export const COMPANY_PLACEHOLDERS: Record<string, (c: Company) => string> = {
   "{{ENDERECO}}": (c) => c.address,
 };
 
-/** CPF (11 dígitos) ou CNPJ (14 dígitos) pelo número digitado; null = não dá para saber. */
-export function documentKind(document: string): "CPF" | "CNPJ" | null {
+/** Tipo do documento da empresa, que vira o rótulo antes do número nas páginas. */
+export type DocumentKind = "CPF" | "CNPJ" | "RFC" | "NIF";
+
+/**
+ * RFC do México: 3 letras (empresa) ou 4 (pessoa física), a data em 6
+ * algarismos e 3 letras/algarismos ("ABC680524P76", "GODE561231GR8").
+ */
+const RFC_RE = /^[A-ZÑ&]{3,4}\d{6}[A-Z\d]{3}$/;
+/**
+ * NIF da Espanha (com ou sem o "ES" do IVA): DNI (8 algarismos + letra), NIE
+ * (X/Y/Z + 7 algarismos + letra) e CIF/NIF de empresa (letra + 7 algarismos +
+ * letra ou algarismo). Portugal com o "PT": 9 algarismos.
+ */
+const NIF_RE = /^(?:ES)?(?:\d{8}[A-Z]|[XYZ]\d{7}[A-Z]|[A-HJNP-SUVW]\d{7}[A-J\d])$|^PT\d{9}$/;
+
+/**
+ * Tipo do documento pelo que foi digitado: CPF (11 algarismos), CNPJ (14), RFC
+ * (México) ou NIF (Espanha; Portugal com "PT" na frente, ou os 9 algarismos só
+ * numa oferta em euro — sem a moeda, 9 algarismos não são reconhecidos). null =
+ * não dá para saber (o rótulo da página fica como está).
+ */
+export function documentKind(document: string, currency?: StoreCurrency | null): DocumentKind | null {
+  const code = document.toUpperCase().replace(/[\s.\-/]/g, "");
+  if (RFC_RE.test(code)) return "RFC";
+  if (NIF_RE.test(code) || (currency === "EUR" && /^\d{9}$/.test(code))) return "NIF";
   const digits = document.replace(/\D/g, "").length;
   return digits === 11 ? "CPF" : digits === 14 ? "CNPJ" : null;
 }
@@ -121,15 +151,16 @@ const OPTIONAL_PARTS: Record<"phone" | "address", RegExp[]> = {
 /**
  * Troca os marcadores preenchidos. Telefone e endereço vazios saem da página
  * junto com o trecho em volta (OPTIONAL_PARTS); nome, documento e e-mail vazios
- * ficam visíveis para o usuário notar. O rótulo do documento vira "CPF" ou
- * "CNPJ" conforme o número.
+ * ficam visíveis para o usuário notar. O rótulo do documento vira "CPF",
+ * "CNPJ", "RFC" ou "NIF" conforme o número (`currency`: a moeda da oferta, para
+ * o NIF de Portugal só com algarismos — ver documentKind).
  */
-export function fillCompanyPlaceholders(html: string, company: Company) {
+export function fillCompanyPlaceholders(html: string, company: Company, currency?: StoreCurrency | null) {
   let out = html;
   for (const field of ["phone", "address"] as const) {
     if (!company[field].trim()) for (const re of OPTIONAL_PARTS[field]) out = out.replace(re, "");
   }
-  const kind = documentKind(company.document);
+  const kind = documentKind(company.document, currency);
   if (kind) out = out.replace(DOCUMENT_LABEL_RE, kind);
   for (const [marker, value] of Object.entries(COMPANY_PLACEHOLDERS)) {
     const v = value(company);

@@ -2,12 +2,15 @@
  * CSS dos widgets na página publicada (prévia e ZIP). O visual de cada bloco
  * vem das regras editáveis do editor; aqui ficam só estados de comportamento
  * (popup aberto, notificação visível, etapa atual do quiz, roleta girando e o
- * resultado), animações e mensagens do formulário.
+ * resultado, produtos escondidos pela busca da loja e a linha de resultados),
+ * animações e mensagens do formulário.
  * Classes com prefixo os- (colocadas pelo script) para não brigar com a página.
  * (Realce e pulso dos botões vão no CSS da própria página: ver
  * src/editor/widgets/button.ts.)
  * Compacto de propósito: entra no script de todas as páginas.
  */
+import { BAR_COLORS, BAR_SIZES } from "@/lib/countdown-bar";
+
 export const WIDGET_CSS =
   // Barra de escassez (listras andando enquanto diminui).
   "[data-os-sc-fill]{transition:width .8s}" +
@@ -39,19 +42,36 @@ export const WIDGET_CSS =
   ".os-wh-cf{position:fixed;top:0;left:0;width:100%;height:100%;overflow:hidden;pointer-events:none;z-index:2147483600}" +
   ".os-wh-cf i{position:absolute;top:-16px;width:9px;height:14px;border-radius:2px;animation:os-wh-f 3s cubic-bezier(.25,.6,.45,1) both}" +
   "@keyframes os-wh-f{to{transform:translate3d(var(--x),112vh,0) rotate(var(--r))}}" +
+  // Loja: o que a busca escondeu, a linha de resultados e a sombra do cabeçalho preso no topo.
+  ".os-sh-hide{display:none!important}.os-sh-res{box-sizing:border-box;max-width:1200px;margin:14px auto;padding:0 16px;font-size:15px;line-height:1.4;text-align:left}" +
+  ".os-sh-res button{margin:0;padding:0;border:0;background:none;color:#1f63d6;font:inherit;font-weight:600;text-decoration:underline;cursor:pointer}" +
+  // Linha dentro do cabeçalho preso no topo: nas cores dele.
+  ".os-top .os-sh-res{margin:0 auto;padding:8px 16px;font-size:14px}.os-top .os-sh-res button{color:inherit}" +
+  ".os-store-header.os-top{box-shadow:0 2px 8px #0002}" +
   "@media (prefers-reduced-motion:reduce){.os-sc-a *,.os-qz-in,.os-wh-done [data-os-wh-result],.os-wh-ptr{animation:none!important}}";
 
 /**
  * Faixa do prêmio da roleta na página de vendas (src/runtime/widgets/prize.ts):
- * fixa no topo, escura e discreta, com o contador em destaque e o cupom.
+ * o mesmo visual da "Contagem no topo (barra)" (src/lib/countdown-bar.ts) —
+ * barra preta fina, frase, "TERMINA EM" e o tempo em caixinhas —, com o cupom
+ * (copiar) e o fechar. Fixa no topo pela classe os-top (src/runtime/widgets/top.ts).
  */
+const K = BAR_COLORS;
+const Z = BAR_SIZES;
 export const PRIZE_CSS =
-  ".os-pz{position:fixed;top:0;left:0;right:0;z-index:2147483000;display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:6px 14px;margin:0;padding:9px 46px 9px 14px;background:#111827;color:#fff;font:600 14px/1.4 system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;text-align:center;box-shadow:0 6px 18px rgba(0,0,0,.25)}" +
-  ".os-pz p{margin:0}.os-pz b{font-weight:800;color:#fde047}" +
-  ".os-pz .os-pz-t{display:inline-block;min-width:3.4em;margin-left:2px;padding:1px 7px;border-radius:6px;background:#fde047;color:#111827;font-variant-numeric:tabular-nums}" +
-  ".os-pz-cp{display:inline-flex;align-items:center;gap:8px;padding:3px 3px 3px 10px;border:1px dashed #fde047;border-radius:9px;font-size:13px}" +
-  ".os-pz-cp code{font:800 13px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.06em;color:#fff}" +
-  ".os-pz-cp button{margin:0;padding:5px 10px;border:0;border-radius:6px;background:#fde047;color:#111827;font-family:inherit;font-size:12px;font-weight:800;line-height:1;cursor:pointer}" +
+  `.os-pz{display:flex;flex-wrap:wrap;align-items:center;justify-content:center;gap:${Z.gap};padding:${Z.pad};padding-right:48px;background:${K.bg};color:${K.text};font-size:${Z.msg};font-weight:${Z.weight};line-height:1.3;text-align:center}` +
+  ".os-pz p{margin:0}.os-pz b{font-weight:inherit;color:inherit}" +
+  `.os-pz-tm{display:flex;align-items:center;justify-content:center;gap:${Z.sepGap};white-space:nowrap}` +
+  `.os-pz-l{margin-right:6px;font-size:${Z.label};font-weight:600;letter-spacing:${Z.labelSpacing};text-transform:uppercase;opacity:.9}` +
+  `.os-pz-t{display:flex;align-items:center;gap:${Z.sepGap};font-variant-numeric:tabular-nums}` +
+  `.os-pz .os-pz-t b{min-width:${Z.boxW};padding:${Z.boxPad};border:1px solid ${K.boxBorder};border-radius:6px;background:${K.boxBg};color:${K.num};font-size:${Z.num};font-weight:${Z.weight};line-height:22px;box-sizing:border-box}` +
+  // Faixa aberta: substitui a "Contagem no topo (barra)" da página (classe os-pz-on, prize.ts).
+  ".os-pz-on [data-os-widget=countdown][data-os-cd-style=bar]{display:none!important}" +
+  `.os-pz-cp{display:inline-flex;align-items:center;gap:8px;padding:2px 2px 2px 10px;border:1px dashed ${K.boxBorder};border-radius:7px;font-size:13px;font-weight:600}` +
+  `.os-pz-cp code{font:800 13px/1 ui-monospace,Menlo,Consolas,monospace;letter-spacing:.06em;color:${K.num}}` +
+  `.os-pz-cp button{margin:0;padding:5px 10px;border:0;border-radius:5px;background:${K.num};color:#111827;font-family:inherit;font-size:12px;font-weight:800;line-height:1;cursor:pointer}` +
   ".os-pz-x{position:absolute;top:50%;right:8px;width:30px;height:30px;margin:-15px 0 0;padding:0;border:0;border-radius:50%;background:#ffffff1f;color:#fff;font:20px/1 sans-serif;cursor:pointer}" +
-  ".os-pz button:focus-visible{outline:3px solid #fde047;outline-offset:2px}" +
-  "@media (max-width:480px){.os-pz{gap:6px 10px;padding:8px 42px 8px 10px;font-size:13px}}";
+  `.os-pz button:focus-visible{outline:3px solid ${K.num};outline-offset:2px}` +
+  `@media (max-width:480px){.os-pz{gap:${Z.gapMobile};padding:${Z.padMobile};padding-right:40px;font-size:${Z.msgMobile}}` +
+  `.os-pz-l{margin-right:2px;font-size:${Z.labelMobile}}.os-pz-tm,.os-pz-t{gap:${Z.sepGapMobile}}` +
+  `.os-pz .os-pz-t b{min-width:${Z.boxWMobile};padding:${Z.boxPadMobile};font-size:${Z.numMobile};line-height:20px}.os-pz-x{right:4px}}`;

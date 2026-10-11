@@ -14,7 +14,13 @@ import { env } from "@/lib/env";
 import { UserError } from "@/lib/errors";
 import { timeAgo } from "@/lib/format";
 import { appVersion, backupHome, keyFingerprint } from "./context";
-import { type BackupKindValue, CORRUPT_FILES_RE, compatibilityProblem, isDataless } from "./format";
+import {
+  type BackupKindValue,
+  CORRUPT_FILES_RE,
+  compatibilityProblem,
+  isDataless,
+  UNREADABLE_FILES_RE,
+} from "./format";
 import { type BackupFileView, cloudOnlyTarget, forgetManifest, listBackupFiles } from "./listing";
 import { prismaQueryable, QUEUED_STEP, RESTORE_IN_PROGRESS_MESSAGE, requestBackup } from "./queue";
 import { openBackup } from "./reader";
@@ -169,7 +175,9 @@ export async function getBackupOverview(now = new Date()): Promise<BackupOvervie
           ? { at: lastFailed.finishedAt, message: lastFailed.errorMessage }
           : null,
       folderProblem: folder.unavailable,
-      lastWarning: lastDone ? (warningsOf(lastDone.warnings).find((w) => CORRUPT_FILES_RE.test(w)) ?? null) : null,
+      lastWarning: lastDone
+        ? (warningsOf(lastDone.warnings).find((w) => CORRUPT_FILES_RE.test(w) || UNREADABLE_FILES_RE.test(w)) ?? null)
+        : null,
     },
     (d) => timeAgo(d),
   );

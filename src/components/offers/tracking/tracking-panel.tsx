@@ -271,6 +271,7 @@ export function TrackingPanel({
               pages={pages}
               pixelCount={activePixels.length}
               forwarding={settings.forwarding}
+              languageHint={data.consentLanguage ?? null}
             />
           </TabsContent>
           <TabsContent value="utms" {...KEEP}>

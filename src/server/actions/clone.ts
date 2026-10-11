@@ -4,6 +4,7 @@ import { revalidatePath } from "next/cache";
 import { z } from "zod";
 import { prisma } from "@/lib/db";
 import { createPreviewToken, previewUrl } from "@/lib/preview";
+import { STORE_CURRENCY_IDS } from "@/lib/store";
 import { protectedAction } from "@/server/action";
 import * as clone from "@/server/services/clone";
 import type { CloneResult } from "@/worker/clone/types";
@@ -73,6 +74,8 @@ export const saveCloneAction = protectedAction(
     name: z.string().trim().min(1, "Dê um nome para a oferta.").max(120, "O nome pode ter no máximo 120 caracteres."),
     folderId: id.nullish(),
     mode: z.enum(["EDITABLE", "PRESERVE_JS"]),
+    /** "Em qual moeda essa oferta vai rodar?" (fica marcada na próxima). */
+    currency: z.enum(STORE_CURRENCY_IDS, "Escolha a moeda da oferta.").optional(),
     keepRemoved: z.array(z.string().max(200)).max(500).default([]),
     childJobIds: z
       .array(id)

@@ -1,14 +1,15 @@
 "use client";
 
-import { LockIcon } from "lucide-react";
-import Link from "next/link";
+import { KeyRoundIcon, LockIcon } from "lucide-react";
 import { useId, useState } from "react";
 import { Callout } from "@/components/offers/tracking/callout";
 import { SaveBar } from "@/components/offers/tracking/form-kit";
+import { Button } from "@/components/ui/button";
 import { Field, FieldDescription, FieldError, FieldLabel } from "@/components/ui/field";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useAction } from "@/hooks/use-action";
+import { OFFER_CURRENCY_NAME, offerCurrencyLabel, paymentCurrencyFor } from "@/lib/offer-currency";
 import type { PaymentKeyState } from "@/lib/payments/checks";
 import {
   CURRENCY_LABEL,
@@ -30,7 +31,9 @@ import {
   type PaymentProductInput,
   parseAmount,
   paymentProductProblems,
+  switchPaymentCurrency,
 } from "@/lib/payments/rules";
+import type { StoreCurrency } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { savePaymentProductAction } from "@/server/actions/payments";
 
@@ -63,22 +66,41 @@ const FIELDS: PaymentProductField[] = [
   "accessUrl",
 ];
 
-/** Valores do formulário para um link que ainda não tem produto. */
-export function newProductDraft(pages: PaymentPageOption[]): PaymentProductInput {
+/** Moeda do produto novo numa oferta em real (a Kyvo não cobra em real): a de antes da moeda da oferta. */
+const FALLBACK_CURRENCY: PaymentCurrencyId = "MXN";
+
+/**
+ * Valores do formulário para um link que ainda não tem produto: na moeda da
+ * oferta quando a Kyvo cobra nela (com as formas de pagamento e o idioma da
+ * janela dessa moeda: peso mexicano → SPEI + cartão, em espanhol); senão (oferta
+ * em real ou de antes da pergunta, `offerCurrency` null), na moeda de um produto
+ * já salvo na oferta (`productCurrency`) ou em peso mexicano.
+ */
+export function newProductDraft(
+  pages: PaymentPageOption[],
+  offerCurrency: StoreCurrency | null = null,
+  productCurrency: PaymentCurrencyId | null = null,
+): PaymentProductInput {
   const thankYou = pages.filter((p) => p.type === "THANK_YOU");
+  const currency = (offerCurrency && paymentCurrencyFor(offerCurrency)) ?? productCurrency ?? FALLBACK_CURRENCY;
   return {
     name: "",
     amount: "",
-    currency: "MXN",
-    methods: defaultMethods("MXN"),
-    locale: defaultLocale("MXN"),
+    currency,
+    methods: defaultMethods(currency),
+    locale: defaultLocale(currency),
     thankYouPageId: thankYou.length === 1 ? thankYou[0].id : null,
     accessUrl: "",
   };
 }
 
-function draftOf(payment: PaymentProductValue | null, pages: PaymentPageOption[]): PaymentProductInput {
-  if (!payment) return newProductDraft(pages);
+function draftOf(
+  payment: PaymentProductValue | null,
+  pages: PaymentPageOption[],
+  offerCurrency: StoreCurrency | null,
+  productCurrency: PaymentCurrencyId | null,
+): PaymentProductInput {
+  if (!payment) return newProductDraft(pages, offerCurrency, productCurrency);
   return {
     name: payment.name,
     amount: payment.amount,
@@ -92,9 +114,15 @@ function draftOf(payment: PaymentProductValue | null, pages: PaymentPageOption[]
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
+/** Problemas de valor e de formas de pagamento de um produto já salvo (os que impedem a cobrança). */
+function savedPaymentProblems(saved: PaymentProductInput): Partial<Record<PaymentProductField, string>> {
+  const { amount, methods } = paymentProductProblems(saved);
+  return { ...(amount && { amount }), ...(methods && { methods }) };
+}
+
 /** Título do aviso da chave do gateway no formulário do produto. */
 const GATEWAY_KEY_TITLE: Record<Exclude<PaymentKeyState, "ok">, string> = {
-  missing: "Falta a chave da Kyvo",
+  missing: "Falta a chave da Kyvo desta oferta",
   unreadable: "Cole de novo a chave da Kyvo",
   rejected: "A Kyvo recusou a chave",
   no_scope: "A chave da Kyvo não tem a permissão transactions:read",
@@ -110,21 +138,38 @@ export function PaymentProductForm({
   linkId,
   payment,
   pages,
+  offerCurrency = null,
+  productCurrency = null,
   gatewayKey,
+  onOpenAccount,
   onSaved,
   onDiscardNew,
 }: {
   linkId: string;
   payment: PaymentProductValue | null;
   pages: PaymentPageOption[];
-  /** Estado da chave do gateway (Configurações → Pagamentos). */
+  /**
+   * Moeda escolhida para a oferta: o produto novo começa nela (se a Kyvo cobrar
+   * nela). null/sem: oferta de antes da pergunta (real só por padrão: sem aviso).
+   */
+  offerCurrency?: StoreCurrency | null;
+  /** Moeda de um produto já salvo na oferta (o novo começa nela quando a oferta não tem moeda da Kyvo). */
+  productCurrency?: PaymentCurrencyId | null;
+  /** Estado da chave do gateway desta oferta (cartão da conta, na mesma aba). */
   gatewayKey: PaymentKeyState;
+  /** Abre o cartão da conta da Kyvo da oferta (rola até ele, com a chave em foco). */
+  onOpenAccount?: () => void;
   onSaved?: () => void;
   /** "Descartar" num link que ainda não tem produto (volta o destino para endereço). */
   onDiscardNew?: () => void;
 }) {
   const id = useId();
-  const initial = draftOf(payment, pages);
+  const initial = draftOf(payment, pages, offerCurrency, productCurrency);
+  // Produto novo numa oferta que escolheu o real: a Kyvo não cobra em real (o produto cobra
+  // em outra moeda). Sem aviso nos produtos já salvos (a moeda já foi escolhida), nas ofertas
+  // de antes da pergunta (o real é só o padrão: muitas já cobram em peso) e quando a oferta já
+  // tem um produto (a pessoa já escolheu a moeda da Kyvo: o novo começa nela).
+  const noKyvoCurrency = !payment && !productCurrency && !!offerCurrency && !paymentCurrencyFor(offerCurrency);
   const [baseline, setBaseline] = useState(initial);
   const [draft, setDraft] = useState(initial);
   // O produto salvo mudou fora daqui (outra aba): sem nada digitado, mostra o novo.
@@ -136,6 +181,12 @@ export function PaymentProductForm({
     if (same(draft, baseline)) setDraft(initial);
   }
   const [errors, setErrors] = useState<Partial<Record<PaymentProductField, string>>>({});
+  // Produto salvo com valor ou forma de pagamento que não servem (ex.: depois de trocar a moeda da
+  // oferta, o valor passou do máximo do SPEI): o campo já mostra o problema, sem esperar o "Salvar".
+  const savedProblems = payment ? savedPaymentProblems(baseline) : {};
+  const priceUntouched =
+    draft.amount === baseline.amount && draft.currency === baseline.currency && same(draft.methods, baseline.methods);
+  const shownErrors = priceUntouched ? { ...savedProblems, ...errors } : errors;
   const [formError, setFormError] = useState<string | null>(null);
   const save = useAction(savePaymentProductAction);
   // Sem produto ainda: o formulário já conta como "não salvo" (o link só vira pagamento ao salvar).
@@ -151,13 +202,10 @@ export function PaymentProductForm({
   }
 
   function changeCurrency(currency: PaymentCurrencyId) {
-    const kept = draft.methods.filter((m) => methodAllows(m, currency));
-    patch({
-      currency,
-      methods: kept.length ? kept : defaultMethods(currency),
-      // Idioma ainda no padrão da moeda antiga: acompanha a nova.
-      locale: draft.locale === defaultLocale(draft.currency) ? defaultLocale(currency) : draft.locale,
-    });
+    // Ficam as formas que a moeda aceita, entram as da moeda nova que a de antes não aceitava (quando o
+    // valor cabe) e o idioma ainda no padrão da moeda antiga acompanha a nova (a mesma regra da troca
+    // da moeda da oferta).
+    patch(switchPaymentCurrency(draft, currency, parseAmount(draft.amount)));
   }
 
   function toggleMethod(method: PaymentMethodId, on: boolean) {
@@ -185,7 +233,7 @@ export function PaymentProductForm({
           else setFormError(message);
         },
         onSuccess: (saved) => {
-          const next = draftOf(saved, pages);
+          const next = draftOf(saved, pages, offerCurrency, productCurrency);
           setBaseline(next);
           setDraft(next);
           setErrors({});
@@ -211,16 +259,29 @@ export function PaymentProductForm({
           variant="warning"
           title={GATEWAY_KEY_TITLE[gatewayKey]}
           action={
-            <Link href="/configuracoes#pagamentos" className="text-sm font-medium text-primary hover:underline">
-              Abrir Configurações → Pagamentos
-            </Link>
+            onOpenAccount && (
+              <Button type="button" variant="outline" size="sm" onClick={onOpenAccount}>
+                <KeyRoundIcon />
+                {gatewayKey === "missing" ? "Cadastrar a chave desta oferta" : "Abrir a conta da Kyvo desta oferta"}
+              </Button>
+            )
           }
         >
           {gatewayKey === "rejected"
-            ? "A Kyvo recusou a chave no último “Testar conexão”. Você já pode montar o produto e testar na prévia, mas para receber de verdade troque a chave."
+            ? "A Kyvo recusou a chave desta oferta no último “Testar conexão”. Você já pode montar o produto e testar na prévia, mas para receber de verdade troque a chave."
             : gatewayKey === "no_scope"
-              ? "A chave não tem a permissão transactions:read: sem ela, o pagamento não é confirmado e o comprador não recebe o acesso. Troque por uma chave com essa permissão."
-              : "Você já pode montar o produto e testar na prévia, mas para receber de verdade cadastre a chave da API da Kyvo."}
+              ? "A chave desta oferta não tem a permissão transactions:read: sem ela, o pagamento não é confirmado e o comprador não recebe o acesso. Troque por uma chave com essa permissão."
+              : gatewayKey === "unreadable"
+                ? "A chave salva nesta oferta não pode mais ser lida neste Mac. Você já pode montar o produto e testar na prévia, mas para receber de verdade cole a chave de novo."
+                : "Você já pode montar o produto e testar na prévia, mas para receber de verdade cadastre a chave da API da Kyvo desta oferta (ou use a mesma de outra oferta). Cada oferta pode cobrar numa conta diferente."}
+        </Callout>
+      )}
+
+      {noKyvoCurrency && (
+        <Callout title={`A Kyvo não cobra em ${OFFER_CURRENCY_NAME[offerCurrency]}`}>
+          Esta oferta roda em <strong>{offerCurrencyLabel(offerCurrency)}</strong>, mas o pagamento na página só cobra
+          em peso mexicano, euro ou dólar. Escolha abaixo, em <strong>Moeda</strong>, a moeda em que o comprador vai
+          pagar — e confira se os preços escritos nas páginas estão na mesma moeda.
         </Callout>
       )}
 
@@ -242,18 +303,18 @@ export function PaymentProductForm({
           )}
         </Field>
 
-        <Field data-invalid={Boolean(errors.amount)}>
+        <Field data-invalid={Boolean(shownErrors.amount)}>
           <FieldLabel htmlFor={`${id}-amount`}>Valor</FieldLabel>
           <Input
             id={`${id}-amount`}
             value={draft.amount}
             inputMode="decimal"
             placeholder="297,00"
-            aria-invalid={Boolean(errors.amount)}
+            aria-invalid={Boolean(shownErrors.amount)}
             onChange={(e) => patch({ amount: e.target.value })}
           />
-          {errors.amount ? (
-            <FieldError>{errors.amount}</FieldError>
+          {shownErrors.amount ? (
+            <FieldError>{shownErrors.amount}</FieldError>
           ) : (
             <FieldDescription>
               {preview ? `O comprador paga ${preview}.` : "Com vírgula ou ponto: 297,00."}
@@ -318,9 +379,9 @@ export function PaymentProductForm({
             );
           })}
         </div>
-        {errors.methods ? (
+        {shownErrors.methods ? (
           <p role="alert" className="text-sm text-destructive">
-            {errors.methods}
+            {shownErrors.methods}
           </p>
         ) : (
           <p id={`${id}-methods-help`} className="text-xs text-muted-foreground">

@@ -5,6 +5,7 @@
 
 import { prisma } from "@/lib/db";
 import { UserError } from "@/lib/errors";
+import { zipCheckoutHref, zipCheckoutRoot } from "@/lib/export/checkout-pages";
 import type { LayoutPage } from "@/lib/export/layout";
 import type { ServerEventVendor } from "@/lib/export/options";
 import { RENDER_LINK_SELECT, type RenderLink, renderLinks } from "@/lib/payments/links";
@@ -47,9 +48,16 @@ export interface SourcePage {
 export interface ExportSource {
   offer: { id: string; name: string; settings: unknown; liveUrl: string | null; updatedAt: Date };
   pages: SourcePage[];
-  /** kind: CHECKOUT, UPSELL… (os botões de checkout levam o prêmio da roleta). */
-  /** Links da oferta (pay = "Pagamento na página", ver src/lib/payments/links.ts). */
+  /**
+   * Links da oferta (pay = "Pagamento na página", ver src/lib/payments/links.ts;
+   * kind: CHECKOUT, UPSELL… — os botões de checkout levam o prêmio da roleta).
+   * "Checkout do Offer Studio" com o produto salvo leva à página de checkout
+   * do ZIP: "./<checkoutRoot><chave>/", relativo à raiz (cada página troca
+   * pelo relativo a ela: rebaseCheckoutLinks).
+   */
   links: RenderLink[];
+  /** Pasta das páginas de checkout do Offer Studio no ZIP (zipCheckoutRoot; sem ela, "checkout/"). */
+  checkoutRoot?: string;
 }
 
 function assetMapOf(value: unknown): Record<string, string> | null {
@@ -109,6 +117,7 @@ export async function loadExportSource(offerId: string, { withHtml = true } = {}
     },
   });
   if (!offer) throw new UserError(OFFER_NOT_FOUND);
+  const checkoutRoot = zipCheckoutRoot(offer.pages);
   return {
     offer: {
       id: offer.id,
@@ -117,7 +126,8 @@ export async function loadExportSource(offerId: string, { withHtml = true } = {}
       liveUrl: offer.liveUrl,
       updatedAt: offer.updatedAt,
     },
-    links: renderLinks(offer.links),
+    links: renderLinks(offer.links, { checkoutHref: (key) => zipCheckoutHref("", checkoutRoot, key) }),
+    checkoutRoot,
     pages: offer.pages.map((p) => ({
       ...p,
       variants: p.variants.map((v) => ({

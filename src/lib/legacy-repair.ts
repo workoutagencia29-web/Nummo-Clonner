@@ -24,8 +24,15 @@
  *
  * A versão "Antes do reparo automático" é gravada com a marca (createVersion,
  * `openAsIs`): restaurada, ela abre como estava, sem ser reparada de novo.
+ *
+ * Cabeçalho de loja dentro de um contêiner (`storeHeaders`, `nestedStoreHeader`):
+ * vale para qualquer projeto, com ou sem a marca — a regra (ele só mora no
+ * nível de cima da página, fora de um bloco que começa escondido) não tem caso
+ * duvidoso. Uma versão "Antes do reparo automático" restaurada com ele num
+ * contêiner é reparada de novo ao abrir.
  */
 import * as cheerio from "cheerio";
+import { HIDDEN_HOST } from "@/lib/countdown-bar";
 import { DUP_ID_ATTR } from "@/lib/dup-ids";
 
 export interface LegacyRepair {
@@ -33,6 +40,11 @@ export interface LegacyRepair {
   noscriptCss: string[];
   /** Id renomeado pelo editor antigo ("comprar-2") → id original ("comprar"). */
   dupIds: Record<string, string>;
+  /**
+   * Há um cabeçalho de loja dentro de um contêiner: vai para o nível de cima
+   * da página (src/editor/widgets/store-header-place.ts).
+   */
+  storeHeaders?: true;
 }
 
 /**
@@ -206,4 +218,49 @@ export function computeLegacyRepair(originalHtml: string, signals: LegacySignals
     }
   }
   return repair.noscriptCss.length || Object.keys(repair.dupIds).length ? repair : null;
+}
+
+// ─── Cabeçalho de loja fora do nível de cima ─────────────────────────────────
+
+/** Atributos do componente casam com o seletor (como no navegador). */
+function attrsMatch(attrs: Record<string, unknown>, selector: string): boolean {
+  const $ = cheerio.load("<div></div>", null, false);
+  const el = $("div");
+  for (const [name, value] of Object.entries(attrs)) {
+    if (value === false || value === null || value === undefined || !/^[^\s"'>/=]+$/.test(name)) continue;
+    el.attr(name, value === true ? "" : String(value));
+  }
+  return el.is(selector);
+}
+
+const isStoreHeaderNode = (obj: Record<string, unknown>, attrs: Record<string, unknown>) =>
+  obj.type === "os-store-header" || attrs["data-os-widget"] === "store-header";
+
+/**
+ * O projeto (JSON do GrapesJS) tem um cabeçalho de loja dentro de um contêiner
+ * que não começa escondido (HIDDEN_HOST: popup, atraso, etapa do quiz, roleta)?
+ * Ao abrir, o editor o leva para o nível de cima da página.
+ */
+export function nestedStoreHeader(project: unknown): boolean {
+  const seen = new Set<unknown>();
+  /** `hosts`: contêineres entre a raiz da página e o nó (null fora de uma página). */
+  const visit = (node: unknown, hosts: Record<string, unknown>[] | null, depth: number): boolean => {
+    if (!node || typeof node !== "object" || depth > 400 || seen.has(node)) return false;
+    seen.add(node);
+    if (Array.isArray(node)) return node.some((item) => visit(item, hosts, depth + 1));
+    const obj = node as Record<string, unknown>;
+    const raw = obj.attributes;
+    const attrs = raw && typeof raw === "object" && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+    if (obj.type === "wrapper") return visit(obj.components, [], depth + 1);
+    if (hosts) {
+      if (isStoreHeaderNode(obj, attrs)) {
+        if (hosts.length && !hosts.some((h) => attrsMatch(h, HIDDEN_HOST))) return true;
+        return false;
+      }
+      return visit(obj.components, [...hosts, attrs], depth + 1);
+    }
+    // Fora de uma página (raiz do projeto, páginas, quadros): procura as raízes.
+    return Object.entries(obj).some(([key, value]) => key !== "styles" && visit(value, null, depth + 1));
+  };
+  return visit(project, null, 0);
 }

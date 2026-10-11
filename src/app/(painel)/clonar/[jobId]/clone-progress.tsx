@@ -3,6 +3,7 @@
 import { WifiOffIcon, XIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
+import { Callout } from "@/components/offers/tracking/callout";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
@@ -34,6 +35,10 @@ export function CloneProgress({
 
   const progress = status?.progress ?? 0;
   const queued = status?.status === "QUEUED";
+  // Robô parado: nada começa nem avança até ele voltar.
+  const workerDown = status?.workerOnline === false;
+  // Na fila sem outra clonagem na frente e com o robô ligado: começa em instantes.
+  const waiting = queued && (workerDown || Boolean(status?.otherRunning));
 
   return (
     <div className="flex max-w-3xl flex-col gap-6">
@@ -47,10 +52,10 @@ export function CloneProgress({
         <CardHeader>
           <CardTitle className="flex items-center gap-2 text-base">
             <Spinner className="size-4 text-primary" />
-            {queued ? "Na fila…" : (status?.step ?? "Preparando")}
+            {waiting ? "Na fila…" : queued ? "Começando…" : (status?.step ?? "Preparando")}
           </CardTitle>
           <CardDescription>
-            {queued
+            {queued && !workerDown && status?.otherRunning
               ? "Outra clonagem está em andamento. Esta começa em seguida."
               : "Pode levar de 30 segundos a alguns minutos, dependendo do tamanho da página e dos vídeos."}
           </CardDescription>
@@ -60,11 +65,25 @@ export function CloneProgress({
             <Progress value={progress} className="h-2" aria-label="Progresso da clonagem" />
             <span className="w-10 text-right text-sm tabular-nums text-muted-foreground">{progress}%</span>
           </div>
-          {offline && (
+          {offline ? (
             <p className="flex items-center gap-2 text-sm text-warning">
               <WifiOffIcon className="size-4" />
               Sem resposta do Offer Studio. Verifique se a janela do atalho continua aberta.
             </p>
+          ) : workerDown ? (
+            <Callout variant="warning" title="O robô de tarefas está parado">
+              {queued
+                ? "A clonagem começa quando ele voltar. Feche o Offer Studio e abra de novo pelo atalho."
+                : "A clonagem parou no meio. Feche o Offer Studio e abra de novo pelo atalho; depois, use “Tentar de novo”."}
+            </Callout>
+          ) : (
+            // Sem avanço há mais de CLONE_STALL_MS (src/server/services/clone.ts).
+            status?.stalled && (
+              <Callout variant="warning" title="A clonagem não avança há mais de 3 minutos">
+                Páginas grandes ou com vídeos pesados podem demorar mesmo. Se continuar parada, a página pode ter
+                travado: cancele e tente de novo, ou importe o HTML/ZIP salvo pelo navegador.
+              </Callout>
+            )
           )}
           <CloneLog logs={logs} />
           <div>

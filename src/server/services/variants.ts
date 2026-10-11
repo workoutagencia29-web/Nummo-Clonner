@@ -32,6 +32,7 @@ import { Prisma } from "@/generated/prisma/client";
 import { prisma } from "@/lib/db";
 import { UserError } from "@/lib/errors";
 import { variantDirs } from "@/lib/export/layout";
+import { offerCurrencyOf } from "@/lib/offer-currency";
 import { removeVersionFiles } from "@/server/services/documents";
 import { pageStart } from "@/server/services/page-templates";
 
@@ -300,11 +301,14 @@ export async function createVariant(input: CreateVariantInput): Promise<CreatedV
   const source: VariantSource = input.source ?? { kind: "copy" };
   const info = await prisma.page.findFirst({
     where: { id: input.pageId, offer: { deletedAt: null } },
-    select: { name: true },
+    select: { name: true, offer: { select: { settings: true } } },
   });
   if (!info) throw new UserError(PAGE_NOT_FOUND);
-  // Modelo validado e montado antes de travar a página.
-  const fromTemplate = source.kind === "template" ? pageStart(source.templateId ?? null, info.name) : null;
+  // Modelo validado e montado antes de travar a página (modelos da loja: na moeda da oferta).
+  const fromTemplate =
+    source.kind === "template"
+      ? pageStart(source.templateId ?? null, info.name, offerCurrencyOf(info.offer.settings))
+      : null;
 
   const created = await prisma.$transaction(async (tx) => {
     const page = await lockPage(tx, input.pageId);

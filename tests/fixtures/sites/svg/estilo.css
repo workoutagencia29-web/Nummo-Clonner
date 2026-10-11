@@ -1,0 +1,4 @@
+body { font-family: sans-serif; margin: 40px; color: #222; }
+.faixa { height: 80px; background: url("/img/selo.svg") no-repeat left center; padding-left: 180px; line-height: 80px; }
+/* Nenhum elemento usa esta classe: o navegador não pede o arquivo, só a montagem da cópia (url() do CSS). */
+.nunca-aparece { background-image: url("/img/falso.svg"); }

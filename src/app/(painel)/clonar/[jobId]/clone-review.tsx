@@ -17,8 +17,19 @@ import {
   XIcon,
 } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useMemo, useState } from "react";
+import { useEffect, useEffectEvent, useMemo, useState } from "react";
 import { toast } from "sonner";
+import { CurrencyPicker } from "@/components/offers/currency-picker";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -32,6 +43,7 @@ import { Spinner } from "@/components/ui/spinner";
 import { videoProviderLabel } from "@/detection/videos";
 import { useAction } from "@/hooks/use-action";
 import { formatBytes, plural } from "@/lib/format";
+import { DEFAULT_CURRENCY, type StoreCurrency } from "@/lib/store";
 import { keptNeedsConsent } from "@/lib/tracking/code-trackers";
 import {
   cancelCloneAction,
@@ -142,6 +154,7 @@ export function CloneReview({
   capturedDevices,
   offerDeleted = false,
   frozenTimer = false,
+  defaultCurrency = DEFAULT_CURRENCY,
 }: {
   jobId: string;
   label: string;
@@ -159,6 +172,8 @@ export function CloneReview({
   offerDeleted?: boolean;
   /** A página tem um contador que depende dos scripts do site (no "Editável", fica parado). */
   frozenTimer?: boolean;
+  /** Moeda que vem marcada em "Em qual moeda essa oferta vai rodar?" (a última escolhida). */
+  defaultCurrency?: StoreCurrency;
 }) {
   const router = useRouter();
   const [mode, setMode] = useState<CloneModeValue>(result.suggestedMode);
@@ -166,11 +181,18 @@ export function CloneReview({
   const [name, setName] = useState(defaultName.slice(0, 120));
   const [nameError, setNameError] = useState<string | null>(null);
   const [folderId, setFolderId] = useState(NO_FOLDER);
+  const [currency, setCurrency] = useState<StoreCurrency>(defaultCurrency);
   const [funnelPick, setFunnelPick] = useState<Set<string>>(new Set());
   const [manualUrl, setManualUrl] = useState("");
   // Páginas do funil prontas entram na oferta, a não ser que você desmarque.
   const [excludedChildren, setExcludedChildren] = useState<Set<string>>(new Set());
   const [copied, setCopied] = useState<string | null>(null);
+  // "Salvar oferta" com páginas do funil marcadas (ou coladas) que ainda não foram
+  // clonadas: pergunta antes, senão elas ficariam de fora sem aviso (depois de
+  // salvar, a clonagem não aceita páginas novas).
+  const [unclonedAsk, setUnclonedAsk] = useState<string[] | null>(null);
+  // "Clonar e salvar junto": as páginas pedidas; a oferta é salva quando elas terminarem.
+  const [saveAfter, setSaveAfter] = useState<string[] | null>(null);
 
   const save = useAction(saveCloneAction);
   const startFunnel = useAction(startFunnelClonesAction);
@@ -186,6 +208,9 @@ export function CloneReview({
         step: null,
         errorMessage: null,
         offerId: null,
+        workerOnline: null,
+        otherRunning: false,
+        stalled: false,
         logs: [],
         children: initialChildren,
       }) as CloneStatus,
@@ -225,7 +250,7 @@ export function CloneReview({
     return next;
   }
 
-  function queueFunnel(urls: string[], after?: () => void) {
+  function queueFunnel(urls: string[], after?: (created: string[]) => void) {
     void startFunnel.run(
       { parentId: jobId, urls },
       {
@@ -235,7 +260,7 @@ export function CloneReview({
             : "Essas páginas já foram clonadas.",
         onSuccess: (r) => {
           setExpectedChildren((prev) => [...prev, ...r.created]);
-          after?.();
+          after?.(r.created);
           setPollChildren(true);
           router.refresh();
         },
@@ -243,9 +268,15 @@ export function CloneReview({
     );
   }
 
-  function cloneFunnel() {
+  /** Páginas do funil marcadas ou coladas que ainda não foram para a fila. */
+  function unclonedPicks() {
     const urls = [...funnelPick].filter((u) => !isCloned(u));
     if (manualUrl.trim()) urls.push(manualUrl.trim());
+    return urls;
+  }
+
+  function cloneFunnel() {
+    const urls = unclonedPicks();
     if (!urls.length) {
       toast.error("Marque uma página sugerida ou cole o link de uma página do funil.");
       return;
@@ -273,17 +304,55 @@ export function CloneReview({
     );
   }
 
+  function nameOk() {
+    if (name.trim()) return true;
+    setNameError("Dê um nome para a oferta.");
+    return false;
+  }
+
   function submit() {
-    if (!name.trim()) {
-      setNameError("Dê um nome para a oferta.");
+    if (!nameOk()) return;
+    const uncloned = unclonedPicks();
+    if (uncloned.length) setUnclonedAsk(uncloned);
+    else saveOffer();
+  }
+
+  function cloneAndSave(urls: string[]) {
+    setUnclonedAsk(null);
+    queueFunnel(urls, (created) => {
+      setFunnelPick(new Set());
+      setManualUrl("");
+      setSaveAfter(created);
+    });
+  }
+
+  // As páginas do "Clonar e salvar junto" terminaram: salva, a não ser que alguma
+  // tenha falhado (aí avisa e deixa a pessoa decidir). Cancelada = a pessoa
+  // desistiu dela ("Não quer esperar?"): salva sem ela.
+  const finishSaveAfter = useEffectEvent((waited: string[]) => {
+    setSaveAfter(null);
+    const failed = children.filter((c) => waited.includes(c.id) && c.status === "FAILED");
+    if (failed.length) {
+      toast.error(
+        `${failed.length === 1 ? "Uma página do funil não pôde ser clonada" : `${failed.length} páginas do funil não puderam ser clonadas`}, e a oferta ainda não foi salva. Veja o erro em “Páginas do funil”: tente de novo ou clique em “Salvar oferta” para salvar sem ${failed.length === 1 ? "ela" : "elas"}.`,
+      );
       return;
     }
+    saveOffer();
+  });
+  useEffect(() => {
+    if (saveAfter && !stillRunning) finishSaveAfter(saveAfter);
+  }, [saveAfter, stillRunning]);
+
+  function saveOffer() {
+    if (!nameOk()) return;
     void save.run(
       {
         jobId,
         name: name.trim(),
         folderId: folderId === NO_FOLDER ? null : folderId,
         mode,
+        currency,
         keepRemoved: [...keep].map((i) => `${jobId}:${i}`),
         childJobIds: readyChildren.filter((c) => included.has(c.id)).map((c) => c.id),
       },
@@ -339,7 +408,8 @@ export function CloneReview({
         </p>
       )}
 
-      <div className="grid gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
+      {/* Uma coluna que nunca passa da tela (a barra da prévia quebra a linha) até o xl. */}
+      <div className="grid grid-cols-1 gap-6 xl:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="flex min-w-0 flex-col gap-4">
           {frozenTimer && mode === "EDITABLE" && (
             <div
@@ -370,7 +440,7 @@ export function CloneReview({
           />
         </div>
 
-        <aside className="flex flex-col gap-4">
+        <aside className="flex min-w-0 flex-col gap-4">
           <Card className="gap-3 py-4">
             <CardHeader className="px-4">
               <CardTitle className="text-sm">Salvar como oferta</CardTitle>
@@ -407,6 +477,12 @@ export function CloneReview({
                     </SelectContent>
                   </Select>
                 </Field>
+                <CurrencyPicker value={currency} onChange={setCurrency} columns={2} describedBy="clone-currency-note">
+                  <p id="clone-currency-note" className="text-xs text-muted-foreground">
+                    A página clonada fica como veio. A moeda vale para o que você criar depois na oferta (loja,
+                    pagamento na página).
+                  </p>
+                </CurrencyPicker>
                 <p className="text-xs text-muted-foreground">
                   Modo: <strong>{mode === "EDITABLE" ? "Editável" : "Com scripts"}</strong>
                   {readyChildren.length > 0 &&
@@ -418,6 +494,7 @@ export function CloneReview({
                 </Button>
                 {stillRunning && (
                   <p className="text-xs text-muted-foreground">
+                    {saveAfter && "A oferta é salva sozinha quando elas terminarem. "}
                     Não quer esperar? Cancele as páginas do funil que ainda estão na fila ou clonando.
                   </p>
                 )}
@@ -682,6 +759,54 @@ export function CloneReview({
           </Section>
         </aside>
       </div>
+
+      <AlertDialog open={unclonedAsk !== null} onOpenChange={(open) => !open && setUnclonedAsk(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>
+              {unclonedAsk?.length === 1
+                ? "Uma página do funil marcada ainda não foi clonada"
+                : `${unclonedAsk?.length ?? 0} páginas do funil marcadas ainda não foram clonadas`}
+            </AlertDialogTitle>
+            <AlertDialogDescription>
+              {unclonedAsk?.length === 1
+                ? "Ela só entra na oferta depois de clonada. Se salvar agora, fica de fora."
+                : "Elas só entram na oferta depois de clonadas. Se salvar agora, ficam de fora."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <ul className="flex flex-col gap-1.5 text-sm">
+            {unclonedAsk?.map((url) => {
+              const suggestion = result.funnel.find((f) => f.url === url);
+              return (
+                <li key={url} className="min-w-0 truncate" title={url}>
+                  {suggestion ? (
+                    <>
+                      <span className="font-medium">{FUNNEL_LABEL[suggestion.kind]}</span> · {suggestion.label}
+                    </>
+                  ) : (
+                    url
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Voltar</AlertDialogCancel>
+            <AlertDialogAction
+              variant="outline"
+              onClick={() => {
+                setUnclonedAsk(null);
+                saveOffer();
+              }}
+            >
+              {unclonedAsk?.length === 1 ? "Salvar sem ela" : "Salvar sem elas"}
+            </AlertDialogAction>
+            <AlertDialogAction onClick={() => unclonedAsk && cloneAndSave(unclonedAsk)}>
+              Clonar e salvar junto
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

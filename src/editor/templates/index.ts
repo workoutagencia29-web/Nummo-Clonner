@@ -7,12 +7,16 @@
  * Use pelo servidor (src/server/services/page-templates.ts). A tela importa só
  * o catálogo (./catalog), sem o HTML.
  */
+
+import type { StoreCurrency } from "@/lib/store";
 import { advertorialHtml } from "./advertorial";
 import { captureHtml } from "./capture";
 import { type PageTemplateId, TEMPLATE_SUMMARIES } from "./catalog";
 import { privacyHtml, termsHtml } from "./legal";
+import { productHtml, productHtmlFor } from "./product";
 import { quizHtml } from "./quiz";
 import { salesHtml } from "./sales";
+import { storeHtml, storeHtmlFor } from "./store";
 import { thankYouHtml } from "./thank-you";
 import type { PageTemplate } from "./types";
 import { downsellHtml, upsellHtml } from "./upsell";
@@ -37,6 +41,8 @@ const HTML: Record<PageTemplateId, string> = {
   advertorial: advertorialHtml,
   quiz: quizHtml,
   roleta: wheelHtml,
+  loja: storeHtml,
+  produto: productHtml,
   captura: captureHtml,
   upsell: upsellHtml,
   downsell: downsellHtml,
@@ -49,3 +55,18 @@ export const PAGE_TEMPLATES: readonly PageTemplate[] = TEMPLATE_SUMMARIES.map((s
   ...summary,
   html: HTML[summary.id as PageTemplateId],
 }));
+
+/**
+ * Modelos com preços da loja (vitrines, caixa de compra): o HTML muda com a
+ * moeda da oferta. Os outros têm os preços escritos como texto ("R$ 97"): não
+ * mudam (TemplateSummary.textPrices avisa na "Nova oferta").
+ */
+const PRICED: Partial<Record<PageTemplateId, (currency: StoreCurrency) => string>> = {
+  loja: storeHtmlFor,
+  produto: productHtmlFor,
+};
+
+/** HTML do modelo com os preços da loja na moeda `currency` (a da oferta). */
+export function templateHtmlFor(id: PageTemplateId, currency: StoreCurrency): string {
+  return PRICED[id]?.(currency) ?? HTML[id];
+}

@@ -17,6 +17,7 @@
  * preso dentro do popup, Esc e "Fechar" fecham, clique fora da caixa fecha e o
  * foco volta para onde estava.
  */
+import { t } from "./texts";
 import { autoScrolling, flag, isTouch, load, num, opt, save, widgets } from "./util";
 
 const FOCUSABLE = "a[href],button:not([disabled]),input:not([disabled]),select,textarea";
@@ -87,7 +88,7 @@ export function initExitPopups(root?: ParentNode) {
       x.className = "os-pop-x";
       x.setAttribute("type", "button");
       x.setAttribute("data-os-close", "");
-      x.setAttribute("aria-label", "Fechar");
+      x.setAttribute("aria-label", t("popClose", "Fechar"));
       x.textContent = "×";
       box.prepend(x);
       if (getComputedStyle(box).position === "static") box.style.position = "relative";

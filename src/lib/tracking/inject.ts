@@ -12,6 +12,7 @@
  * Funções puras, sem DOM (rodam no servidor).
  */
 
+import { afterLeadingDoctype } from "@/lib/doctype";
 import { splitVerificationMetas } from "./domain-verification";
 import {
   CONSENT_BLOCK_ATTR,
@@ -68,7 +69,6 @@ export function stripTracking(html: string): string {
 
 const HEAD_OPEN_RE = /<head\b(?:[^>"']|"[^"]*"|'[^']*')*>/i;
 const HTML_OPEN_RE = /<html\b(?:[^>"']|"[^"]*"|'[^']*')*>/i;
-const DOCTYPE_RE = /^\s*(?:<!--[\s\S]*?-->\s*)*<!doctype[^>]*>/i;
 /** Metas e comentários no início do <head> (antes de qualquer script/estilo). */
 const LEADING_RE = /^(?:\s+|<!--[\s\S]*?-->|<meta\b(?:[^>"']|"[^"]*"|'[^']*')*>)/i;
 
@@ -96,8 +96,7 @@ function insertionPoint(html: string): { at: number; wrapHead: boolean; hasChars
   // Sem <head>: cria um logo depois do <html> (ou do doctype, ou no começo).
   const htmlOpen = HTML_OPEN_RE.exec(html);
   if (htmlOpen) return { at: htmlOpen.index + htmlOpen[0].length, wrapHead: true, hasCharset: false };
-  const doctype = DOCTYPE_RE.exec(html);
-  return { at: doctype ? doctype[0].length : 0, wrapHead: true, hasCharset: false };
+  return { at: afterLeadingDoctype(html), wrapHead: true, hasCharset: false };
 }
 
 /**

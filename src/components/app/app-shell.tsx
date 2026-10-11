@@ -30,6 +30,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { Sheet, SheetContent, SheetDescription, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
 import { useAction } from "@/hooks/use-action";
+import type { StoreCurrency } from "@/lib/store";
 import type { Theme } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 import { createFolderAction, deleteFolderAction, renameFolderAction } from "@/server/actions/organize";
@@ -60,10 +61,12 @@ interface AppShellProps {
   sidebar: SidebarData;
   workerOnline: boolean;
   theme: Theme;
+  /** Moeda que vem marcada na "Nova oferta" (a última escolhida). */
+  offerCurrency?: StoreCurrency;
   children: ReactNode;
 }
 
-export function AppShell({ user, sidebar, workerOnline, theme, children }: AppShellProps) {
+export function AppShell({ user, sidebar, workerOnline, theme, offerCurrency, children }: AppShellProps) {
   const [createOpen, setCreateOpen] = useState(false);
   const [createFolderId, setCreateFolderId] = useState<string | null>(null);
   const [createTemplateId, setCreateTemplateId] = useState<string | null>(null);
@@ -142,6 +145,7 @@ export function AppShell({ user, sidebar, workerOnline, theme, children }: AppSh
         folders={sidebar.folders}
         defaultFolderId={createFolderId}
         defaultTemplateId={createTemplateId}
+        defaultCurrency={offerCurrency}
       />
     </ShellContext.Provider>
   );

@@ -11,7 +11,7 @@ import { buildSync } from "esbuild";
 import { type Browser, type BrowserContext, chromium, type Page } from "playwright";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { injectPageCode } from "@/lib/page-code";
-import { DELAY_STYLE, runtimeScript } from "@/lib/runtime-bundle";
+import { checkoutScript, DELAY_STYLE, paymentScript, productScript, runtimeScript } from "@/lib/runtime-bundle";
 import { knownCheckoutHosts } from "@/lib/tracking/compose";
 import { gateCode, injectTracking } from "@/lib/tracking/inject";
 import type { PixelTestReport, RuntimePixel, TrackingRuntimeConfig } from "@/lib/tracking/runtime-config";
@@ -347,6 +347,50 @@ describe("consentimento (LGPD)", () => {
     expect(await banner(page).count()).toBe(0);
     expect(site.vendorRequests).toEqual([]);
     expect(await page.evaluate(() => (window as { osConsent?: { get(): string } }).osConsent?.get())).toBe("rejected");
+    await site.context.close();
+  });
+
+  it("o banner aparece de uma vez no tamanho final; o leitor de tela recebe o texto pela região de anúncio", async () => {
+    // Anota o banner no instante em que ele entra na página (antes de qualquer setTimeout).
+    const watch = `<script>window.__first=null;new MutationObserver(function(){var h=document.querySelector("os-consent");if(!h||window.__first||!h.shadowRoot)return;var r=h.shadowRoot;window.__first={h:r.querySelector(".b").getBoundingClientRect().height,text:r.querySelector("span").textContent,live:r.querySelector(".s").textContent,buttons:[].map.call(r.querySelectorAll("button"),function(b){return b.textContent})}}).observe(document.documentElement,{childList:true,subtree:true});</script>`;
+    const cfg = config({ pixels: [PX.META] });
+    // Celular: o texto ocupa várias linhas (antes, o banner crescia ~40 px depois de aparecer).
+    const site = await open(pageHtml(cfg, "<h1>Oferta</h1>", { head: watch }), {
+      viewport: { width: 390, height: 800 },
+    });
+    const { page } = site;
+    await expect.poll(() => banner(page).isVisible()).toBe(true);
+    await settle(page, 300);
+    type First = { h: number; text: string; live: string; buttons: string[] };
+    const first = await page.evaluate(() => (window as unknown as { __first: First | null }).__first);
+    const after = await page.$eval("os-consent", (el) => {
+      const r = el.shadowRoot as ShadowRoot;
+      const q = (s: string) => r.querySelector(s) as HTMLElement;
+      return {
+        h: q(".b").getBoundingClientRect().height,
+        live: q(".s").textContent,
+        liveAttr: q(".s").getAttribute("aria-live"),
+        shownHidden: q("span").getAttribute("aria-hidden"),
+        liveBox: q(".s").getBoundingClientRect().width,
+      };
+    });
+    expect(first).toEqual({
+      h: after.h,
+      text: "Usamos cookies para medir nossos anúncios.",
+      live: "",
+      buttons: ["Recusar", "Aceitar"],
+    });
+    expect(first?.h).toBeGreaterThan(100);
+    // Região de anúncio (escondida na tela) com o texto; o texto à mostra fica fora da leitura (sem repetir).
+    expect(after.live).toBe("Usamos cookies para medir nossos anúncios.");
+    expect(after.liveAttr).toBe("polite");
+    expect(after.shownHidden).toBe("true");
+    expect(after.liveBox).toBeLessThanOrEqual(1);
+    await expect.poll(() => banner(page).textContent()).toContain("Usamos cookies para medir nossos anúncios.");
+    // Aceitar continua funcionando.
+    await page.getByRole("button", { name: "Aceitar" }).click();
+    await expect.poll(async () => byPrefix(await calls(page), "load").length).toBe(1);
+    expect(await banner(page).count()).toBe(0);
     await site.context.close();
   });
 
@@ -2203,7 +2247,8 @@ describe("refix 1: código em espera e navegadores antigos", () => {
   });
 
   it("os scripts compilados não usam APIs que o Safari 13 não tem", () => {
-    for (const code of [SCRIPT, runtimeScript()]) {
+    // Também os scripts da janela de pagamento (com o bloco "Acesso ao produto"), do checkout e da página do produto.
+    for (const code of [SCRIPT, runtimeScript(), paymentScript(), checkoutScript(), productScript()]) {
       for (const api of ["Object.hasOwn", "findLast", "replaceAll", "structuredClone"]) {
         expect(code.includes(api), api).toBe(false);
       }

@@ -37,6 +37,8 @@ export const getOfferDetail = cache(async (id: string) => {
       createdAt: true,
       updatedAt: true,
       folderId: true,
+      /** Configurações (a tela usa só a moeda da oferta: offerCurrencyOf). */
+      settings: true,
       folder: { select: { id: true, name: true } },
       tags: { select: { tag: { select: { id: true, name: true, color: true } } } },
       pages: {

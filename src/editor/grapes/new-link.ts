@@ -2,13 +2,19 @@
  * Opção "＋ Criar link da oferta…" nas listas de "Link da oferta" das
  * configurações de um elemento. Escolher a opção não grava nada no elemento:
  * o valor volta ao anterior e o editor abre o diálogo de link novo, que cria o
- * link na oferta e já liga o elemento a ele.
+ * link na oferta e já liga o elemento a ele. O diálogo deixa escolher o
+ * destino ("Endereço" ou "Checkout do Offer Studio"); o "Botão de checkout"
+ * solto numa oferta sem link desse destino já pede o checkout do Offer Studio.
  */
 import type { Component, Editor } from "grapesjs";
+import { NEW_LINK_TARGET_ATTR, NEW_LINK_TARGET_CHECKOUT } from "@/lib/checkout/rules";
 import { editorTimeout, watchEditor } from "./lifecycle";
 
 export const NEW_LINK_OPTION = "__novo-link__";
 export const NEW_LINK_EVENT = "os:novo-link";
+
+/** Destino do link novo. CHECKOUT = "Checkout do Offer Studio". */
+export type NewLinkTarget = "URL" | "CHECKOUT";
 
 export interface NewLinkRequest {
   component: Component;
@@ -18,6 +24,43 @@ export interface NewLinkRequest {
   name?: string;
   /** Liga ao link criado de outro jeito (ex.: fatia da roleta); sem ele, data-os-link no elemento. */
   bind?: (key: string) => void;
+  /** Destino sugerido (padrão: endereço). */
+  target?: NewLinkTarget;
+}
+
+/**
+ * "Botão de checkout" solto sem nenhum link "Checkout do Offer Studio" na
+ * oferta (src/editor/widgets/hooks.ts): o próprio botão guarda a preferência
+ * (data-os-new-link="checkout", vai no HTML e no projeto salvos), e o link
+ * novo dele nasce com esse destino também depois de reabrir a página, pelo
+ * "＋ Criar link da oferta…" das Configurações e pelo "Criar link da oferta"
+ * dos "Botões de compra sem link" (diálogo "Links e checkouts" do editor).
+ * Some quando o botão é ligado a um link ou deixa de pedir link
+ * (forgetNewLinkTarget) e o render a tira da página (applyOfferLinks).
+ */
+export function wantOwnCheckout(component: Component) {
+  component.addAttributes({ [NEW_LINK_TARGET_ATTR]: NEW_LINK_TARGET_CHECKOUT });
+}
+
+/** Destino sugerido para o link novo de um elemento. */
+export function suggestedTarget(component: Component): NewLinkTarget {
+  return component.getAttributes()[NEW_LINK_TARGET_ATTR] === NEW_LINK_TARGET_CHECKOUT ? "CHECKOUT" : "URL";
+}
+
+/**
+ * Botão ligado a um link (qualquer um) ou que deixou de pedir link (endereço
+ * digitado, página do funil): a preferência pelo destino do link novo sai. Na
+ * mesma pilha da mudança, então o Desfazer da ligação a devolve junto. O
+ * "＋ Criar link da oferta…" (o valor volta ao de antes) e o vazio não contam.
+ */
+export function forgetNewLinkTarget(editor: Editor) {
+  editor.on("component:update:attributes", (component: Component) => {
+    const attrs = component.getAttributes();
+    if (attrs[NEW_LINK_TARGET_ATTR] === undefined) return;
+    const key = attrs["data-os-link"];
+    if (key === "" || key === NEW_LINK_OPTION) return;
+    component.removeAttributes(NEW_LINK_TARGET_ATTR);
+  });
 }
 
 const handlers = new WeakMap<Editor, (req: NewLinkRequest) => void>();
@@ -53,7 +96,11 @@ export function installNewLinkOption(editor: Editor, onRequest: (req: NewLinkReq
       });
       pending.delete(component);
       const isWhatsapp = component.get("type") === "os-whatsapp" || /wa\.me|whatsapp/i.test(String(attrs.href ?? ""));
-      onRequest({ component, kind: isWhatsapp ? "WHATSAPP" : "CHECKOUT" });
+      onRequest(
+        isWhatsapp
+          ? { component, kind: "WHATSAPP" }
+          : { component, kind: "CHECKOUT", target: suggestedTarget(component) },
+      );
     });
   };
   editor.on("component:update:attributes", handler);

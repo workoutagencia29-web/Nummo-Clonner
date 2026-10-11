@@ -12,9 +12,12 @@ import { formatAmount, parseAmount } from "./helpers";
 
 type Currency = TrackingSettings["value"]["currency"];
 
-const SYMBOL: Record<Currency, string> = { BRL: "R$", USD: "US$", EUR: "€" };
+const SYMBOL: Record<Currency, string> = { BRL: "R$", MXN: "$", EUR: "€", USD: "US$" };
 
-/** Moeda e valor enviados junto com InitiateCheckout e Purchase. */
+/**
+ * Moeda e valor enviados junto com InitiateCheckout e Purchase. Enquanto não é
+ * salva, a moeda vem da moeda da oferta (parseTrackingSettings).
+ */
 export function ValueForm({ offerId, value }: { offerId: string; value: TrackingSettings["value"] }) {
   const { draft, patch, dirty, reset, commit } = useDraft({
     currency: value.currency,

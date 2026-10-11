@@ -282,6 +282,10 @@ describe("biblioteca de blocos", () => {
       quiz: "os-quiz",
       wheel: "os-wheel",
       access: "os-access",
+      products: "os-products",
+      "store-header": "os-store-header",
+      "product-gallery": "os-product-gallery",
+      "product-buy": "os-product-buy",
     });
   });
 
@@ -306,8 +310,9 @@ describe("script das páginas", () => {
       'import { initQuizzes } from "./src/runtime/widgets/quiz";',
       'import { initWheels } from "./src/runtime/widgets/wheel";',
       'import { initPrize } from "./src/runtime/widgets/prize";',
+      'import { initStore } from "./src/runtime/widgets/store";',
       "addCss();",
-      "for (const f of [initPrize, initCountdowns, initScarcity, initSalesNotifications, initExitPopups, initLeadForms, initVturb, initQuizzes, initWheels]) f();",
+      "for (const f of [initPrize, initCountdowns, initScarcity, initSalesNotifications, initExitPopups, initLeadForms, initVturb, initQuizzes, initWheels, initStore]) f();",
     ].join("\n");
     const widgets = buildSync({
       stdin: { contents: entry, resolveDir: process.cwd(), loader: "ts" },
@@ -325,8 +330,26 @@ describe("script das páginas", () => {
     // prêmio nas outras páginas (botões de checkout, faixa com contador e cupom,
     // visibilidade): +~11,5 KB com o CSS, ~4 KB com gzip (~28,9 KB no total).
     // Correções da revisão da roleta (checkout na página da roleta, memória por
-    // oferta, destino original do "Resgatar"): +~0,7 KB (hoje ~29,6 KB).
-    expect(Buffer.byteLength(widgets, "utf8")).toBeLessThan(30_000);
+    // oferta, destino original do "Resgatar"): +~0,7 KB (hoje ~29,6 KB; ~30 KB com o pagamento).
+    // "Contagem no topo (barra)": barra presa no topo com espaço reservado (módulo
+    // único com a faixa do prêmio, que as empilha) e a faixa do prêmio no visual da
+    // barra (caixinhas HH:MM:SS): +~1,65 KB (hoje ~31,6 KB).
+    // Loja (busca do cabeçalho de loja com a linha de resultados e o ?busca=, página
+    // sem vitrine levando à loja, categoria que busca, setas do carrossel e cabeçalho
+    // fixo, + o CSS de comportamento): +~4,5 KB (~37,2 KB).
+    // Correções da revisão da loja (título da vitrine e selo na busca, linha de
+    // resultados presa no cabeçalho fixo e à vista sem resultado, foco de volta no
+    // campo, rolagem longa sem abrir o popup de saída, ?busca= conferido no load,
+    // setas de vitrine que começa escondida): +~1,1 KB (hoje ~38,3 KB).
+    // Páginas em espanhol/inglês e telefone de fora do Brasil: textos por t("chave",
+    // "padrão em pt-BR") — as traduções ficam no #os-textos da página, fora do
+    // script — e o formulário aceitando número de outro país: +~0,8 KB (hoje ~39,3 KB).
+    // Prêmio da roleta num "Checkout do Offer Studio" (página de checkout do próprio
+    // site, botão passa a ser do link do prêmio): +~0,2 KB, compensado sem subir o
+    // limite (prefers-reduced-motion num lugar só, reducedMotion em ./util, e a mesma
+    // regra de chave para os links de pagamento e de checkout no mapa de prêmios):
+    // hoje ~39,4 KB.
+    expect(Buffer.byteLength(widgets, "utf8")).toBeLessThan(39_500);
     // O script inteiro (widgets + botões com data-os-href + delay de VSL) compila.
     expect(runtimeScript()).toContain("os-widgets-css");
   });

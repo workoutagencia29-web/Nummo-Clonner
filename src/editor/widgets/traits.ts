@@ -6,7 +6,9 @@
  * - os-datetime: data e hora (contador com data fixa)
  * - os-check: liga/desliga que grava "1"/"0" e entende padrão ligado
  * - os-heading: título de grupo (só visual)
- * - os-note: explicação curta (só visual; o texto vem do label)
+ * - os-note: explicação curta (só visual; o texto vem do label). Com `osHidden`,
+ *   só aparece quando vale (ex.: "fundo escuro" no logo do rodapé), refeita
+ *   como os botões os-action.
  * - os-color: cor (amostra + código). Não usa o campo de cor do GrapesJS, que
  *   regrava o último valor ao selecionar outro elemento (o Desfazer se perdia e
  *   entravam mudanças invisíveis na pilha) e transformava um nome que ele não
@@ -14,12 +16,20 @@
  *   campo avisa.
  * - select com `osOptions`: opções vindas da oferta (links, páginas do funil),
  *   atualizadas sempre que o elemento é selecionado.
+ * - os-action: botão que age no elemento, com o texto, o "desligado" e o
+ *   "escondido" calculados na hora (osText / osDisabled / osHidden / osRun;
+ *   `osPrimary`: botão de destaque, como o "Trocar logo") —
+ *   ex.: "＋ Adicionar foto" que vira "Máximo de 8 fotos". Refeitos a cada
+ *   mudança nos atributos ou nos elementos da página (refreshActions). Nunca um
+ *   botão que não faz nada.
  *
  * Atenção: o GrapesJS troca "-" por espaço nos rótulos; por isso "e‑mail" usa
  * o hífen inseparável (U+2011).
  */
 import type { Component, Editor, Trait, TraitProperties } from "grapesjs";
 import { esc, type Style } from "@/editor/blocks/shared";
+import { linkOptionLabel } from "@/editor/grapes/components";
+import { editorTimeout } from "@/editor/grapes/lifecycle";
 import { newLinkOption } from "@/editor/grapes/new-link";
 import { widgetContext } from "./context";
 import { attr, baseStyle, descendants, setBaseStyle } from "./dom";
@@ -30,6 +40,16 @@ export type TraitDef = Partial<TraitProperties> & {
   /** Primeira opção da lista dinâmica (valor ""). */
   osEmpty?: string;
   rows?: number;
+  /** os-action: texto do botão para o elemento (calculado a cada desenho). */
+  osText?: (component: Component) => string;
+  /** os-action: botão desligado (ex.: limite atingido). */
+  osDisabled?: (component: Component) => boolean;
+  /** os-action / os-note: a linha some (ex.: o que o botão faz não cabe agora). */
+  osHidden?: (component: Component, editor: Editor) => boolean;
+  /** os-action: o que o botão faz. */
+  osRun?: (editor: Editor, component: Component) => void;
+  /** os-action: botão de destaque (maior, na cor principal), para a ação principal do elemento. */
+  osPrimary?: boolean;
 };
 
 /** Propriedade extra de um trait (rows, osOptions…), fora da tipagem do GrapesJS. */
@@ -145,6 +165,40 @@ export function registerTraitTypes(editor: Editor) {
     },
   });
 
+  tm.addType("os-action", {
+    noLabel: true,
+    templateInput: () => "",
+    createInput({ trait }: { trait: Trait }) {
+      const ppfx = String(editor.getConfig().stylePrefix ?? "gjs-");
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = `${ppfx}btn-prim ${ppfx}btn--full${prop(trait, "osPrimary") ? " os-action-primary" : ""}`;
+      btn.style.cssText = "margin:4px 0;";
+      btn.addEventListener("click", () => {
+        const component = trait.target as Component;
+        const disabled = prop(trait, "osDisabled") as TraitDef["osDisabled"];
+        if (disabled?.(component)) return;
+        (prop(trait, "osRun") as TraitDef["osRun"])?.(editor, component);
+        paintAction(btn, trait, editor);
+      });
+      return btn;
+    },
+    onUpdate({ elInput, trait }: { elInput: HTMLElement; trait: Trait }) {
+      paintAction(elInput as HTMLButtonElement, trait, editor);
+    },
+  });
+  // O texto, o "desligado" e o "escondido" dependem da página: refeitos a cada mudança.
+  let pendingActions = false;
+  const repaint = () => {
+    if (pendingActions) return;
+    pendingActions = true;
+    editorTimeout(editor, () => {
+      pendingActions = false;
+      refreshActions(editor);
+    });
+  };
+  editor.on("component:update:attributes component:add component:remove", repaint);
+
   tm.addType("os-note", {
     noLabel: true,
     templateInput: () => "",
@@ -153,6 +207,9 @@ export function registerTraitTypes(editor: Editor) {
       p.textContent = String(prop(trait, "label") ?? "");
       p.style.cssText = "margin:4px 0 8px;font-size:12px;line-height:1.45;opacity:.8;";
       return p;
+    },
+    onUpdate({ elInput, trait }: { elInput: HTMLElement; trait: Trait }) {
+      paintNote(elInput, trait, editor);
     },
   });
 
@@ -180,6 +237,44 @@ export function registerTraitTypes(editor: Editor) {
       (trait.view as unknown as { postUpdate?: () => void } | undefined)?.postUpdate?.();
     }
   });
+}
+
+/** Texto e "desligado" do botão os-action, para o elemento de agora. */
+function paintAction(btn: HTMLButtonElement, trait: Trait, editor: Editor) {
+  const component = trait.target as Component;
+  const text = prop(trait, "osText") as TraitDef["osText"];
+  const disabled = prop(trait, "osDisabled") as TraitDef["osDisabled"];
+  const hidden = prop(trait, "osHidden") as TraitDef["osHidden"];
+  btn.textContent = text ? text(component) : String(prop(trait, "label") ?? "");
+  btn.disabled = Boolean(disabled?.(component));
+  btn.style.opacity = btn.disabled ? ".55" : "";
+  btn.style.cursor = btn.disabled ? "default" : "";
+  // Escondido: a linha inteira do campo some (sem deixar o espaço dela).
+  const row = btn.closest<HTMLElement>('[class*="trait__wrp"]') ?? btn;
+  row.style.display = hidden?.(component, editor) ? "none" : "";
+}
+
+/** Nota (os-note) com `osHidden`: a linha inteira some quando não vale para o elemento de agora. */
+function paintNote(el: HTMLElement, trait: Trait, editor: Editor) {
+  const hidden = prop(trait, "osHidden") as TraitDef["osHidden"];
+  if (!hidden) return;
+  const off = hidden(trait.target as Component, editor);
+  el.style.display = off ? "none" : "";
+  const row = el.closest<HTMLElement>('[class*="trait__wrp"]');
+  if (row) row.style.display = off ? "none" : "";
+}
+
+/** Redesenha os botões (os-action) e as notas condicionais (os-note) das Configurações do elemento selecionado. */
+export function refreshActions(editor: Editor) {
+  const selected = editor.getSelected();
+  if (!selected) return;
+  for (const trait of selected.getTraits()) {
+    const type = trait.get("type");
+    if (type !== "os-action" && type !== "os-note") continue;
+    const el = (trait as unknown as { view?: { getInputElem?: () => unknown } }).view?.getInputElem?.();
+    if (type === "os-action" && el instanceof HTMLButtonElement) paintAction(el, trait, editor);
+    else if (type === "os-note" && el instanceof HTMLElement) paintNote(el, trait, editor);
+  }
 }
 
 /** Cor que o navegador entende (#hex, rgb(), nome em inglês, var()…). */
@@ -241,7 +336,7 @@ export function refreshOptions(editor: Editor, component: Component) {
       const links = kind ? ctx.links.filter((l) => l.kind === kind) : ctx.links;
       options = links.map((l) => ({
         id: l.key,
-        label: l.payment ? `${esc(l.label)} · Pagamento na página` : esc(l.label),
+        label: linkOptionLabel(l, esc(l.label)),
       }));
       // Mantém visível uma chave que não existe mais (link apagado).
       const current = String(trait.getValue() ?? "");

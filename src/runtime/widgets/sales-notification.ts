@@ -11,8 +11,12 @@
  * data-os-position  "left" | "right"; data-os-time: mostra "há X minutos"
  * data-os-mobile    "0" não mostra no celular
  * (role="status"/aria-live vêm do bloco.)
+ *
+ * "de", "há X minutos" e a ação padrão ("acabou de comprar", com que o bloco
+ * nasce) seguem o idioma da página (espanhol/inglês pelo #os-textos, ./texts).
  */
 import { parsePeople } from "./options";
+import { t, tf } from "./texts";
 import { flag, num, opt, widgets } from "./util";
 
 export function initSalesNotifications(root?: ParentNode) {
@@ -22,7 +26,9 @@ export function initSalesNotifications(root?: ParentNode) {
   const people = parsePeople(opt(el, "people")).sort(() => Math.random() - 0.5);
   if (!people.length) return;
   const product = opt(el, "product");
-  const action = opt(el, "action", "acabou de comprar");
+  const ACTION_PT = "acabou de comprar";
+  const typed = opt(el, "action", ACTION_PT);
+  const action = typed === ACTION_PT ? t("snAction", ACTION_PT) : typed;
   const max = num(el, "max", 10, 0, 1000);
   const interval = num(el, "interval", 15, 2, 3600) * 1000;
   const duration = num(el, "duration", 5, 1, 120) * 1000;
@@ -63,9 +69,9 @@ export function initSalesNotifications(root?: ParentNode) {
     if (max && shown >= max) return;
     clearWhatsapp();
     const p = people[shown++ % people.length];
-    if (title) title.textContent = p.city ? `${p.name}, de ${p.city}` : p.name;
+    if (title) title.textContent = p.city ? tf("snFrom", "{n}, de {c}", { n: p.name, c: p.city }) : p.name;
     if (text) text.textContent = product ? `${action} ${product}` : action;
-    if (time) time.textContent = `há ${2 + Math.floor(Math.random() * 38)} minutos`;
+    if (time) time.textContent = tf("snAgo", "há {n} minutos", { n: 2 + Math.floor(Math.random() * 38) });
     el.classList.add("os-show");
     setTimeout(() => {
       el.classList.remove("os-show");

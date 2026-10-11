@@ -24,7 +24,15 @@ if (env.NODE_ENV !== "production") globalForPrisma.prisma = prisma;
  */
 export type Db = Prisma.TransactionClient;
 
-/** Roda `fn` numa transação: a de `db`, se já for uma, ou uma nova. */
-export function atomically<T>(db: Db, fn: (tx: Db) => Promise<T>): Promise<T> {
-  return db === prisma ? prisma.$transaction(fn) : fn(db);
+/**
+ * Roda `fn` numa transação: a de `db`, se já for uma, ou uma nova (com os
+ * tempos de `opts` — o padrão do Prisma é 5 s, pouco para criar dezenas de
+ * páginas de uma vez).
+ */
+export function atomically<T>(
+  db: Db,
+  fn: (tx: Db) => Promise<T>,
+  opts?: { timeout?: number; maxWait?: number },
+): Promise<T> {
+  return db === prisma ? prisma.$transaction(fn, opts) : fn(db);
 }

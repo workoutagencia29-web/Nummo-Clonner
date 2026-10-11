@@ -579,7 +579,7 @@ describe("páginas 'Preservar JS'", () => {
       }),
     );
     const s = await open(server, id, { waitReady: false });
-    await s.page.getByText("Esta página usa os scripts originais (“Preservar JS”)").waitFor();
+    await s.page.getByText("Esta página usa os scripts originais (modo “Com scripts”)").waitFor();
     await expect
       .poll(() => s.page.locator('iframe[title="Prévia da página"]').getAttribute("src"))
       .toBe("http://preview.test/t1/?dispositivo=desktop");
@@ -611,7 +611,7 @@ describe("páginas 'Preservar JS'", () => {
       }),
     );
     const s = await open(server, id, { waitReady: false });
-    await s.page.getByText("Esta página usa os scripts originais (“Preservar JS”)").waitFor();
+    await s.page.getByText("Esta página usa os scripts originais (modo “Com scripts”)").waitFor();
     await s.page.getByText(/o editor abre a cópia editável desta clonagem/).waitFor();
     expect(await s.page.getByText(/versão antiga do Offer Studio/).count()).toBe(0);
 
@@ -633,8 +633,8 @@ describe("páginas 'Preservar JS'", () => {
     expect(await actionCalls(s, "convertToEditableAction")).toEqual([
       { name: "convertToEditableAction", input: { documentId: id } },
     ]);
-    // Abriu como página editável: sem o aviso de "Preservar JS".
-    expect(await s.page.getByText(/scripts originais \(“Preservar JS”\)/).count()).toBe(0);
+    // Abriu como página editável: sem o aviso de "Com scripts".
+    expect(await s.page.getByText(/scripts originais \(modo “Com scripts”\)/).count()).toBe(0);
   });
 
   it("sem a cópia editável (salva numa versão antiga): avisa e converte como antes, sem chamar o servidor", async () => {

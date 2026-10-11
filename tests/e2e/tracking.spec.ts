@@ -191,7 +191,7 @@ test.describe("Pixels e rastreamento", () => {
 test.describe("Empresa e SEO", () => {
   test("salva os dados da empresa e o SEO de uma página", async ({ page }) => {
     await createOffer(page, `Oferta Empresa ${uid()}`);
-    await page.getByRole("tab", { name: "Empresa e SEO" }).click();
+    await page.getByRole("tab", { name: "Moeda, empresa e SEO" }).click();
 
     await page.getByLabel("Nome da empresa (ou seu nome)").fill("Minha Empresa Ltda.");
     await page.getByLabel("CNPJ ou CPF").fill("12.345.678/0001-90");

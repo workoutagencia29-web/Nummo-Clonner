@@ -14,7 +14,7 @@ import type { Editor } from "grapesjs";
 import type { Browser, Page } from "playwright";
 import type { OsBlock } from "@/editor/blocks";
 import type { registerDynamicTraits } from "@/editor/grapes/components";
-import type { createEditor, DEVICES } from "@/editor/grapes/setup";
+import type { createEditor, DEVICES, showLayers } from "@/editor/grapes/setup";
 import type { setWidgetContext } from "@/editor/widgets";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
@@ -26,6 +26,8 @@ export interface E2Window {
   pageErrors: string[];
   OS: {
     createEditor: typeof createEditor;
+    /** Abre as camadas (no editor-app, ao abrir a aba "Camadas"). */
+    showLayers: typeof showLayers;
     registerDynamicTraits: typeof registerDynamicTraits;
     setWidgetContext: typeof setWidgetContext;
     DEVICES: typeof DEVICES;
@@ -43,7 +45,7 @@ export interface BootOptions {
 }
 
 const ENTRY = `
-import { createEditor, DEVICES } from "@/editor/grapes/setup";
+import { createEditor, DEVICES, showLayers } from "@/editor/grapes/setup";
 import { registerDynamicTraits } from "@/editor/grapes/components";
 import { setWidgetContext } from "@/editor/widgets";
 import { ALL_BLOCKS } from "@/editor/blocks";
@@ -70,7 +72,7 @@ function boot(opts) {
   });
 }
 
-window.OS = { createEditor, registerDynamicTraits, setWidgetContext, DEVICES, ALL_BLOCKS, boot };
+window.OS = { createEditor, showLayers, registerDynamicTraits, setWidgetContext, DEVICES, ALL_BLOCKS, boot };
 `;
 
 /** Toasts (sonner) só anotados numa lista: o teste não tem React. */

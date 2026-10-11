@@ -9,7 +9,7 @@ export const OFFER_TABS = [
   { value: "paginas", label: "Páginas do funil" },
   { value: "links", label: "Links e checkouts" },
   { value: "rastreamento", label: "Pixels e rastreamento" },
-  { value: "configuracoes", label: "Empresa e SEO" },
+  { value: "configuracoes", label: "Moeda, empresa e SEO" },
   { value: "detalhes", label: "Detalhes" },
 ] as const;
 
@@ -25,8 +25,13 @@ export function offerTabOf(value: string | string[] | null | undefined): OfferTa
 /**
  * Abas da tela da oferta. A aba escolhida vai para o endereço (?aba=…), então
  * recarregar, voltar do "Testar pixels" ou mandar o link abre na mesma aba. No
- * celular, as abas viram uma grade de duas colunas (todas visíveis, sem rolagem
- * escondida).
+ * celular e em janelas até o lg (de 768 px a ~1000 px o menu lateral ocupa 256
+ * px), as abas viram uma grade de duas colunas (todas visíveis, sem rolagem
+ * escondida); o nome que não cabe na coluna (telas estreitas, ou com o ponto de
+ * "não salvo" ao lado) quebra em duas linhas, e as duas abas da linha ficam da
+ * mesma altura. Do lg em diante ficam numa linha; se ainda assim faltar espaço
+ * (ponto de "não salvo" em várias), a última desce para a linha de baixo em vez
+ * de sumir numa rolagem para o lado.
  */
 export function OfferTabs({ children }: { children: ReactNode }) {
   const params = useSearchParams();
@@ -56,10 +61,14 @@ export function OfferTabs({ children }: { children: ReactNode }) {
     >
       <TabsList
         aria-label="Partes da oferta"
-        className="grid h-auto w-full grid-cols-2 gap-1 sm:inline-flex sm:h-9 sm:w-fit sm:max-w-full sm:justify-start sm:gap-0 sm:overflow-x-auto [&>*:last-child]:col-span-2"
+        className="grid h-auto w-full grid-cols-2 items-stretch gap-1 lg:flex lg:min-h-9 lg:w-fit lg:max-w-full lg:flex-wrap lg:items-center lg:justify-start lg:gap-0 [&>*:last-child]:col-span-2"
       >
         {OFFER_TABS.map((t) => (
-          <TabsTrigger key={t.value} value={t.value} className="h-8 sm:h-[calc(100%-1px)]">
+          <TabsTrigger
+            key={t.value}
+            value={t.value}
+            className="h-auto min-h-8 whitespace-normal text-center max-lg:leading-tight lg:h-[calc(2.25rem-7px)] lg:min-h-0 lg:flex-auto lg:whitespace-nowrap"
+          >
             {t.label}
           </TabsTrigger>
         ))}

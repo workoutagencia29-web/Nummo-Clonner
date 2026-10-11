@@ -5,7 +5,7 @@
  * Código de Defesa do Consumidor. NÃO são aconselhamento jurídico: o painel
  * avisa isso ao escolher o modelo. Os dados da empresa ficam como
  * {{EMPRESA}}, {{CNPJ}}, {{EMAIL}}, {{TELEFONE}} e {{ENDERECO}} (destacados só
- * no editor): a prévia e o ZIP trocam pelos dados da aba "Empresa e SEO"
+ * no editor): a prévia e o ZIP trocam pelos dados da aba "Moeda, empresa e SEO"
  * (fillCompanyPlaceholders), inclusive "CNPJ/CPF" por CPF ou CNPJ conforme o
  * número. Telefone e endereço são opcionais: os trechos com eles ficam em
  * <span data-os-company="phone|address">, que somem quando o dado está vazio.

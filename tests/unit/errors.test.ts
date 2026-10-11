@@ -82,7 +82,7 @@ describe("toUserMessage — erros reais do banco", () => {
 
     expect(err).toMatchObject({ code: "P2002" });
     expect(toUserMessage(err)).toEqual({
-      message: "Já existe uma página com esse endereço (slug) nesta oferta.",
+      message: "Já existe uma página com esse endereço nesta oferta.",
       field: "slug",
     });
   });

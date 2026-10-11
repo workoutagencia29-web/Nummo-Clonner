@@ -205,6 +205,10 @@ export const kyvoGateway: PaymentGatewayAdapter = {
     if (!Number.isSafeInteger(input.amountCents) || input.amountCents <= 0) {
       throw new PaymentGatewayError("invalid_request", "amount");
     }
+    // PIX e real são dos gateways de PIX (FlevoPay, BlackCat): a Kyvo não cobra.
+    if (input.method === "pix" || input.currency === "BRL") {
+      throw new PaymentGatewayError("invalid_request", "currency_not_allowed");
+    }
     const body = chargeBody(input);
     let path: string;
     if (input.method === "spei") {

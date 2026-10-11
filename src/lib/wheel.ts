@@ -241,10 +241,31 @@ export const LINK_KIND_ATTR = "data-os-link-kind";
  */
 export const SCOPE_ATTR = "data-os-oferta";
 
+/**
+ * Endereço de uma página do próprio site, sem domínio ("/checkout/x",
+ * "../checkout/x/index.html", com query): o da página de checkout do Offer
+ * Studio num prêmio (`o`). Nada de "//outro-site" nem "javascript:".
+ */
+export const SITE_PATH_RE = /^(?:\/|\.{1,2}\/)(?![/\\])[\w.~%/?=&-]*$/;
+
+/** Chave de um link da oferta (a mesma regra das chaves de produto: PRODUCT_KEY_RE). */
+export const PRIZE_LINK_KEY_RE = /^[a-z0-9-]{1,80}$/;
+
 /** Prêmio no mapa embutido na página (nomes curtos: vai em todas as páginas). */
 export interface PrizeInfo {
-  /** Endereço do link do prêmio (checkout com desconto). Ausente quando o prêmio é pagamento na página (`p`). */
+  /**
+   * Endereço do link do prêmio (checkout com desconto): http(s) ou, com `o`, a
+   * página de checkout do Offer Studio no próprio site (SITE_PATH_RE). Ausente
+   * quando o prêmio é pagamento na página (`p`).
+   */
   u?: string;
+  /**
+   * Link do prêmio do tipo "Checkout do Offer Studio": a chave dele. Os botões
+   * de compra trocados passam a ser desse link (data-os-link): o rastreamento
+   * não conta o InitiateCheckout no clique (a página de checkout conta ao
+   * abrir) e repassa as UTMs como num link do funil.
+   */
+  o?: string;
   /**
    * Link do prêmio do tipo "Pagamento na página": chave do produto (com o
    * preço com desconto) que os botões de compra passam a abrir (data-os-pay).

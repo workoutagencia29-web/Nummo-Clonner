@@ -126,7 +126,7 @@ describe("saveOfferImages", () => {
     expect(result.errors).toEqual([
       {
         name: "contrato.pdf",
-        error: '"contrato.pdf" não é uma imagem aceita. Envie JPG, PNG, WebP, GIF, AVIF ou SVG.',
+        error: '"contrato.pdf" não é uma imagem aceita. Envie JPG, PNG, WebP, GIF, AVIF, SVG ou ICO.',
         status: 415,
       },
       {

@@ -168,6 +168,7 @@ interface CodeView {
 }
 interface Harness {
   createEditor: typeof Setup.createEditor;
+  showLayers: typeof Setup.showLayers;
   SECTORS: typeof Setup.SECTORS;
   dialog: typeof Dialog;
   findView(el: Element): CodeView | null;
@@ -199,7 +200,7 @@ import { useState } from "react";
 import { createRoot } from "react-dom/client";
 import { EditorView } from "@uiw/react-codemirror";
 import { Toaster } from "sonner";
-import { createEditor, SECTORS } from "./src/editor/grapes/setup";
+import { createEditor, SECTORS, showLayers } from "./src/editor/grapes/setup";
 import * as dialog from "./src/editor/panels/code-dialog";
 
 function Host({ editor }: { editor: any }) {
@@ -215,6 +216,7 @@ function Host({ editor }: { editor: any }) {
 
 (window as any).OS = {
   createEditor,
+  showLayers,
   SECTORS,
   dialog,
   findView: (el: Element) => EditorView.findFromDOM(el as HTMLElement),
@@ -409,6 +411,8 @@ describe("painel de estilo e configurações em português", () => {
     await page.evaluate(() => {
       const w = window as unknown as TestWindow;
       for (const s of w.ed.StyleManager.getSectors()) s.setOpen(true);
+      // Camadas: desenhadas quando a aba abre.
+      w.OS.showLayers(w.ed);
       const h1 = w.ed.getWrapper()?.find("h1")[0];
       h1?.addStyle({
         "text-shadow": "1px 1px 2px #000",
@@ -1151,7 +1155,11 @@ describe("editor de código: janela", () => {
     await apply.click();
     await expect.poll(() => page.evaluate(() => (window as unknown as TestWindow).dialogOpen)).toBe(false);
     const html = await page.evaluate(() => (window as unknown as TestWindow).ed.getHtml());
-    expect(html).toBe('<body><section><h2 class="novo">Nova oferta</h2></section></body>');
+    // O h2 novo fica selecionado e o painel Estilo cria a regra #id dele logo depois (o GrapesJS
+    // então exporta o id): conforme o tempo, o id automático vem ou não — não é o que se testa aqui.
+    expect(html.replace(/ id="i[\da-z]+"/g, "")).toBe(
+      '<body><section><h2 class="novo">Nova oferta</h2></section></body>',
+    );
     await page.close();
   });
 

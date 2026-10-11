@@ -7,7 +7,12 @@ export function packProject(data: unknown): Uint8Array<ArrayBuffer> {
 }
 
 export function unpackProject<T = unknown>(bytes: Uint8Array): T {
-  return JSON.parse(gunzipSync(bytes).toString("utf8")) as T;
+  return JSON.parse(unpackProjectText(bytes)) as T;
+}
+
+/** O texto JSON do projeto compactado (sem montar o objeto: para conferir algo antes de ler). */
+export function unpackProjectText(bytes: Uint8Array): string {
+  return gunzipSync(bytes).toString("utf8");
 }
 
 /** Aplica uma transformação de texto dentro do projeto compactado. */

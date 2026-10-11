@@ -561,7 +561,7 @@ describe("fidelity#14 — Preservar JS e endereços absolutos do site original n
     expect(preserve).toContain('"https://wp.test/wp-admin/admin-ajax.php"');
     const warning = result.warnings.find((w) => w.code === "PRESERVE_JS_ORIGIN");
     expect(warning?.url).toBe("https://wp.test/wp-admin/admin-ajax.php");
-    expect(warning?.message).toContain("“Preservar JS”");
+    expect(warning?.message).toContain("“Com scripts”");
   });
 });
 

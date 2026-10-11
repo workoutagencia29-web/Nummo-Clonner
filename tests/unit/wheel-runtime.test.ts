@@ -115,13 +115,15 @@ let anchorHtml = "";
 const scoped: Record<string, string> = {};
 
 /** Página de vendas do modelo, com os botões no checkout cheio e blocos condicionais. */
-function salesPage(render: WheelRender | null) {
+function salesPage(render: WheelRender | null, top = "") {
   const template = PAGE_TEMPLATES.find((t) => t.id === "vendas-longa")?.html ?? "";
   const html = template
     .replaceAll('data-os-link=""', 'data-os-link="checkout"')
     .replace(
       "<body>",
-      '<body><p id="so-ganhou" data-os-premio="ganhou">Preço com desconto só hoje</p><p id="so-nao" data-os-premio="nao">Preço cheio</p>',
+      "<body>" +
+        top +
+        '<p id="so-ganhou" data-os-premio="ganhou">Preço com desconto só hoje</p><p id="so-nao" data-os-premio="nao">Preço cheio</p>',
     );
   return renderPageHtml(html, {
     links: LINKS,
@@ -405,24 +407,29 @@ describe("prêmio na página de vendas", () => {
     for (const href of await buttons.evaluateAll((els) => els.map((e) => e.getAttribute("href")))) {
       expect(href).toBe("https://pay.exemplo.com/trinta");
     }
-    expect(await page.locator(".os-pz-msg").textContent()).toBe(
-      "🎉 Você ganhou 30% OFF — seu desconto está reservado por 10:00",
-    );
+    // Visual da "Contagem no topo (barra)": frase, "TERMINA EM" e o tempo em 3 caixinhas.
+    // Com cupom, o desconto não está aplicado: a pessoa digita o cupom no checkout.
+    expect(await page.locator(".os-pz-msg").textContent()).toBe("30% OFF liberado! Use o cupom no pagamento");
+    expect(await page.locator(".os-pz-l").innerText()).toBe("TERMINA EM");
+    expect(await page.locator(".os-pz-t").textContent()).toBe("00:10:00");
+    expect(await page.locator(".os-pz-t b").count()).toBe(3);
     expect(await page.locator(".os-pz-cp code").textContent()).toBe("ROLETA30");
     expect(await visible(page, "#so-ganhou")).toBe(true);
     expect(await visible(page, "#so-nao")).toBe(false);
     // A faixa não cobre o topo da página.
     const bar = await page.locator(".os-pz").boundingBox();
-    const spacer = await page.locator(".os-pz-sp").boundingBox();
+    const spacer = await page.locator(".os-top-sp").boundingBox();
     expect(Math.round(spacer?.height ?? 0)).toBe(Math.round(bar?.height ?? -1));
+    expect(bar?.y).toBe(0);
 
     await page.clock.runFor(61_000);
-    expect(await page.locator(".os-pz-t").textContent()).toBe("08:59");
+    expect(await page.locator(".os-pz-t").textContent()).toBe("00:08:59");
     // Zerou: o desconto continua (texto muda, botões continuam no prêmio).
     await page.clock.runFor(10 * 60_000);
     expect(await page.locator(".os-pz-msg").textContent()).toBe(
-      "🎉 Seu desconto de 30% OFF continua reservado — aproveite agora",
+      "Seu desconto de 30% OFF continua reservado — aproveite agora",
     );
+    expect(await page.locator(".os-pz-t").count()).toBe(0);
     expect(await buttons.first().getAttribute("href")).toBe("https://pay.exemplo.com/trinta");
 
     // (o botão pulsa: sem esperar ficar parado)
@@ -442,6 +449,38 @@ describe("prêmio na página de vendas", () => {
     expect(checkout.searchParams.get("os_premio")).toBeNull();
     await site.close();
   }, 40_000);
+
+  it("com uma “Contagem no topo” na página: a faixa do prêmio a substitui enquanto está aberta (um desconto e um prazo só)", async () => {
+    const bar =
+      '<div id="barra" data-os-widget="countdown" data-os-cd-style="bar" data-os-minutes="15" data-os-cd-days="0" style="padding:10px">' +
+      '<p>95% OFF aplicado automaticamente!</p><div data-os-cd-units><span data-os-cd-unit="h"><b data-os-cd="h">00</b>:</span>' +
+      '<span data-os-cd-unit="m"><b data-os-cd="m">15</b>:</span><span data-os-cd-unit="s"><b data-os-cd="s">00</b></span></div></div>';
+    // 50% OFF não tem cupom: o desconto já vem no link do prêmio.
+    const site = await open(`${SALES_PATH}?os_premio=${prizeParam(prizeId(SLICES[3]), Date.now() + 2 * DAY)}`, {
+      sales: salesPage(wheel, bar),
+    });
+    const { page } = site;
+    await expect.poll(() => page.locator(".os-pz").count()).toBe(1);
+    expect(await page.locator(".os-pz-msg").textContent()).toBe("50% OFF aplicado automaticamente!");
+    expect(await page.locator(".os-pz-cp").count()).toBe(0);
+    // A barra da página some enquanto a faixa está aberta; o espaço é só o da faixa.
+    expect(await page.locator("#barra").isVisible()).toBe(false);
+    const prize = await page.locator(".os-pz").boundingBox();
+    expect(prize?.y).toBe(0);
+    await page.waitForTimeout(1100);
+    expect(Math.round((await page.locator(".os-top-sp").boundingBox())?.height ?? 0)).toBe(
+      Math.round(prize?.height ?? -1),
+    );
+    // Fechar a faixa: a barra da página volta, no topo, e o espaço passa a ser o dela.
+    await page.getByRole("button", { name: "Fechar o aviso do desconto" }).click();
+    expect(await page.locator("#barra").isVisible()).toBe(true);
+    const top = await page.locator("#barra").boundingBox();
+    expect(top?.y).toBe(0);
+    expect(Math.round((await page.locator(".os-top-sp").boundingBox())?.height ?? 0)).toBe(
+      Math.round(top?.height ?? -1),
+    );
+    await site.close();
+  }, 30_000);
 
   it("InitiateCheckout continua saindo no botão trocado; voltar depois (sem o parâmetro) mantém o prêmio e o contador", async () => {
     const site = await open(`${SALES_PATH}?os_premio=${valid()}`);
@@ -463,7 +502,7 @@ describe("prêmio na página de vendas", () => {
     expect(await page.locator('[data-os-link="checkout"]').first().getAttribute("href")).toBe(
       "https://pay.exemplo.com/trinta",
     );
-    expect(await page.locator(".os-pz-t").textContent()).toMatch(/^(09:5\d|10:00)$/);
+    expect(await page.locator(".os-pz-t").textContent()).toMatch(/^00:(09:5\d|10:00)$/);
     // Fechar a faixa: some nesta visita; os botões continuam com o desconto.
     await page.getByRole("button", { name: "Fechar o aviso do desconto" }).click();
     expect(await page.locator(".os-pz").count()).toBe(0);

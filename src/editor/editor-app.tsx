@@ -75,7 +75,10 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { useAction } from "@/hooks/use-action";
 import { installEditorSync } from "@/lib/find-replace";
+import { plural } from "@/lib/format";
 import { PAGE_TYPE_LABEL } from "@/lib/labels";
+import { OFFER_CURRENCY_NAME } from "@/lib/offer-currency";
+import { PRODUCT_ATTR, STORE_CURRENCY_IDS, type StoreCurrency } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { convertToEditableAction, offerPreviewUrlAction } from "@/server/actions/editor";
 import type { EditorPayload } from "@/server/services/documents";
@@ -89,19 +92,24 @@ import {
   type ZoomMode,
 } from "./grapes/canvas-fit";
 import { type Patchable, patchOnce, registerDynamicTraits } from "./grapes/components";
+import { guardDeleteKeys } from "./grapes/delete-keys";
 import { STATE_LABELS } from "./grapes/i18n";
 import { applyLegacyRepair } from "./grapes/legacy-repair";
 import { enclosingClickable } from "./grapes/link-select";
 import { installNewLinkOption, type NewLinkRequest } from "./grapes/new-link";
-import { createEditor, DEVICES, type DeviceId, deviceWidthPx, importPageHtml } from "./grapes/setup";
+import { installProductPages, type ProductPagesRequest } from "./grapes/product-pages";
+import { createEditor, DEVICES, type DeviceId, deviceWidthPx, importPageHtml, showLayers } from "./grapes/setup";
 import { skipPhoneValues } from "./grapes/style-cascade";
 import { configureVideoUpload } from "./grapes/video-upload";
+import { linkTargetNoun, linkTargetText, showsLinkTarget } from "./link-target";
 import { CodeDialog } from "./panels/code-dialog";
 import { FindReplaceDialog } from "./panels/find-replace-dialog";
 import { LinksDialog } from "./panels/links-dialog";
 import { NewLinkDialog } from "./panels/new-link-dialog";
+import { ProductPageDialog } from "./panels/product-page-dialog";
 import { VersionsDialog } from "./panels/versions-dialog";
 import { setWidgetContext } from "./widgets";
+import { liftStoreHeaders } from "./widgets/store-header-place";
 import { pageHasWheel } from "./widgets/wheel";
 
 type SaveState = "saved" | "dirty" | "saving" | "error" | "conflict";
@@ -135,6 +143,7 @@ const SAVE_TOAST_ID = "os-save";
  */
 const SETTINGS_FIRST_TYPES = new Set([
   "os-countdown",
+  "os-countdown-bar",
   "os-scarcity",
   "os-sales-notification",
   "os-exit-popup",
@@ -151,6 +160,14 @@ const SETTINGS_FIRST_TYPES = new Set([
   "os-quiz-loading",
   "os-quiz-final",
   "os-wheel",
+  "os-products",
+  "os-product",
+  "os-store-header",
+  "os-sh-link",
+  "os-sh-logo-img",
+  "os-sh-cat",
+  "os-footer",
+  "os-ft-logo-img",
 ]);
 
 const DEVICE_ICON: Record<DeviceId, typeof MonitorIcon> = {
@@ -617,17 +634,72 @@ function stateLabel(state: string) {
   return label ? `“${label.toLowerCase()}”` : `do estado “${state}”`;
 }
 
+/** O que o link em volta do elemento selecionado é (muda os textos do atalho). */
+type LinkParentKind = "product" | "logo" | "button";
+
+const LINK_PARENT_TEXTS: Record<LinkParentKind, [string, string]> = {
+  product: ["Este texto está dentro de um produto.", "Configurar o produto"],
+  logo: ["Este logo é um link.", "Configurar o link"],
+  button: ["Este texto está dentro de um botão ou link.", "Configurar o botão"],
+};
+
+function linkParentKind(link: Component): LinkParentKind {
+  if (PRODUCT_ATTR in link.getAttributes()) return "product";
+  return link.getClasses().includes("os-sh-logo") ? "logo" : "button";
+}
+
 /**
  * Texto dentro de um link/botão selecionado (dois cliques, camadas): o link, a
- * página do funil e o evento ficam no link — um atalho leva até ele.
+ * página do funil e o evento ficam no link — um atalho leva até ele. Dentro
+ * de um cartão da vitrine (nome do produto), o atalho leva ao produto; no logo
+ * do cabeçalho de loja (o clique seleciona a imagem), ao link dele.
  */
-function LinkParentHint({ onSelect }: { onSelect: () => void }) {
+function LinkParentHint({ onSelect, kind }: { onSelect: () => void; kind: LinkParentKind }) {
+  const [text, action] = LINK_PARENT_TEXTS[kind];
   return (
     <div className="flex items-center gap-2 border-b bg-muted/60 px-3 py-2 text-xs">
       <LinkIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
-      <p className="min-w-0 flex-1">Este texto está dentro de um botão ou link.</p>
+      <p className="min-w-0 flex-1">{text}</p>
       <Button variant="outline" size="sm" className="h-7 shrink-0" onClick={onSelect}>
-        Configurar o botão
+        {action}
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * Botão ou link selecionado: "Este botão leva para: …" no Estilo, com o atalho
+ * "Mudar destino" (abre Configurações, onde o "Link da oferta" vem primeiro).
+ * Acompanha a troca de destino (Configurações, Desfazer).
+ */
+function LinkTargetHint({
+  component,
+  payload,
+  onChange,
+}: {
+  component: Component;
+  payload: EditorPayload;
+  onChange: () => void;
+}) {
+  const [, redraw] = useState(0);
+  useEffect(() => {
+    const update = () => redraw((n) => n + 1);
+    component.on("change:attributes", update);
+    return () => {
+      component.off("change:attributes", update);
+    };
+  }, [component]);
+  const text = linkTargetText("a", component.getAttributes(), { links: payload.links, pages: payload.pages });
+  if (!text) return null;
+  const noun = linkTargetNoun(String(component.get("type") ?? ""), component.getClasses() as string[]);
+  return (
+    <div data-os-link-target className="flex items-center gap-2 border-b bg-muted/60 px-3 py-2 text-xs">
+      <LinkIcon className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
+      <p className="min-w-0 flex-1 break-words">
+        Este {noun} leva para: <span className="font-medium">{text}</span>
+      </p>
+      <Button variant="outline" size="sm" className="h-7 shrink-0" onClick={onChange}>
+        Mudar destino
       </Button>
     </div>
   );
@@ -806,7 +878,7 @@ function PreserveJsNotice({
       </header>
       <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto p-4 lg:flex-row">
         <section className="flex max-w-md shrink-0 flex-col gap-3 rounded-lg border bg-card p-5 text-sm">
-          <h1 className="font-semibold text-base">Esta página usa os scripts originais (“Preservar JS”)</h1>
+          <h1 className="font-semibold text-base">Esta página usa os scripts originais (modo “Com scripts”)</h1>
           <p className="text-muted-foreground">
             Ela foi clonada para funcionar com os scripts do site original — quiz, calculadora, carrinho, animações. Por
             isso ela não abre direto no editor visual: o editor reescreve o HTML da página, e os scripts que dependem do
@@ -960,6 +1032,12 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
   const selectorsRef = useRef<HTMLDivElement>(null);
   const stylesRef = useRef<HTMLDivElement>(null);
   const traitsRef = useRef<HTMLDivElement>(null);
+  /** Painel "Configurações": Backspace/Delete num botão dele não apagam o elemento selecionado. */
+  const configPanelRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const panel = configPanelRef.current;
+    return panel ? guardDeleteKeys(panel) : undefined;
+  }, []);
   const editorRef = useRef<Editor | null>(null);
 
   const [editor, setEditor] = useState<Editor | null>(null);
@@ -973,13 +1051,20 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
   const [previewKey, setPreviewKey] = useState(0);
   const [dialog, setDialog] = useState<"code" | "find" | "links" | "versions" | null>(null);
   const [newLink, setNewLink] = useState<NewLinkRequest | null>(null);
+  /** "＋ Criar página deste produto" / "Criar as páginas que faltam" (vitrine de produtos). */
+  const [productPages, setProductPages] = useState<ProductPagesRequest | null>(null);
+  /** Páginas criadas daqui (payload.pages muda no lugar): a aba "Páginas" desenha de novo. */
+  const [, setPagesVersion] = useState(0);
   const [conflictOpen, setConflictOpen] = useState(false);
   const [pendingLeave, setPendingLeave] = useState<string | null>(null);
   const [layerQuery, setLayerQuery] = useState("");
+  const [leftTab, setLeftTab] = useState("blocos");
   const [rightTab, setRightTab] = useState("estilo");
   const [hasSelection, setHasSelection] = useState(false);
   /** Link/botão em volta do elemento selecionado (atalho "Configurar o botão"). */
   const [linkParent, setLinkParent] = useState<Component | null>(null);
+  /** Botão ou link selecionado (faixa "Este botão leva para" no Estilo). */
+  const [linkTarget, setLinkTarget] = useState<Component | null>(null);
   /** Estado do estilo (":hover"…) escolhido em "Avançado"; "" = normal. */
   const [styleState, setStyleState] = useState("");
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -996,6 +1081,18 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
   const conflicted = useRef(false);
   /** Revisão do servidor no 409 (só "Manter a minha" passa a usá-la). */
   const conflictRevision = useRef<number | null>(null);
+  /**
+   * Moeda da oferta no 409, quando ela foi trocada com o editor aberto (o
+   * diálogo de conflito explica; "Manter a minha" grava com as vitrines e
+   * caixas de compra já na moeda nova: saveEditorDocument).
+   */
+  const [conflictCurrency, setConflictCurrency] = useState<StoreCurrency | null>(null);
+  /**
+   * A gravação passou as vitrines e caixas desta página para a moeda nova da
+   * oferta (trocada com o editor aberto): o editor recarrega, depois de gravar
+   * o resto, para mostrar a página como ficou.
+   */
+  const currencyReload = useRef<StoreCurrency | null>(null);
   /** A pessoa escolheu descartar (recarregar/sair sem salvar): nada mais grava. */
   const discarding = useRef(false);
   const changeCounter = useRef(0);
@@ -1044,7 +1141,9 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
       const counterAtStart = changeCounter.current;
       let body: string;
       try {
-        body = JSON.stringify({ revision: revision.current, ...snapshotOf(ed) });
+        // Com a moeda da oferta que o editor conhece: trocada com ele aberto, o servidor passa as
+        // vitrines e caixas de compra para a de agora.
+        body = JSON.stringify({ revision: revision.current, ...snapshotOf(ed), currency: payload.offer.currency });
       } catch {
         setSaveState("error");
         return false;
@@ -1060,10 +1159,19 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
             body,
             keepalive: Boolean(opts.keepalive) && body.length < KEEPALIVE_MAX_BYTES,
           });
-          const data = (await res.json().catch(() => ({}))) as { revision?: number; savedAt?: string; error?: string };
+          const data = (await res.json().catch(() => ({}))) as {
+            revision?: number;
+            savedAt?: string;
+            error?: string;
+            currency?: string;
+            currencySwitched?: number;
+          };
+          const offerCurrency = STORE_CURRENCY_IDS.find((c) => c === data.currency) ?? null;
+          const currencyChanged = offerCurrency !== null && offerCurrency !== payload.offer.currency;
           if (res.status === 409) {
             conflicted.current = true;
             conflictRevision.current = typeof data.revision === "number" ? data.revision : null;
+            setConflictCurrency(currencyChanged ? offerCurrency : null);
             clearTimeout(timer.current);
             setSaveState("conflict");
             setConflictOpen(true);
@@ -1081,6 +1189,20 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
           }
           revision.current = data.revision ?? revision.current + 1;
           savedCounter.current = counterAtStart;
+          if (currencyChanged && offerCurrency) {
+            if (data.currencySwitched) {
+              if (!currencyReload.current) {
+                toast.info(`A moeda da oferta foi trocada para ${OFFER_CURRENCY_NAME[offerCurrency]}`, {
+                  description:
+                    "As vitrines e caixas de compra desta página passaram para ela também. Recarregando o editor…",
+                });
+              }
+              currencyReload.current = offerCurrency;
+            } else {
+              // Nada desta página mudou de moeda: só os blocos com preço novos já nascem na de agora.
+              payload.offer.currency = offerCurrency;
+            }
+          }
           if (retries.current > 0) toast.dismiss(SAVE_TOAST_ID);
           retries.current = 0;
           setSavedAt(data.savedAt ?? new Date().toISOString());
@@ -1103,7 +1225,7 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
       saving.current = task;
       return task;
     },
-    [documentUrl],
+    [documentUrl, payload.offer],
   );
 
   const scheduleSave = useCallback(() => {
@@ -1185,10 +1307,12 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
     // payload.links é atualizado no lugar por "Links e checkouts" (links criados ali aparecem na hora).
     // Roleta de desconto em alguma página da oferta (ou posta agora nesta): os
     // elementos ganham "Roleta de desconto: mostrar".
+    // Moeda da oferta: vitrines e caixas de compra soltas na página nascem nela.
     const offerData = () => ({
       links: payload.links,
       pages: payload.pages,
       wheel: Boolean(payload.hasWheel) || pageHasWheel(ed),
+      currency: payload.offer.currency,
     });
     registerDynamicTraits(ed, offerData);
     setWidgetContext(ed, offerData);
@@ -1196,6 +1320,7 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
     const disposeVideo = configureVideoUpload(ed, payload.offer.id);
     const disposeSync = installEditorSync(ed);
     const disposeNewLink = installNewLinkOption(ed, setNewLink);
+    const disposeProductPages = installProductPages(ed, setProductPages);
 
     const refreshUndo = () => {
       const um = ed.UndoManager;
@@ -1223,8 +1348,11 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
         // original vira o "Original da clonagem" do Histórico); páginas "Preservar JS" só gravam
         // quando houver uma alteração de verdade.
         importPageHtml(ed, payload.html);
+        // Cabeçalho de loja dentro de um contêiner: vai para o nível de cima (largura toda).
+        const wrapper = ed.getWrapper();
+        const lifted = wrapper ? liftStoreHeaders(wrapper).length > 0 : false;
         ed.UndoManager.clear();
-        if (!preserveJs) {
+        if (!preserveJs || lifted) {
           changeCounter.current++;
           firstSave = true;
         }
@@ -1250,6 +1378,18 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
       const all = ed.getSelectedAll();
       setHasSelection(all.length > 0);
       setLinkParent(all.length === 1 ? enclosingClickable(all[0]) : null);
+      const one = all.length === 1 ? all[0] : null;
+      setLinkTarget(
+        one &&
+          showsLinkTarget(
+            String(one.get("type") ?? ""),
+            String(one.get("tagName") ?? ""),
+            one.getAttributes(),
+            one.getClasses() as string[],
+          )
+          ? one
+          : null,
+      );
     });
     ed.on(CANVAS_FIT_EVENT, (info: CanvasFitInfo) => setFit(info));
     ed.on("selector:state", () => {
@@ -1299,7 +1439,7 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
           const counter = changeCounter.current;
           const send = () => {
             if (!data || conflicted.current || savedCounter.current === counter) return;
-            const body = JSON.stringify({ revision: revision.current, ...data });
+            const body = JSON.stringify({ revision: revision.current, ...data, currency: payload.offer.currency });
             void fetch(documentUrl, {
               method: "PUT",
               headers: { "Content-Type": "application/json" },
@@ -1315,6 +1455,7 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
       ready.current = false;
       disposeSync();
       disposeNewLink();
+      disposeProductPages();
       disposeAssets();
       disposeVideo();
       ed.destroy();
@@ -1323,6 +1464,12 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
       for (const ref of mounted) if (ref.current) ref.current.innerHTML = "";
     };
   }, [payload, preserveJs, documentUrl, save, saveRepair, markDirty]);
+
+  // Camadas: desenhadas só quando a aba abre (com o editor carregado). Editor novo
+  // (outro documento) com a aba já aberta: desenha as dele.
+  useEffect(() => {
+    if (leftTab === "camadas" && editor && editor === editorRef.current) showLayers(editor);
+  }, [leftTab, editor]);
 
   // Aviso ao fechar a aba com alterações não salvas (inclusive texto sendo digitado).
   useEffect(() => {
@@ -1376,6 +1523,11 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
     clearTimeout(timer.current);
     window.location.reload();
   }, []);
+
+  // A moeda da oferta foi trocada com o editor aberto e esta página foi junto: tudo gravado, recarrega.
+  useEffect(() => {
+    if (saveState === "saved" && currencyReload.current) reloadDiscarding();
+  }, [saveState, reloadDiscarding]);
 
   function onLinkClick(e: React.MouseEvent<HTMLAnchorElement>, href: string) {
     if (!isPlainClick(e)) return;
@@ -1472,21 +1624,24 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
     if (url) window.open(payload.device === "MOBILE" ? `${url}?dispositivo=celular` : url, "_blank", "noopener");
   }
 
-  /** Busca nas camadas: seleciona o primeiro elemento com o texto e rola até ele. */
+  /** Busca nas camadas: seleciona o primeiro elemento com o texto (o mais de dentro) e rola até ele. */
   function findInLayers(query: string) {
     const ed = editorRef.current;
     const q = query.trim().toLowerCase();
     if (!ed || !q) return;
     const wrapper = ed.getWrapper();
-    const match = wrapper
-      ?.find("*")
-      .find(
-        (c) =>
-          (c.getEl()?.textContent ?? "").toLowerCase().includes(q) &&
-          c.get("selectable") !== false &&
-          !c.components().length,
-      );
-    const fallback = wrapper?.find("*").find((c) => (c.getName?.() ?? "").toLowerCase().includes(q));
+    const all = wrapper?.find("*") ?? [];
+    // Em ordem da página (o de fora antes dos de dentro). O texto de um parágrafo ou
+    // título fica num filho "textnode" (sem camada): o elemento achado é o de dentro
+    // que tem o texto — o seguinte com o texto não está dentro dele.
+    const hits = all.filter(
+      (c) => c.get("selectable") !== false && (c.getEl()?.textContent ?? "").toLowerCase().includes(q),
+    );
+    const match = hits.find((c, i) => {
+      for (let at = hits[i + 1]?.parent(); at; at = at.parent()) if (at === c) return false;
+      return true;
+    });
+    const fallback = all.find((c) => (c.getName?.() ?? "").toLowerCase().includes(q));
     const target = match ?? fallback;
     if (!target) {
       toast.error(`Nada encontrado com "${query.trim()}".`);
@@ -1709,7 +1864,7 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
           className={cn("os-panel flex w-72 shrink-0 flex-col border-r bg-card", !showLeft && "hidden")}
           aria-label="Blocos e camadas"
         >
-          <Tabs defaultValue="blocos" className="flex min-h-0 flex-1 flex-col gap-0">
+          <Tabs value={leftTab} onValueChange={setLeftTab} className="flex min-h-0 flex-1 flex-col gap-0">
             <TabsList className="m-2 grid grid-cols-3">
               <TabsTrigger value="blocos">Blocos</TabsTrigger>
               <TabsTrigger value="camadas">Camadas</TabsTrigger>
@@ -1789,8 +1944,8 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
           )}
           {preserveJs && !previewing && (
             <Notice tone="warning">
-              Esta página usa os scripts originais (“Preservar JS”). Depois de editar, confira no Modo prévia se tudo
-              continua funcionando — a página original fica no Histórico.
+              Esta página usa os scripts originais (modo “Com scripts”). Depois de editar, confira no Modo prévia se
+              tudo continua funcionando — a página original fica no Histórico.
             </Notice>
           )}
           {split && payload.device === "DESKTOP" && device !== "desktop" && otherLayout && (
@@ -1884,7 +2039,10 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
                     Você está mudando o estilo {stateLabel(styleState)}.
                   </Notice>
                 )}
-                {linkParent && <LinkParentHint onSelect={selectLinkParent} />}
+                {linkParent && <LinkParentHint onSelect={selectLinkParent} kind={linkParentKind(linkParent)} />}
+                {linkTarget && (
+                  <LinkTargetHint component={linkTarget} payload={payload} onChange={() => setRightTab("config")} />
+                )}
                 <div ref={stylesRef} />
                 <details
                   className="group border-t"
@@ -1908,8 +2066,14 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
               className="min-h-0 flex-1 overflow-y-auto data-[state=inactive]:hidden"
             >
               {!hasSelection && <NothingSelected tab="config" />}
-              <div className={cn(!hasSelection && "hidden")} data-os-panel="config">
-                {linkParent && <LinkParentHint onSelect={selectLinkParent} />}
+              <div
+                ref={configPanelRef}
+                // Recebe o foco ao fechar um diálogo do editor (nunca o <body>: lá o Delete apagaria o elemento).
+                tabIndex={-1}
+                className={cn("outline-none", !hasSelection && "hidden")}
+                data-os-panel="config"
+              >
+                {linkParent && <LinkParentHint onSelect={selectLinkParent} kind={linkParentKind(linkParent)} />}
                 <div ref={traitsRef} />
               </div>
             </TabsContent>
@@ -1959,6 +2123,7 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
             payload={payload}
             request={newLink}
             onClose={() => setNewLink(null)}
+            navigate={(href) => void leave(href)}
             onBound={({ component }) => {
               // Reabre as configurações com a lista de links atualizada: as do elemento
               // ou, se o pedido veio de quem o contém (ex.: o quiz, para o botão final), as dele.
@@ -1970,17 +2135,75 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
               editor.select(target);
             }}
           />
+          <ProductPageDialog
+            editor={editor}
+            payload={payload}
+            request={productPages}
+            onClose={() => setProductPages(null)}
+            onCreated={(request, pages) => {
+              setPagesVersion((n) => n + 1);
+              // Reabre as configurações de quem pediu: a lista "Página do produto" já com a
+              // página nova e o botão de criar (ou a contagem da vitrine) atualizado.
+              const target = request.widget ?? request.cards[0];
+              if (target) {
+                editor.selectRemove(target);
+                editor.select(target);
+              }
+              const created = pages.filter((p) => p.created);
+              const reused = pages.length - created.length;
+              const [first] = pages;
+              if (pages.length === 1 && first) {
+                const open = first.documentId;
+                toast.success(
+                  first.created ? `Página “${first.name}” criada` : `Produto ligado à página “${first.name}”`,
+                  {
+                    description: first.created
+                      ? "O produto já leva a ela. Abra para trocar as fotos e escrever a descrição."
+                      : "Essa página já era deste produto: ele passa a levar a ela, sem criar outra.",
+                    ...(open && { action: { label: "Abrir", onClick: () => void leave(`/editor/${open}`) } }),
+                  },
+                );
+              } else {
+                const also = reused
+                  ? ` ${plural(reused, "produto já tinha página e passou", "produtos já tinham página e passaram")} a levar a ela.`
+                  : "";
+                toast.success(
+                  created.length
+                    ? plural(created.length, "página de produto criada", "páginas de produto criadas")
+                    : `${plural(reused, "produto ligado", "produtos ligados")} às páginas deles`,
+                  {
+                    description: `Cada produto já leva à página dele.${also} Elas estão em “Páginas”, no painel da esquerda.`,
+                  },
+                );
+              }
+            }}
+          />
         </>
       )}
 
       <Dialog open={conflictOpen} onOpenChange={setConflictOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Esta página foi alterada em outra aba</DialogTitle>
-            <DialogDescription>
-              Outra aba ou janela salvou esta página depois que você abriu. Escolha o que fica: recarregar mostra o que
-              a outra aba salvou (as alterações desta aba se perdem); manter a sua grava por cima.
-            </DialogDescription>
+            {conflictCurrency ? (
+              <>
+                <DialogTitle>A moeda da oferta foi trocada</DialogTitle>
+                <DialogDescription>
+                  Enquanto esta página estava aberta, a moeda da oferta passou para{" "}
+                  {OFFER_CURRENCY_NAME[conflictCurrency]}, e as vitrines e caixas de compra desta página foram junto.
+                  Recarregar mostra a página em {OFFER_CURRENCY_NAME[conflictCurrency]} (as alterações desta aba se
+                  perdem); manter a sua grava por cima, com as vitrines e caixas de compra também em{" "}
+                  {OFFER_CURRENCY_NAME[conflictCurrency]}.
+                </DialogDescription>
+              </>
+            ) : (
+              <>
+                <DialogTitle>Esta página foi alterada em outra aba</DialogTitle>
+                <DialogDescription>
+                  Outra aba ou janela salvou esta página depois que você abriu. Escolha o que fica: recarregar mostra o
+                  que a outra aba salvou (as alterações desta aba se perdem); manter a sua grava por cima.
+                </DialogDescription>
+              </>
+            )}
           </DialogHeader>
           <DialogFooter className="gap-2 sm:justify-between">
             <Button variant="outline" onClick={reloadDiscarding}>

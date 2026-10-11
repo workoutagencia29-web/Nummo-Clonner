@@ -7,7 +7,13 @@ import { describe, expect, it, vi } from "vitest";
 
 vi.mock("@/server/actions/tracking", () => ({}));
 
-import { assetSrcFromKey, COMPANY_FIELDS, companyEmailProblem, SEO_LIMITS } from "@/components/offers/settings/helpers";
+import {
+  assetSrcFromKey,
+  COMPANY_FIELDS,
+  companyEmailProblem,
+  companyPlaceholder,
+  SEO_LIMITS,
+} from "@/components/offers/settings/helpers";
 import {
   CATEGORY_HELP,
   eventNameProblem,
@@ -232,6 +238,23 @@ describe("empresa e SEO", () => {
     expect(companyEmailProblem("contato@empresa.com.br")).toBeNull();
     expect(companyEmailProblem("contato@empresa")).toMatch(/e-mail válido/);
     expect(SEO_LIMITS.title.recommended).toBeLessThan(SEO_LIMITS.title.max);
+  });
+
+  it("exemplos dos campos da empresa seguem a moeda da oferta (real: os do Brasil)", () => {
+    for (const f of COMPANY_FIELDS) expect(companyPlaceholder(f.key, "BRL")).toBe(f.placeholder);
+    expect(companyPlaceholder("phone", "MXN")).toMatch(/^\+52 /);
+    expect(companyPlaceholder("document", "MXN")).toMatch(/^RFC/);
+    expect(companyPlaceholder("phone", "EUR")).toMatch(/^\+34 /);
+    expect(companyPlaceholder("document", "EUR")).toMatch(/^NIF/);
+    expect(companyPlaceholder("phone", "USD")).toMatch(/^\+1 /);
+    // Nenhum exemplo de fora do real fala do Brasil.
+    for (const c of ["MXN", "EUR", "USD"] as const) {
+      for (const f of COMPANY_FIELDS) {
+        const text = companyPlaceholder(f.key, c);
+        expect(text).not.toBe("");
+        expect(text).not.toMatch(/\(11\)|São Paulo|\.com\.br|Ltda|CNPJ/);
+      }
+    }
   });
 });
 

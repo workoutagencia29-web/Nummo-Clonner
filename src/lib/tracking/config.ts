@@ -6,6 +6,7 @@
 
 import { prisma } from "@/lib/db";
 import { planLayout } from "@/lib/export/layout";
+import { offerCurrencyOf } from "@/lib/offer-currency";
 import { RENDER_LINK_SELECT, renderLinks } from "@/lib/payments/links";
 import { composeTrackingConfig, type TrackingVariant } from "./compose";
 import type { TrackingMode, TrackingRuntimeConfig } from "./runtime-config";
@@ -101,6 +102,7 @@ export async function loadTracking(opts: BuildTrackingOptions): Promise<LoadedTr
     where: { id: opts.offerId, deletedAt: null },
     select: {
       tracking: true,
+      settings: true,
       pixels: {
         where: { enabled: true },
         orderBy: [{ createdAt: "asc" }, { id: "asc" }],
@@ -122,7 +124,7 @@ export async function loadTracking(opts: BuildTrackingOptions): Promise<LoadedTr
     },
   });
   if (!offer) return null;
-  const settings = parseTrackingSettings(offer.tracking);
+  const settings = parseTrackingSettings(offer.tracking, offerCurrencyOf(offer.settings));
 
   // A escolhida ou, sem escolha, a página "Política de privacidade" da oferta.
   const policyPage = resolvePolicyPage(settings.consent.policyPageId, offer.pages);

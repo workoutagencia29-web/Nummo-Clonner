@@ -45,7 +45,7 @@ async function build(offerId: string, options: Record<string, boolean> = {}) {
   const target = path.join(tmp, `${offerId}-${Date.now()}-${Math.random().toString(36).slice(2)}.zip`);
   const result = await buildExport({
     offerId,
-    options: { splitter: true, serverEvents: false, optimizeHtml: true, ...options },
+    options: { splitter: true, serverEvents: false, optimizeHtml: true, lighterImages: true, ...options },
     target,
   });
   const zip = await readZip(target);

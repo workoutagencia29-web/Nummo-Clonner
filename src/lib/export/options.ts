@@ -26,6 +26,8 @@
  *   pagamento-dados/config.php a chave da Kyvo e os produtos (+ .htaccess que
  *                            bloqueia a pasta; limites por IP em limites/)
  *   assets/os-pagamento-<hash>.js  a janela de pagamento (só com pagamento)
+ *   assets/os-produto-<hash>.js    galeria, barra de compra do celular e "Voltar
+ *                            para a loja" (só com páginas de produto)
  *   LEIA-ME.txt              como subir na hospedagem (pt-BR)
  *   (Preservar JS)           arquivos nos caminhos originais do site (só funcionam
  *                            com a oferta na raiz do domínio — o painel avisa);
@@ -50,6 +52,12 @@ export const ExportOptionsSchema = z.object({
   serverEvents: z.boolean().default(false),
   /** HTML mais leve (sem comentários e espaços sobrando); nunca mexe em scripts. */
   optimizeHtml: z.boolean().default(true),
+  /**
+   * Imagens mais leves: as de baixo da primeira tela só carregam perto de
+   * aparecer, com o espaço reservado (src/lib/export/lighter-images.ts). Só nas
+   * páginas que não são "Com scripts"; o visual não muda.
+   */
+  lighterImages: z.boolean().default(true),
 });
 export type ExportOptions = z.infer<typeof ExportOptionsSchema>;
 
@@ -139,13 +147,32 @@ export interface ExportPlan {
    * abrir no editor. buy = botão de compra sem link; quiz = botão final do quiz
    * sem destino; wheel = roleta com prêmio sem link ou "Resgatar" sem destino.
    */
-  deadButtonPages?: { name: string; documentId: string; buy?: boolean; quiz?: boolean; wheel?: boolean }[];
-  /** A oferta tem pagamento na página: o ZIP leva o pagamento.php e a pasta pagamento-dados/. */
+  deadButtonPages?: {
+    name: string;
+    documentId: string;
+    buy?: boolean;
+    quiz?: boolean;
+    wheel?: boolean;
+    /** Loja: cartões da vitrine (ou "Ver todas") sem destino, categorias que não mostram produtos. */
+    products?: boolean;
+  }[];
+  /**
+   * O ZIP leva o pagamento.php e a pasta pagamento-dados/ (pagamento na página
+   * ou checkout do Offer Studio).
+   */
   hasPayments?: boolean;
+  /** Gateways com chave no pagamento-dados/config.php ("Kyvo", "FlevoPay", "BlackCat"). */
+  paymentGateways?: string[];
   /** Links de pagamento na página com algo faltando (conserto "Abrir o link"). */
   paymentLinks?: { linkId: string; label: string }[];
   /** Páginas de obrigado sem o bloco "Acesso ao produto" (conserto "Abrir no editor"). */
   accessBlockPages?: { name: string; documentId: string }[];
+  /** Links do checkout do Offer Studio com algo faltando (conserto "Abrir o link"). */
+  checkoutLinks?: { linkId: string; label: string }[];
+  /** Links que ainda levam ao checkout da página clonada (conserto "Abrir o link"). */
+  clonedCheckoutLinks?: { linkId: string; label: string }[];
+  /** Páginas com links de Política, Termos, Contato… sem destino (conserto "Abrir no editor"). */
+  legalLinkPages?: { name: string; documentId: string }[];
 }
 
 /** Etapas mostradas enquanto o ZIP é gerado. */

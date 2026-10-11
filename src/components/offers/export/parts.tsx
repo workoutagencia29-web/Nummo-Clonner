@@ -247,6 +247,13 @@ export function ExportOptionsForm({
         disabled={disabled}
         description="Tira comentários e espaços sobrando para a página carregar mais rápido. Scripts e visual não mudam."
       />
+      <OptionRow
+        label="Imagens mais leves"
+        checked={options.lighterImages}
+        onCheckedChange={(lighterImages) => onChange({ lighterImages })}
+        disabled={disabled}
+        description="As imagens mais para baixo na página só carregam quando o visitante chega perto delas, com o espaço já reservado: a primeira tela abre mais rápido, principalmente no celular. O visual não muda. Não vale para páginas “Com scripts”."
+      />
     </div>
   );
 }

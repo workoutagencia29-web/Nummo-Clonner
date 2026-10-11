@@ -9,6 +9,13 @@
  * Regras:
  * - Procura nos textos visíveis e nos atributos de SEARCH_ATTRIBUTES; nunca em
  *   nomes de tags/atributos, scripts, estilos ou no <head>.
+ * - Conteúdo gerado pelos widgets (partes do cartão de produto e da caixa de
+ *   compra, ícones do cabeçalho de loja, roda e prêmio da roleta, foto grande
+ *   da galeria do produto) fica de fora: o editor refaz esse HTML dos
+ *   atributos e a troca sumiria no próximo salvamento. Os textos do produto
+ *   que aparecem nele (frete, vendidos, selo) são procurados nos atributos do
+ *   cartão, e as partes são refeitas no HTML depois da troca (a foto grande, a
+ *   partir da primeira miniatura).
  * - Maiúsculas e minúsculas contam como iguais; acentos, opcional (ação = acao).
  * - No JSON, só valores de texto conhecidos mudam (parse → percorre → stringify):
  *   o resultado continua sendo um projeto válido.
@@ -18,6 +25,20 @@
 import type { AnyNode, Element, Text as TextNode } from "domhandler";
 import type { Component, Editor } from "grapesjs";
 import { restoreDoctype } from "@/lib/doctype";
+import {
+  CURRENCY_ATTR,
+  GALLERY_STAGE_ATTR,
+  galleryStageHtml,
+  isProductPart,
+  LANG_ATTR,
+  PART_ATTR,
+  PRODUCT_ATTR,
+  PRODUCT_DATA_ATTRS,
+  productPartHtml,
+  readProduct,
+  storeCurrency,
+  storeLang,
+} from "@/lib/store";
 
 // ─── Busca de texto ──────────────────────────────────────────────────────────
 
@@ -202,13 +223,50 @@ export interface SearchTargets {
 export const ALL_TARGETS: SearchTargets = { text: true, attributes: true };
 
 /** Atributos em que a busca procura (os demais nunca mudam). */
-export const SEARCH_ATTRIBUTES = ["href", "data-os-href", "src", "alt", "title", "action", "placeholder"] as const;
+export const SEARCH_ATTRIBUTES = [
+  "href",
+  "data-os-href",
+  "src",
+  "alt",
+  "title",
+  "action",
+  "placeholder",
+  // Nome lido pelo leitor de tela (caixas do formulário, botão de WhatsApp…): sem
+  // ele, trocar o idioma da página deixava esses nomes em português.
+  "aria-label",
+] as const;
 const SEARCH_ATTRIBUTE_SET = new Set<string>(SEARCH_ATTRIBUTES);
 /** Atributos que guardam endereços (a troca nunca mexe nas maiúsculas deles). */
 const URL_ATTRIBUTES = new Set(["href", "data-os-href", "src", "action"]);
 
 export function valueKindOfAttribute(name: string): ValueKind {
   return URL_ATTRIBUTES.has(name.toLowerCase()) ? "url" : "text";
+}
+
+/** Textos do produto guardados em atributos do cartão (o que a parte gerada mostra). */
+const PRODUCT_TEXT_ATTRS = new Set<string>([
+  PRODUCT_DATA_ATTRS.ship,
+  PRODUCT_DATA_ATTRS.sold,
+  PRODUCT_DATA_ATTRS.badge,
+]);
+
+/** Dono dos dados de um produto: o cartão da vitrine ou a caixa de compra. */
+const isProductHost = (attrs: Attrs) => attrs[PRODUCT_ATTR] !== undefined || attrs["data-os-widget"] === "product-buy";
+
+/** Elementos cujo conteúdo o editor gera a partir de atributos (a busca não entra neles). */
+const GENERATED_ATTRS = [
+  PART_ATTR,
+  "data-os-sh-icon",
+  "data-os-wh-disc",
+  "data-os-wh-prize",
+  "data-os-wh-code",
+  GALLERY_STAGE_ATTR,
+];
+
+function isGenerated(tag: string, attrs: Attrs) {
+  if (GENERATED_ATTRS.some((name) => attrs[name] !== undefined)) return true;
+  // Setas do carrossel: o nome para leitores de tela é gerado (idioma da vitrine).
+  return tag === "button" && /(?:^|\s)os-pd-nav(?:\s|$)/.test(String(attrs.class ?? ""));
 }
 const BUTTON_INPUT_TYPES = new Set(["submit", "button", "reset"]);
 
@@ -222,6 +280,7 @@ type Attrs = Record<string, unknown>;
 export function isSearchableAttribute(tag: string, name: string, attrs: Attrs) {
   const lower = name.toLowerCase();
   if (SEARCH_ATTRIBUTE_SET.has(lower)) return true;
+  if (PRODUCT_TEXT_ATTRS.has(lower)) return isProductHost(attrs);
   return lower === "value" && tag === "input" && BUTTON_INPUT_TYPES.has(String(attrs.type ?? "").toLowerCase());
 }
 
@@ -268,6 +327,8 @@ export async function replaceInHtml(
   const load = await loadCheerio();
   const $ = opts.fragment ? load(html, null, false) : load(html);
   let count = 0;
+  /** Cartões com um texto do produto trocado: as partes deles são refeitas no fim. */
+  const products: Element[] = [];
 
   const visit = (node: AnyNode) => {
     if (isTextNode(node)) {
@@ -286,7 +347,9 @@ export async function replaceInHtml(
       const r = replaceInAttributes(tag, node.attribs, matcher, replacement);
       Object.assign(node.attribs, r.changes);
       count += r.count;
+      if (Object.keys(r.changes).some((name) => PRODUCT_TEXT_ATTRS.has(name.toLowerCase()))) products.push(node);
     }
+    if (isGenerated(tag, node.attribs)) return;
     for (const child of node.children) visit(child);
   };
 
@@ -294,6 +357,24 @@ export async function replaceInHtml(
   const roots = body ? body.children : ($.root().get(0)?.children ?? []);
   for (const node of roots) visit(node);
   if (!count) return { html, count };
+  // As partes do cartão mostram os textos trocados (o editor faria o mesmo ao abrir).
+  for (const host of products) {
+    const owner = $(host).closest(`[${CURRENCY_ATTR}]`);
+    const currency = storeCurrency(owner.attr(CURRENCY_ATTR));
+    const lang = storeLang(owner.attr(LANG_ATTR), currency);
+    const data = readProduct(host.attribs);
+    $(host)
+      .find(`[${PART_ATTR}]`)
+      .each((_, el) => {
+        const part = $(el).attr(PART_ATTR);
+        if (isProductPart(part)) $(el).html(productPartHtml(part, data, currency, lang));
+      });
+  }
+  // A foto grande da galeria do produto mostra a primeira miniatura (endereço e descrição trocados).
+  $(`[${GALLERY_STAGE_ATTR}]`).each((_, el) => {
+    const first = $(el).closest('[data-os-widget="product-gallery"]').find(".os-pg-thumb img").first();
+    if (first.length) $(el).html(galleryStageHtml(first.attr("src") ?? "", first.attr("alt") ?? ""));
+  });
   // O cheerio reescreve qualquer doctype como <!DOCTYPE html>: volta o original
   // (páginas antigas dependem do modo quirks/quase-padrão).
   return { html: opts.fragment ? $.html() : restoreDoctype($.html(), html), count };
@@ -729,8 +810,16 @@ export function describeAttribute(tag: string, name: string) {
       return "Envio do formulário";
     case "placeholder":
       return "Texto de exemplo do campo";
+    case "aria-label":
+      return "Nome lido pelo leitor de tela";
     case "value":
       return "Texto do botão";
+    case PRODUCT_DATA_ATTRS.ship:
+      return "Frete do produto";
+    case PRODUCT_DATA_ATTRS.sold:
+      return "Vendidos do produto";
+    case PRODUCT_DATA_ATTRS.badge:
+      return "Selo do produto";
     default:
       return name;
   }
@@ -835,15 +924,15 @@ function eachFragmentValue(root: ParentNode, targets: SearchTargets, cb: Fragmen
       const el = node as HTMLElement;
       const tag = el.tagName.toLowerCase();
       if (SKIP_TAGS.has(tag)) continue;
+      const attrs: Attrs = {};
+      for (const a of Array.from(el.attributes)) attrs[a.name] = a.value;
       if (targets.attributes) {
-        const attrs: Attrs = {};
-        for (const a of Array.from(el.attributes)) attrs[a.name] = a.value;
         for (const a of Array.from(el.attributes)) {
           if (!isSearchableAttribute(tag, a.name, attrs)) continue;
           cb(a.value, { kind: "attr", name: a.name }, tag, (next) => el.setAttribute(a.name, next));
         }
       }
-      eachFragmentValue(el, targets, cb, tag);
+      if (!isGenerated(tag, attrs)) eachFragmentValue(el, targets, cb, tag);
     }
   }
 }

@@ -1,13 +1,14 @@
 /**
- * Blocos de conversão: botões (inclusive ligado ao checkout da oferta),
- * contador, escassez, notificação de compra, preços, garantia, WhatsApp,
+ * Blocos de conversão: contagem no topo (barra), botões (inclusive ligado ao
+ * checkout da oferta e o "Botão de checkout", ligado ao checkout do Offer
+ * Studio), contador, escassez, notificação de compra, preços, garantia, WhatsApp,
  * popup de saída e "Acesso ao produto" (página de obrigado do pagamento na página). Os que têm comportamento usam os widgets de
  * src/editor/widgets (opções em "Configurações").
  */
 import { PROP_ACCESS_LANG } from "@/editor/widgets/access";
 import { accessDef } from "@/editor/widgets/access-content";
 import { buttonDef } from "@/editor/widgets/button";
-import { countdownDef } from "@/editor/widgets/countdown";
+import { countdownBarDef, countdownDef } from "@/editor/widgets/countdown";
 import { exitPopupDef } from "@/editor/widgets/exit-popup";
 import { salesNotificationDef } from "@/editor/widgets/sales-notification";
 import { scarcityDef } from "@/editor/widgets/scarcity";
@@ -42,6 +43,18 @@ const checkoutCta = el("div", "Botão do checkout", { margin: "32px auto", paddi
   buttonDef("QUERO COMPRAR AGORA", { checkout: true }),
   small("Pagamento seguro via Pix, cartão de crédito ou boleto"),
 ]);
+
+/**
+ * "Botão de checkout": leva à página de checkout do Offer Studio (nasce ligado
+ * ao primeiro link "Checkout do Offer Studio" da oferta). Os textos não falam
+ * em PIX: fora do real, quem cobra é a Kyvo.
+ */
+const ownCheckoutCta = el(
+  "div",
+  "Botão de checkout",
+  { margin: "32px auto", padding: "0 16px", "text-align": "center" },
+  [buttonDef("COMPRAR AGORA", { own: true }), small("🔒 Pagamento 100% seguro &nbsp;·&nbsp; Acesso imediato")],
+);
 
 // ─── Preços ──────────────────────────────────────────────────────────────────
 
@@ -373,6 +386,17 @@ const guarantee = onMobile(
 
 export const conversionBlocks: OsBlock[] = [
   {
+    // Primeiro da categoria: a contagem que mais converte (barra fina fixa no topo).
+    id: "contador-barra",
+    label: "Contagem no topo (barra)",
+    category: "conversao",
+    media: icon(
+      '<rect x="2" y="8" width="20" height="8" rx="1.5"/><path d="M5 12h4"/><rect x="11.5" y="10" width="3.5" height="4" rx=".8"/><rect x="16.5" y="10" width="3.5" height="4" rx=".8"/>',
+    ),
+    content: countdownBarDef(),
+    select: true,
+  },
+  {
     id: "cta-grande",
     label: "Botão CTA grande",
     category: "conversao",
@@ -387,6 +411,16 @@ export const conversionBlocks: OsBlock[] = [
       '<circle cx="9" cy="20" r="1.4"/><circle cx="18" cy="20" r="1.4"/><path d="M2.5 3h3l2.6 12.2a1.5 1.5 0 0 0 1.5 1.2h8.6a1.5 1.5 0 0 0 1.5-1.1L21.5 8H6.3"/>',
     ),
     content: checkoutCta,
+  },
+  {
+    id: "cta-checkout-proprio",
+    label: "Botão de checkout",
+    hint: "Leva à página de checkout do Offer Studio (PIX em real; Kyvo nas outras moedas), montada em “Links e checkouts”.",
+    category: "conversao",
+    media: icon(
+      '<rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M2.5 9.5h19"/><path d="M6 14.5h4"/><path d="m14.5 15 1.5 1.5 3-3"/>',
+    ),
+    content: ownCheckoutCta,
   },
   {
     id: "contador",

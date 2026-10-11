@@ -19,18 +19,29 @@
  */
 import type { Ev } from "./config";
 
-/** Purchase da janela de pagamento (valor e moeda do produto; eventID = pedidoExterno). */
+/**
+ * Purchase da janela de pagamento (valor e moeda do produto; eventID =
+ * pedidoExterno). A página de checkout do Offer Studio (src/runtime/checkout)
+ * usa o mesmo aviso com `std`: InitiateCheckout ao abrir e AddPaymentInfo ao
+ * gerar o pagamento; `x` leva o conteúdo (produto + bumps) aos pixels do navegador.
+ */
 export interface PurchaseEvent {
   std: Ev;
   id: string;
   amount: { value: number; currency: string };
+  x?: object;
 }
 
 /** Evento para um aviso "os:purchase" (null = inválido). */
 export function purchaseEvent(detail: unknown): PurchaseEvent | null {
-  const d = (detail || {}) as { id: string; value: number; currency: string };
+  const d = (detail || {}) as { id: string; value: number; currency: string; std: Ev; x: object };
   return /^[\w.:-]{1,100}$/.test(d.id) && d.value >= 0 && d.value <= 1e7 && /^[A-Z]{3}$/.test(d.currency)
-    ? { std: "PURCHASE", id: d.id, amount: { value: d.value, currency: d.currency } }
+    ? {
+        std: /^(INITIATE_CHECKOUT|ADD_PAYMENT_INFO)$/.test(d.std) ? d.std : "PURCHASE",
+        id: d.id,
+        amount: { value: d.value, currency: d.currency },
+        x: d.x,
+      }
     : null;
 }
 

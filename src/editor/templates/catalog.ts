@@ -13,6 +13,8 @@ export const TEMPLATE_IDS = [
   "advertorial",
   "quiz",
   "roleta",
+  "loja",
+  "produto",
   "captura",
   "upsell",
   "downsell",
@@ -33,6 +35,7 @@ const SUMMARIES: Record<PageTemplateId, Omit<TemplateSummary, "id" | "thumbnail"
       "Carta de vendas completa: headline, benefícios, módulos, bônus, depoimentos, preço com parcelas, garantia, FAQ e popup de saída.",
     pageType: "SALES",
     pageName: "Página de vendas",
+    textPrices: true,
   },
   vsl: {
     name: "VSL",
@@ -60,6 +63,20 @@ const SUMMARIES: Record<PageTemplateId, Omit<TemplateSummary, "id" | "thumbnail"
     pageType: "OTHER",
     pageName: "Roleta",
   },
+  loja: {
+    name: "Loja (vitrine)",
+    description:
+      "Página inicial de loja no estilo marketplace: cabeçalho com pesquisa e categorias, banner, oferta do dia, mais vendidos e faixas de ofertas.",
+    pageType: "OTHER",
+    pageName: "Loja",
+  },
+  produto: {
+    name: "Página do produto",
+    description:
+      "Uma página por produto: galeria de fotos, caixa de compra com preço e parcelas, descrição, características e opiniões.",
+    pageType: "SALES",
+    pageName: "Página do produto",
+  },
   captura: {
     name: "Captura de leads",
     description: "Isca digital com formulário (nome, e-mail e WhatsApp), prova social e notificação de inscrição.",
@@ -71,12 +88,14 @@ const SUMMARIES: Record<PageTemplateId, Omit<TemplateSummary, "id" | "thumbnail"
     description: "Oferta única depois da compra, com contador e botões “Sim, quero” / “Não, obrigado”.",
     pageType: "UPSELL",
     pageName: "Upsell",
+    textPrices: true,
   },
   downsell: {
     name: "Downsell",
     description: "Alternativa mais barata para quem recusou o upsell, com os mesmos botões de sim/não.",
     pageType: "DOWNSELL",
     pageName: "Downsell",
+    textPrices: true,
   },
   obrigado: {
     name: "Obrigado",

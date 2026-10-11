@@ -86,6 +86,8 @@ class FakeEndpoint {
   /** Resposta forçada da próxima criação (uma vez). */
   nextCreate: { status: number; body: unknown } | "abort" | null = null;
   sdkUrl = SDK_URL;
+  /** Links dos order bumps comprados na resposta do acesso (como o checkout do Offer Studio manda). */
+  accessExtras: { titulo: string; acesso: string }[] | null = null;
 
   handle(body: Record<string, unknown>): { status: number; body: unknown } | "abort" {
     this.requests.push(body);
@@ -167,7 +169,14 @@ class FakeEndpoint {
       if (order.status !== "paid") return fail(403, "nao_pago");
       return {
         status: 200,
-        body: { ok: true, pedido: order.id, status: "paid", acesso: ACCESS[order.produto], produto: order.produto },
+        body: {
+          ok: true,
+          pedido: order.id,
+          status: "paid",
+          acesso: ACCESS[order.produto],
+          produto: order.produto,
+          ...(this.accessExtras ? { extras: this.accessExtras } : {}),
+        },
       };
     }
     return fail(400, "invalido");
@@ -297,6 +306,8 @@ interface Site {
   html: string;
   /** Endereços das páginas pedidas ao servidor (com a query como foi pedida). */
   docs: string[];
+  /** Erros de JavaScript das páginas. */
+  errors: string[];
 }
 
 async function open(
@@ -308,6 +319,8 @@ async function open(
     clock?: boolean;
     fake?: FakeEndpoint;
     path?: string;
+    /** Script que roda antes dos da página (ex.: tirar uma API que navegadores antigos não têm). */
+    init?: string;
   } = {},
 ): Promise<Site> {
   const context = await browser.newContext({
@@ -321,7 +334,10 @@ async function open(
     calls.push(JSON.parse(json));
   });
   await context.addInitScript(DATA_LAYER);
+  if (opts.init) await context.addInitScript(opts.init);
   const page = await context.newPage();
+  const errors: string[] = [];
+  page.on("pageerror", (e) => errors.push(e.message));
   const fake = opts.fake ?? new FakeEndpoint();
   const scripts: string[] = [];
   const docs: string[] = [];
@@ -352,7 +368,7 @@ async function open(
   if (opts.clock) await page.clock.install();
   const res = await page.goto(`${ORIGIN}${opts.path ?? "/vendas/"}${opts.query ?? ""}`);
   const html = (await res?.text()) ?? "";
-  return { page, fake, scripts, calls, html, docs, close: () => context.close() };
+  return { page, fake, scripts, calls, html, docs, errors, close: () => context.close() };
 }
 
 const dialog = (page: Page) => page.getByRole("dialog");
@@ -996,6 +1012,25 @@ describe("bloco “Acesso ao produto” (página de obrigado)", () => {
       { acao: "acesso", pedido: "tx_1" },
       { acao: "acesso", pedido: "tx_1" },
     ]);
+    await s.close();
+  }, 30_000);
+
+  it("sem Object.hasOwn (Safari < 15.4, Chrome/WebView < 93): pedido pago libera o botão e os dos order bumps", async () => {
+    const fake = new FakeEndpoint();
+    fake.handle({ acao: "criar", produto: "eu", metodo: "bizum", nome: "A B", email: "a@b.co" });
+    fake.setStatus("tx_1", "paid");
+    fake.accessExtras = [{ titulo: "Bônus", acesso: "https://membros.exemplo.com/bonus" }];
+    const s = await open({ fake, path: "/obrigado/", query: "?pedido=tx_1", init: "delete Object.hasOwn;" });
+    const { page } = s;
+    await expect.poll(() => page.locator(".os-access").getAttribute("class")).toContain("os-ac-ok");
+    expect(await page.locator("[data-os-ac-go]").isVisible()).toBe(true);
+    expect(await page.locator("[data-os-ac-go]").getAttribute("href")).toBe(ACCESS.eu);
+    // O produto é em Português (o idioma vem do #os-pagamento): os textos padrão trocaram.
+    expect(await page.locator("[data-os-ac-go]").textContent()).toBe(ACCESS_TEXTS.pt.go);
+    expect(await page.locator("[data-os-ac-extra]").getAttribute("href")).toBe("https://membros.exemplo.com/bonus");
+    expect(await page.locator("[data-os-ac-extra]").isVisible()).toBe(true);
+    expect(await page.evaluate(() => typeof (Object as { hasOwn?: unknown }).hasOwn)).toBe("undefined");
+    expect(s.errors).toEqual([]);
     await s.close();
   }, 30_000);
 

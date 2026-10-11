@@ -60,6 +60,12 @@ export interface CaptureOptions {
   virtualSite?: VirtualSite;
   /** Limite de tempo para rolar a página (ms). */
   maxScrollMs?: number;
+  /**
+   * Espera do DOMContentLoaded e depois do "load" (ms). Passado o prazo, a
+   * cópia segue com o que já carregou (aviso PAGE_STALLED). Padrão: 30 s e 20 s.
+   */
+  domReadyTimeoutMs?: number;
+  loadTimeoutMs?: number;
 }
 
 /** Captura + avisos para a tela de revisão (página que não terminou de carregar, print que falhou). */
@@ -441,11 +447,11 @@ export async function capturePage(opts: CaptureOptions): Promise<CaptureResult> 
       throw navigationError(proxy, response.url(), new Error("A página não abriu."));
     }
     let stalled = false;
-    await page.waitForLoadState("domcontentloaded", { timeout: 30_000 }).catch(() => {
+    await page.waitForLoadState("domcontentloaded", { timeout: opts.domReadyTimeoutMs ?? 30_000 }).catch(() => {
       stalled = true;
     });
     if (!stalled) {
-      await page.waitForLoadState("load", { timeout: 20_000 }).catch(() => {
+      await page.waitForLoadState("load", { timeout: opts.loadTimeoutMs ?? 20_000 }).catch(() => {
         stalled = true;
       });
     }

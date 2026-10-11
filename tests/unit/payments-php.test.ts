@@ -18,7 +18,7 @@
  */
 import type { ChildProcess } from "node:child_process";
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readdir, rm, stat, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { Engine as PhpParser } from "php-parser";
@@ -556,10 +556,14 @@ describe.skipIf(!PHP)("pagamento.php no PHP de verdade (Kyvo falsa)", () => {
     for (let i = 0; i < 3; i++) expect((await status()).json.erro).toBe("indisponivel");
     expect((await status()).json.erro).toBe("limite");
 
-    const files = await readdir(path.join(limitDir, PAGAMENTO_CONFIG_DIR, "limites"));
+    const limits = path.join(limitDir, PAGAMENTO_CONFIG_DIR, "limites");
+    const files = await readdir(limits);
     expect(files.length).toBeGreaterThan(0);
+    // Só o PHP lê e muda (outra conta da hospedagem, não).
+    expect((await stat(limits)).mode & 0o777).toBe(0o700);
     for (const f of files) {
       expect(f).toMatch(/^(criar|criar-rede|criar-email|criar-site|consulta)-[0-9a-f]{2}\.php$/);
+      expect((await stat(path.join(limits, f))).mode & 0o777).toBe(0o600);
       const res = await fetch(`${limitOrigin}/${PAGAMENTO_CONFIG_DIR}limites/${f}`);
       expect(await res.text()).toBe("");
     }

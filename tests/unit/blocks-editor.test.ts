@@ -400,3 +400,85 @@ describe("Configurações dos widgets", () => {
     expect(pageErrors(page)).toEqual([]);
   });
 });
+
+describe("WhatsApp fora do Brasil e textos do formulário de captura", () => {
+  it("oferta em peso: o campo pede o código do país, nada ganha o 55 e o número final aparece para conferir", async () => {
+    const page = await openEditor(browser, { currency: "MXN" });
+    await addBlock(page, "whatsapp-botao");
+    const sel = '[data-os-widget="whatsapp"]';
+    await setTrait(page, sel, "os-wa-phone", "55 1234 5678");
+    expect(await attrs(page, sel)).toMatchObject({
+      "data-os-phone": "5512345678",
+      href: "https://wa.me/5512345678?text=Ol%C3%A1!%20Vim%20pela%20p%C3%A1gina%20e%20quero%20saber%20mais.",
+    });
+    await setTrait(page, sel, "os-wa-phone", "+34 612 345 678");
+    expect((await attrs(page, sel))["data-os-phone"]).toBe("34612345678");
+    // Mudar só a mensagem não mexe no número (nada de 55 na frente de um número já internacional).
+    await setTrait(page, sel, "os-wa-message", "Hola");
+    expect(await attrs(page, sel)).toMatchObject({
+      "data-os-phone": "34612345678",
+      href: "https://wa.me/34612345678?text=Hola",
+    });
+    const panel = page.locator("#traits");
+    await expect.poll(() => panel.textContent()).toContain("Abre a conversa com +34 612345678.");
+    const field = panel.locator(".gjs-trt-trait__wrp-os-wa-phone");
+    expect(await field.textContent()).toContain("Número com código do país");
+    expect(await field.locator("input").getAttribute("placeholder")).toBe("+52 55 1234 5678");
+    expect(pageErrors(page)).toEqual([]);
+    await page.close();
+  });
+
+  it("oferta em real: o campo continua “Número com DDD” e um número com “+” não ganha o 55", async () => {
+    const page = await openEditor(browser);
+    await addBlock(page, "whatsapp-botao");
+    const sel = '[data-os-widget="whatsapp"]';
+    await setTrait(page, sel, "os-wa-phone", "+1 305 555 1234");
+    expect((await attrs(page, sel))["data-os-phone"]).toBe("13055551234");
+    // Desenhado de novo (editor aberto outro dia), o campo mostra o número com "+": corrigir um
+    // algarismo nele não faz o número ganhar o 55 (antes mostrava "13055551234" e virava 55130…).
+    const shown = await page.evaluate((s) => {
+      const ed = (window as unknown as { ed: import("grapesjs").Editor }).ed;
+      return ed.getWrapper()?.find(s)[0]?.getTrait("os-wa-phone")?.getValue();
+    }, sel);
+    expect(shown).toBe("+13055551234");
+    await setTrait(page, sel, "os-wa-phone", "+13055551235");
+    expect((await attrs(page, sel))["data-os-phone"]).toBe("13055551235");
+    await setTrait(page, sel, "os-wa-phone", "(21) 98888-7777");
+    expect((await attrs(page, sel))["data-os-phone"]).toBe("5521988887777");
+    const panel = page.locator("#traits");
+    await expect.poll(() => panel.textContent()).toContain("Abre a conversa com +55 21 98888-7777.");
+    expect(await panel.locator(".gjs-trt-trait__wrp-os-wa-phone").textContent()).toContain("Número com DDD");
+    await page.close();
+  });
+
+  it("caixa de texto do formulário: “Texto dentro do campo” grava o placeholder e o nome do leitor de tela", async () => {
+    const page = await openEditor(browser);
+    await addBlock(page, "form-captura");
+    const sel = '[data-os-widget="lead-form"] [data-os-field="name"] input';
+    await setTrait(page, sel, "os-lf-input-text", "  Tu nombre  ");
+    expect(await attrs(page, sel)).toMatchObject({ placeholder: "Tu nombre", "aria-label": "Tu nombre" });
+    // As reticências do fim não entram no nome lido.
+    await setTrait(page, sel, "os-lf-input-text", "Tu WhatsApp…");
+    expect(await attrs(page, sel)).toMatchObject({ placeholder: "Tu WhatsApp…", "aria-label": "Tu WhatsApp" });
+    // Vazio: volta o texto com que o campo nasceu.
+    await setTrait(page, sel, "os-lf-input-text", "");
+    expect(await attrs(page, sel)).toMatchObject({ placeholder: "Seu primeiro nome", "aria-label": "Seu nome" });
+    // O campo aparece no painel, primeiro, e só nas caixas do formulário.
+    const panel = page.locator("#traits");
+    await expect.poll(() => panel.textContent()).toContain("Texto dentro do campo");
+    const order = await page.evaluate(
+      (s) =>
+        (window as unknown as EditorWindow).ed
+          .getWrapper()
+          ?.find(s)[0]
+          ?.getTraits()
+          .map((t) => String(t.get("name"))),
+      sel,
+    );
+    expect(order?.[0]).toBe("os-lf-input-text");
+    const html = (await editorOutput(page)).html;
+    expect(html).not.toContain("os-lf-input-text");
+    expect(pageErrors(page)).toEqual([]);
+    await page.close();
+  });
+});

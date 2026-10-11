@@ -49,6 +49,12 @@ export interface TrackingSourceLink {
   key: string;
   kind: string;
   url: string;
+  /**
+   * Leva à página de checkout do Offer Studio: ela mesma conta o
+   * InitiateCheckout ao abrir (com o valor do produto) — o clique no botão
+   * não conta de novo — e, no mesmo site, os parâmetros vão como num link do funil.
+   */
+  checkout?: boolean;
 }
 
 export interface TrackingSource {
@@ -208,7 +214,7 @@ export function runtimeVariant(variant: TrackingVariant | null | undefined): Run
 function linkHosts(links: TrackingSourceLink[]): string[] {
   const out: string[] = [];
   for (const link of links) {
-    if (!(CHECKOUT_LINK_KINDS as readonly string[]).includes(link.kind) || !link.url) continue;
+    if (!(CHECKOUT_LINK_KINDS as readonly string[]).includes(link.kind) || !link.url || link.checkout) continue;
     try {
       const url = new URL(link.url);
       if (url.protocol === "http:" || url.protocol === "https:") out.push(bareHost(url.hostname));
@@ -264,7 +270,11 @@ export function composeTrackingConfig(src: TrackingSource): TrackingRuntimeConfi
   }
 
   const checkoutLinkKeys = [
-    ...new Set(src.links.filter((l) => (CHECKOUT_LINK_KINDS as readonly string[]).includes(l.kind)).map((l) => l.key)),
+    ...new Set(
+      src.links
+        .filter((l) => !l.checkout && (CHECKOUT_LINK_KINDS as readonly string[]).includes(l.kind))
+        .map((l) => l.key),
+    ),
   ];
   const checkoutHosts = [...new Set([...knownCheckoutHosts(), ...linkHosts(src.links)])];
 

@@ -1,11 +1,13 @@
 /**
  * Processamento de imagens enviadas no editor (src/server/services/assets.ts):
- * conversão para WebP, limites, animações, EXIF e limpeza de SVG.
+ * conversão para WebP, limites, animações, EXIF e limpeza de SVG — inclusive
+ * a limpeza leve dos SVGs baixados na clonagem (cleanClonedSvg).
  */
 import sharp from "sharp";
 import { describe, expect, it } from "vitest";
 import {
   AssetError,
+  cleanClonedSvg,
   cleanFileName,
   IMAGE_UPLOAD_LIMITS,
   processImage,
@@ -197,7 +199,7 @@ describe("processImage — erros em português", () => {
     await expectAssetError(
       processImage({ name: "planilha.xlsx", data: Buffer.from("PK\x03\x04 conteúdo") }),
       415,
-      /^"planilha\.xlsx" não é uma imagem aceita\. Envie JPG, PNG, WebP, GIF, AVIF ou SVG\.$/,
+      /^"planilha\.xlsx" não é uma imagem aceita\. Envie JPG, PNG, WebP, GIF, AVIF, SVG ou ICO\.$/,
     );
     await expectAssetError(
       processImage({ name: "vazio.png", data: Buffer.alloc(0) }),
@@ -312,5 +314,97 @@ describe("sanitizeSvg / processImage com SVG", () => {
     expect(text).not.toMatch(/script|onload|javascript/i);
     const meta = await metaOf(out.data);
     expect(meta).toMatchObject({ format: "svg", width: 200, height: 100 });
+  });
+});
+
+describe("cleanClonedSvg — SVGs baixados na clonagem", () => {
+  const svg = (inner: string, attrs = "") =>
+    Buffer.from(
+      `<?xml version="1.0"?>\n<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" width="10" height="10"${attrs}>${inner}</svg>`,
+      "utf8",
+    );
+
+  it("SVG sem nada que rode código fica byte a byte igual (mesmo com foreignObject, estilo e comentário)", () => {
+    const icons = [
+      svg('<rect width="10" height="10" fill="red"/>'),
+      svg(
+        '<!-- logo --><style>@import url("https://fonts.example/x.css"); .a{fill:#000}</style><text class="a">Oi</text>',
+      ),
+      svg(
+        '<foreignObject width="10" height="10"><div xmlns="http://www.w3.org/1999/xhtml">texto</div></foreignObject>',
+      ),
+      svg('<image href="data:image/svg+xml;base64,PHN2Zy8+" width="10" height="10"/>'),
+      svg('<a xlink:href="https://site.com/"><circle r="4"/></a>'),
+    ];
+    for (const icon of icons) expect(cleanClonedSvg(icon)).toBe(icon);
+  });
+
+  it("tira script, on*, javascript:, data: que não é imagem, iframes e animações de href — e mantém o desenho", () => {
+    const dirty = svg(
+      [
+        "<script>alert(1)</script>",
+        '<style>.a{fill:#0a7}</style><rect class="a" width="10" height="10" onclick="x()"/>',
+        '<a xlink:href="javascript:alert(2)"><text>Oi</text></a>',
+        '<a href="data:text/html,<script>alert(3)</script>"><circle r="2"/></a>',
+        '<foreignObject width="10" height="10"><div xmlns="http://www.w3.org/1999/xhtml" onmouseover="y()">texto<iframe srcdoc="&lt;script&gt;alert(4)&lt;/script&gt;"></iframe></div></foreignObject>',
+        '<a href="#"><set attributeName="href" to="javascript:alert(5)"/><animate attributeName="onclick" values="z()"/></a>',
+        "<handler>alert(6)</handler>",
+      ].join(""),
+      ' onload="alert(0)"',
+    );
+    const out = cleanClonedSvg(dirty)?.toString("utf8") ?? "";
+    expect(out).not.toMatch(/<script|<handler|<iframe|<set|<animate|\son[a-z]+=|javascript:|data:text/i);
+    expect(out).toContain("<style>.a{fill:#0a7}</style>");
+    expect(out).toContain('<rect class="a" width="10" height="10"/>');
+    expect(out).toContain("<foreignObject");
+    expect(out).toContain(">texto</div>");
+    expect(out).toContain("<text>Oi</text>");
+    // Continua um SVG que o Offer Studio reconhece e abre.
+    expect(sniffImageFormat(Buffer.from(out))).toBe("svg");
+    expect(sanitizeSvg(out).width).toBe(10);
+  });
+
+  it("<?xml-stylesheet?> (pode trazer XSLT) sai; o que não é SVG volta null (não pode ir como .svg)", () => {
+    const xsl = Buffer.from('<?xml-stylesheet type="text/xsl" href="x.xsl"?><svg xmlns="http://www.w3.org/2000/svg"/>');
+    expect(cleanClonedSvg(xsl)?.toString("utf8")).not.toContain("xml-stylesheet");
+    const notSvg = Buffer.from("<html><body><script>alert(1)</script></body></html>");
+    expect(cleanClonedSvg(notSvg)).toBeNull();
+    const gzip = Buffer.from([0x1f, 0x8b, 0x08, 0x00, 0x00]);
+    expect(cleanClonedSvg(gzip)).toBeNull();
+  });
+
+  it("script escondido em entidade do DOCTYPE ou numa raiz que não é <svg>: nunca fica como veio", () => {
+    const ns = 'xmlns="http://www.w3.org/2000/svg"';
+    // O navegador expande &x; em marcação: o <script> só existe depois da expansão.
+    const entity = Buffer.from(
+      `<!DOCTYPE svg [<!ENTITY x "&#60;script&#62;window.name='X'&#60;/script&#62;">]><svg ${ns}>&x;<rect width="1" height="1"/></svg>`,
+    );
+    const parameter = Buffer.from(
+      `<!DOCTYPE svg [<!ENTITY % p "<!ENTITY y '&#60;script&#62;window.name=1&#60;/script&#62;'>"> %p;]><svg ${ns}>&y;</svg>`,
+    );
+    for (const dirty of [entity, parameter]) {
+      const out = cleanClonedSvg(dirty)?.toString("utf8") ?? "";
+      expect(out).not.toBe(dirty.toString("utf8"));
+      // Sem DOCTYPE, nada é expandido: o &x; vira texto (escapado), nunca marcação.
+      expect(out).not.toMatch(/<!DOCTYPE|<!ENTITY|<script|&#60;script/i);
+      expect(out).not.toMatch(/&[xy];/);
+      expect(sniffImageFormat(Buffer.from(out))).toBe("svg");
+    }
+    // Raiz XHTML ou <g>: o navegador roda o <script> se o arquivo for servido como SVG.
+    const xhtml = Buffer.from(`<html xmlns="http://www.w3.org/1999/xhtml"><script>window.name='X'</script></html>`);
+    const group = Buffer.from(`<g ${ns}><script>window.name='X'</script></g>`);
+    expect(cleanClonedSvg(xhtml)).toBeNull();
+    expect(cleanClonedSvg(group)).toBeNull();
+  });
+
+  it("SVG do Illustrator (entidades simples no DOCTYPE): sai limpo e com o mesmo desenho", () => {
+    const ai = Buffer.from(
+      `<?xml version="1.0"?><!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN" "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd" [<!ENTITY ns_svg "http://www.w3.org/2000/svg"><!ENTITY ns_xlink "http://www.w3.org/1999/xlink">]><svg xmlns="&ns_svg;" xmlns:xlink="&ns_xlink;" width="10" height="10"><rect width="10" height="10" fill="#0a7"/></svg>`,
+    );
+    const out = cleanClonedSvg(ai)?.toString("utf8") ?? "";
+    expect(out).not.toMatch(/<!DOCTYPE|&ns_/);
+    expect(out).toContain('xmlns="http://www.w3.org/2000/svg"');
+    expect(out).toContain('<rect width="10" height="10" fill="#0a7"/>');
+    expect(sanitizeSvg(out).width).toBe(10);
   });
 });

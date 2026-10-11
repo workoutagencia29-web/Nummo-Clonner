@@ -22,7 +22,7 @@ export class UserError extends Error {
 
 /** Nomes amigáveis dos campos únicos, usados na mensagem "Já existe…". */
 const UNIQUE_FIELD_MESSAGES: Record<string, string> = {
-  slug: "Já existe uma página com esse endereço (slug) nesta oferta.",
+  slug: "Já existe uma página com esse endereço nesta oferta.",
   nameKey: "Já existe um item com esse nome.",
   email: "Já existe uma conta com esse e-mail.",
   name: "Já existe uma variação com esse nome nesta página.",

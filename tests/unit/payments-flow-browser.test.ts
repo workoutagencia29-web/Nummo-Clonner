@@ -89,7 +89,7 @@ async function paymentOffer() {
   await prisma.pageDocument.updateMany({ where: { variant: { pageId: home.id } }, data: { html: SALES } });
   await prisma.pageDocument.updateMany({ where: { variant: { pageId: thanks.id } }, data: { html: THANKS } });
   const link = await createOfferLink(offer.id, { label: "Checkout", url: "", kind: "CHECKOUT" });
-  await savePaymentGatewayKey("KYVO", KYVO_KEY);
+  await savePaymentGatewayKey(offer.id, "KYVO", KYVO_KEY);
   await savePaymentProduct(link.id, {
     name: "Curso de Repostería",
     amount: "497",

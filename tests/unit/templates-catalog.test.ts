@@ -15,10 +15,13 @@ import {
   TEMPLATE_SUMMARIES,
   thumbnailUrl,
 } from "@/editor/templates";
+import { PRODUCT_PAGE_HOOKS } from "@/editor/widgets/product-page-content";
+import { SH_CATEGORIES } from "@/editor/widgets/store-header-content";
 import { BASE_CSS_ATTR, finalizeFromEditor, prepareForEditor } from "@/lib/editor-html";
 import { UserError } from "@/lib/errors";
 import { renderPageHtml } from "@/lib/page-render";
 import { getObject } from "@/lib/storage";
+import { categoryGaps, gapCount, productGaps } from "@/lib/store-pages";
 import { htmlForEditor } from "@/server/services/documents";
 import {
   getTemplate,
@@ -55,9 +58,9 @@ function cssOf(html: string) {
 }
 
 describe("catálogo de modelos", () => {
-  it("tem os 11 modelos pedidos, com tipo de página válido, nome e descrição", () => {
+  it("tem os 13 modelos pedidos, com tipo de página válido, nome e descrição", () => {
     expect(PAGE_TEMPLATES.map((t) => t.id)).toEqual([...TEMPLATE_IDS]);
-    expect(new Set(TEMPLATE_IDS).size).toBe(11);
+    expect(new Set(TEMPLATE_IDS).size).toBe(13);
     expect(PAGE_TEMPLATE_IDS).toBe(TEMPLATE_IDS);
     for (const t of PAGE_TEMPLATES) {
       expect(PAGE_TYPE_VALUES).toContain(t.pageType);
@@ -72,6 +75,8 @@ describe("catálogo de modelos", () => {
       advertorial: "ADVERTORIAL",
       quiz: "QUIZ",
       roleta: "OTHER",
+      loja: "OTHER",
+      produto: "SALES",
       captura: "CAPTURE",
       upsell: "UPSELL",
       downsell: "DOWNSELL",
@@ -178,7 +183,13 @@ describe.each(
 
   it("não tem script, estilo inline, on* nem ids repetidos", () => {
     expect($("script")).toHaveLength(0);
-    expect($("[style]")).toHaveLength(0);
+    // Exceções: as cores próprias de uma vitrine da loja vão no style="" dela (como num
+    // bloco solto: o CSS do tipo, fora de camada no editor, venceria uma regra do modelo)
+    // e as estrelas geradas da avaliação têm a largura da nota.
+    expect($("[style]").not("[data-os-widget]").not("[data-os-pd-part] *")).toHaveLength(0);
+    $("[data-os-widget][style]").each((_, el) => {
+      expect($(el).attr("data-os-widget"), t.id).toBe("products");
+    });
     const ids: string[] = [];
     $("*").each((_, el) => {
       const attribs = (el as Element).attribs ?? {};
@@ -197,7 +208,7 @@ describe.each(
         const v = a[name];
         if (v === undefined) continue;
         expect(
-          v === "#" || /^#[a-z][\w-]*$/.test(v) || v.startsWith("data:image/svg+xml,"),
+          v === "#" || /^#[a-z][\w-]*$/.test(v) || /^data:image\/svg\+xml(;charset=utf-8)?,/.test(v),
           `${t.id} ${name}=${v.slice(0, 60)}`,
         ).toBe(true);
       }
@@ -249,7 +260,80 @@ describe.each(
     ).toBe(true);
     expect($("h1")).toHaveLength(1);
 
-    switch (t.pageType) {
+    switch (t.id === "loja" || t.id === "produto" ? t.id : t.pageType) {
+      case "loja": {
+        // Cabeçalho de loja + 5 vitrines (a "Oferta do dia + ofertas" lado a lado), com as
+        // partes geradas já desenhadas e os produtos ainda sem página (avisos do editor/ZIP).
+        expect($('[data-os-widget="store-header"]')).toHaveLength(1);
+        expect($('[data-os-widget="store-header"] .os-sh-ico svg')).toHaveLength(4);
+        expect(
+          $("a.os-sh-cat")
+            .map((_, a) => $(a).text())
+            .get(),
+        ).toEqual(SH_CATEGORIES);
+        // As categorias padrão acham produtos desta página (nenhuma nasce com aviso).
+        expect(categoryGaps(html, [], () => [])).toEqual([]);
+        const shops = $('[data-os-widget="products"]');
+        expect(shops.map((_, el) => `${$(el).attr("data-os-layout")}/${$(el).attr("data-os-card")}`).get()).toEqual([
+          "grid/classic",
+          "carousel/classic",
+          "grid/classic",
+          "carousel/compact",
+          "grid/highlight",
+        ]);
+        expect($('.os-pd-row > [data-os-widget="products"]')).toHaveLength(2);
+        const cards = $("a[data-os-product]");
+        expect(cards.length).toBe(1 + 7 + 8 + 8 + 4);
+        cards.each((_, el) => {
+          expect($(el).attr("href")).toBe("#");
+          expect($(el).attr("data-os-link")).toBeUndefined();
+          expect($(el).find(".os-pd-now").text()).toMatch(/^R\$ \d/);
+        });
+        expect(gapCount(productGaps(html, []))).toBe(cards.length);
+        // Faixa de ofertas azul de ponta a ponta (estilo próprio da vitrine, como no bloco).
+        expect(shops.eq(3).attr("style")).toContain("--os-pd-bg:#1462d6");
+        expect($("h1.os-lj-h1 .os-ph").text()).toBe("{{EMPRESA}}");
+        expect($('img[alt="Banner da loja"]')).toHaveLength(1);
+        expect($(".os-lj-perk")).toHaveLength(3);
+        expect(buy).toHaveLength(0);
+        expect($('.os-sh-cart[data-os-link=""]')).toHaveLength(1);
+        break;
+      }
+      case "produto": {
+        // Ganchos para a criação automática das páginas: um de cada.
+        for (const [hook, sel] of Object.entries(PRODUCT_PAGE_HOOKS)) expect($(sel), hook).toHaveLength(1);
+        const gallery = $(PRODUCT_PAGE_HOOKS.gallery);
+        const thumbs = gallery.find('button.os-pg-thumb[type="button"] > img');
+        expect(thumbs).toHaveLength(4);
+        const main = gallery.find("[data-os-pg-stage] > img.os-pg-main");
+        expect(main.attr("src")).toBe(thumbs.first().attr("src"));
+        expect(main.attr("alt")).toBe("Foto 1 do produto");
+        const box = $(PRODUCT_PAGE_HOOKS.buy);
+        expect(box.attr()).toMatchObject({
+          "data-os-currency": "BRL",
+          "data-os-pb-bar": "1",
+          "data-os-pd-price": "12990",
+          "data-os-pd-old": "21990",
+        });
+        expect(box.children("h1.os-pb-name").text()).toBe("Fone de ouvido Bluetooth sem fio");
+        expect(box.find(".os-pd-now").text()).toBe("R$ 129,90");
+        expect(box.find(".os-pd-inst").text()).toBe("12x R$ 10,83 sem juros");
+        expect(buy).toHaveLength(1);
+        expect(buy.hasClass("os-pb-buy")).toBe(true);
+        expect(box.find(".os-pb-trust li")).toHaveLength(3);
+        expect($(PRODUCT_PAGE_HOOKS.back).attr("href")).toBe("#");
+        expect($(PRODUCT_PAGE_HOOKS.back).text()).toBe("‹ Voltar para a loja");
+        expect($(".os-pp-specs th").length).toBeGreaterThanOrEqual(5);
+        // Opiniões provisórias: pedem a opinião de um cliente real (nada inventado que pareça real).
+        const reviews = $(".os-pp-review");
+        expect(reviews).toHaveLength(3);
+        reviews.each((_, el) => {
+          expect($(el).text()).toContain("Escreva aqui a opinião de um cliente real.");
+          expect($(el).find(".os-pp-who").text()).toBe("Nome do cliente");
+        });
+        expect($('[data-os-widget="exit-popup"], [data-os-widget="countdown"]')).toHaveLength(0);
+        break;
+      }
       case "SALES":
         expect(buy.length).toBeGreaterThanOrEqual(3);
         expect($('[data-os-widget="countdown"] [data-os-cd="m"]')).toHaveLength(1);

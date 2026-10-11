@@ -11,6 +11,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { decryptSecret } from "@/lib/crypto";
 import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
+import { offerCurrencyOf } from "@/lib/offer-currency";
 import { type CreatedBackup, createBackupArchive } from "@/server/services/backup/archive";
 import {
   APP_BACKUP_NAME_RE,
@@ -21,6 +22,7 @@ import {
 } from "@/server/services/backup/format";
 import { readBackupManifest } from "@/server/services/backup/reader";
 import { restoreBackup } from "@/server/services/backup/restore";
+import { lastOfferCurrency } from "@/server/services/preferences";
 import { resetDatabase } from "../setup/per-file";
 import {
   cleanupRichData,
@@ -109,6 +111,8 @@ describe("arquivo de backup", () => {
     expect(names.indexOf("Page")).toBeLessThan(names.indexOf("PageVariant"));
     expect(names.indexOf("PageDocument")).toBeLessThan(names.indexOf("PageVersion"));
     expect(names.indexOf("user")).toBeLessThan(names.indexOf("account"));
+    // A chave da Kyvo é da oferta: vem depois dela.
+    expect(names.indexOf("Offer")).toBeLessThan(names.indexOf("PaymentGateway"));
     // Fora do backup: estado deste Mac e tabelas passageiras.
     for (const skipped of [
       "Backup",
@@ -205,6 +209,11 @@ describe("restauração completa", () => {
     for (const table of Object.keys(exp)) expect(got[table], table).toEqual(exp[table]);
     expect(Object.keys(got).sort()).toEqual(Object.keys(exp).sort());
     expect((await prisma.offer.findUniqueOrThrow({ where: { id: data.fx.offerId } })).notes).toBe(TRICKY_TEXT);
+    // Moeda da oferta e a última moeda escolhida na "Nova oferta" voltam.
+    expect(offerCurrencyOf((await prisma.offer.findUniqueOrThrow({ where: { id: data.fx.offerId } })).settings)).toBe(
+      "MXN",
+    );
+    expect(await lastOfferCurrency()).toBe("EUR");
 
     // Sessões encerradas; configurações deste Mac mantidas; histórico de backups intacto.
     expect(await prisma.session.count()).toBe(0);
@@ -230,9 +239,31 @@ describe("restauração completa", () => {
     // Tokens continuam legíveis e o autoincremento continua do último número.
     const pixels = await prisma.pixelConfig.findMany({ orderBy: { vendor: "asc" } });
     expect(pixels.map((p) => decryptSecret(p.accessTokenEnc as string))).toEqual([META_TOKEN, TIKTOK_TOKEN]);
-    // Chave do gateway de pagamento e o produto (métodos, página de obrigado, link de acesso) voltam.
-    const gateway = await prisma.paymentGateway.findUniqueOrThrow({ where: { provider: "KYVO" } });
+    // Chave do gateway da oferta (com o último teste) e o produto (métodos, página de obrigado, link de acesso) voltam.
+    const gateway = await prisma.paymentGateway.findUniqueOrThrow({
+      where: { offerId_provider: { offerId: data.fx.offerId, provider: "KYVO" } },
+    });
     expect(decryptSecret(gateway.apiKeyEnc)).toBe(KYVO_KEY);
+    expect(gateway.checkStatus).toBe("ok");
+    // A da Kyvo e a da FlevoPay (checkout do Offer Studio).
+    expect(await prisma.paymentGateway.count()).toBe(2);
+    const flevo = await prisma.paymentGateway.findUniqueOrThrow({
+      where: { offerId_provider: { offerId: data.fx.offerId, provider: "FLEVOPAY" } },
+    });
+    expect(decryptSecret(flevo.apiKeyEnc)).toBe("flevopay_sk_chaveDoBackup0123456789");
+    // Produto do checkout do Offer Studio: colunas e a configuração em JSON (com os links de acesso dos bumps).
+    const checkout = await prisma.checkoutProduct.findFirstOrThrow({ include: { link: true } });
+    expect(checkout).toMatchObject({
+      provider: "FLEVOPAY",
+      currency: "BRL",
+      methods: ["PIX"],
+      thankYouPageId: data.fx.upsellId,
+      link: { target: "CHECKOUT", key: "checkout-proprio" },
+      config: {
+        bumps: [{ id: "bump0001", accessUrl: "https://drive.exemplo.com/apostila" }],
+        texts: { payButton: "Quero agora" },
+      },
+    });
     const product = await prisma.paymentProduct.findFirstOrThrow({ include: { link: true } });
     expect(product).toMatchObject({
       methods: ["CARD", "BIZUM", "MB_WAY"],
@@ -305,6 +336,46 @@ describe("compatibilidade de versões", () => {
     // O resto igual.
     const { Export: _a, ...restBefore } = portable(before);
     const { Export: _b, ...restAfter } = portable(await snapshotTables());
+    expect(restAfter).toEqual(restBefore);
+  }, 60_000);
+
+  it("backup de quando a chave da Kyvo era uma só (sem offerId): restaura o resto e avisa para cadastrar de novo", async () => {
+    const old = path.join(work, "chave-global.zip");
+    await rewriteArchive(backup.filePath, old, {
+      fixManifest: true,
+      edit: (name, buf) => {
+        if (name !== "db/PaymentGateway.jsonl") return buf;
+        const lines = buf
+          .toString("utf8")
+          .split("\n")
+          .filter(Boolean)
+          .map((l) => {
+            const row = JSON.parse(l) as Record<string, unknown>;
+            delete row.offerId;
+            return JSON.stringify(row);
+          });
+        return Buffer.from(`${lines.join("\n")}\n`, "utf8");
+      },
+      manifest: (m) => ({
+        ...m,
+        migrations: m.migrations.filter((x) => x !== "20261006230000_pagamento_chave_por_oferta"),
+        tables: m.tables.map((t) =>
+          t.name === "PaymentGateway" ? { ...t, columns: t.columns.filter((c) => c !== "offerId") } : t,
+        ),
+      }),
+    });
+    await wipeAppTables();
+    const result = await restoreBackup({
+      filePath: old,
+      storageRoot: path.join(work, "storage-chave-global"),
+      tmpRoot: path.join(work, "tmp"),
+    });
+    expect(result.warnings).toContain(
+      "A chave da Kyvo deste backup é de quando ela era uma só para o Offer Studio inteiro e não foi restaurada: cadastre de novo em cada oferta, na aba “Links e checkouts”.",
+    );
+    expect(await prisma.paymentGateway.count()).toBe(0);
+    const { PaymentGateway: _a, ...restBefore } = portable(before);
+    const { PaymentGateway: _b, ...restAfter } = portable(await snapshotTables());
     expect(restAfter).toEqual(restBefore);
   }, 60_000);
 
@@ -410,11 +481,11 @@ describe("chave dos tokens de outro Mac", () => {
       tmpRoot: path.join(work, "tmp"),
       encryptionKey: otherKey,
     });
-    // 2 tokens de pixel + a chave da Kyvo.
-    expect(result.reencrypted).toBe(3);
+    // 2 tokens de pixel + a chave da Kyvo + a da FlevoPay.
+    expect(result.reencrypted).toBe(4);
     const pixels = await prisma.pixelConfig.findMany({ orderBy: { vendor: "asc" } });
     expect(pixels.map((p) => decryptSecret(p.accessTokenEnc as string, otherKey))).toEqual([META_TOKEN, TIKTOK_TOKEN]);
-    const gateway = await prisma.paymentGateway.findUniqueOrThrow({ where: { provider: "KYVO" } });
+    const gateway = await prisma.paymentGateway.findFirstOrThrow({ where: { provider: "KYVO" } });
     expect(decryptSecret(gateway.apiKeyEnc, otherKey)).toBe(KYVO_KEY);
     expect(() => decryptSecret(gateway.apiKeyEnc)).toThrow();
     // Com a chave antiga não abre mais (foi trocada de verdade).

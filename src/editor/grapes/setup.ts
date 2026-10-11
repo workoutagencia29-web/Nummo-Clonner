@@ -12,9 +12,10 @@ import grapesjs, {
 import { registerBlocks } from "@/editor/blocks";
 import { esc } from "@/editor/blocks/shared";
 import { WIDGET_CANVAS_CSS } from "@/editor/widgets/canvas";
+import { retypeFooters } from "@/editor/widgets/footer-content";
 import { installCanvasFit } from "./canvas-fit";
 import { insertBlockOnClick } from "./click-to-add";
-import { CANVAS_CSS, registerComponentTypes } from "./components";
+import { CANVAS_CSS, type Patchable, patchOnce, registerComponentTypes } from "./components";
 import { colorPickerOptions, ptMessages, RTE_ACTIONS, SECTOR_NAMES, type SectorId } from "./i18n";
 import { installLinkSelection } from "./link-select";
 import { installModalA11y } from "./modal-a11y";
@@ -26,6 +27,7 @@ import {
 } from "./style-cascade";
 import { installStyleHints } from "./style-hints";
 import { installSafeStyleParser } from "./style-parse";
+import { installUndoLimit } from "./undo-limit";
 
 export const DEVICES = [
   { id: "desktop", name: "Computador", width: "" },
@@ -57,6 +59,7 @@ function grapesDevices() {
 export interface EditorContainers {
   canvas: HTMLElement;
   blocks: HTMLElement;
+  /** Camadas: desenhadas aqui só quando a aba abre (showLayers). */
   layers: HTMLElement;
   /** "Classes" e "Estado" (no "Avançado" do painel de estilo). Sem ele, a seção não aparece. */
   selectors?: HTMLElement;
@@ -609,6 +612,54 @@ export function importPageHtml(editor: Editor, html: string) {
   if (wrapper && wrapper.get("type") !== "wrapper") wrapper.set("type", "wrapper");
 }
 
+/** Contêiner das camadas de cada editor, enquanto ainda não foram desenhadas. */
+const pendingLayers = new WeakMap<Editor, HTMLElement>();
+
+/**
+ * Desenha as camadas (uma vez por editor), na primeira vez que a aba "Camadas"
+ * abre. Numa página clonada grande, desenhar todas ao abrir o editor custava
+ * ~1/4 do tempo de abertura, com a aba ainda escondida.
+ */
+export function showLayers(editor: Editor) {
+  const box = pendingLayers.get(editor);
+  // Antes do "load" ainda não há a raiz das camadas: fica para depois.
+  if (!box || !editor.Layers.getRoot()) return;
+  pendingLayers.delete(editor);
+  box.appendChild(editor.Layers.render());
+}
+
+interface ColorInput {
+  movedColor?: string;
+  colorEl?: { spectrum?: (command: string) => { get?: (index: number) => Element | undefined } | undefined };
+}
+
+/** A paleta do campo de cor está aberta (a pessoa escolhendo ou arrastando)? */
+function pickerOpen(input: ColorInput) {
+  const box = input.colorEl?.spectrum?.("container")?.get?.(0);
+  return !!box && !box.classList.contains("sp-hidden");
+}
+
+/**
+ * GrapesJS 0.23: o campo de cor do Estilo guarda a cor que só MOSTRA (do
+ * elemento, a digitada, a de um Desfazer) como se fosse uma cor arrastada na
+ * paleta, e grava essa cor ao selecionar outro elemento — dependendo do tempo,
+ * no elemento errado, e como um passo do Desfazer. Pendente fica só a cor
+ * arrastada com a paleta aberta (que o GrapesJS grava ao trocar de elemento).
+ */
+function forgetShownColors(editor: Editor) {
+  const sm = editor.StyleManager as unknown as { getType(id: string): { view?: Patchable } | undefined };
+  patchOnce(sm.getType("color")?.view, "os-shown-color", (proto) => {
+    const setValue = proto.setValue as (this: { inputInst?: ColorInput | null }, ...a: unknown[]) => unknown;
+    proto.setValue = function (this: { inputInst?: ColorInput | null }, ...args: unknown[]) {
+      const input = this.inputInst;
+      const moved = input?.movedColor ?? "";
+      const out = setValue.apply(this, args);
+      if (input) input.movedColor = pickerOpen(input) ? moved : "";
+      return out;
+    };
+  });
+}
+
 export function createEditor(containers: EditorContainers, project: unknown | null): Editor {
   const editor = grapesjs.init({
     container: containers.canvas,
@@ -622,7 +673,8 @@ export function createEditor(containers: EditorContainers, project: unknown | nu
     canvasCss: CANVAS_CSS + WIDGET_CANVAS_CSS,
     noticeOnUnload: false,
     storageManager: false,
-    projectData: project ? fixPageRoots(project) : undefined,
+    // Rodapés do Offer Studio gravados antes do tipo "Rodapé" ganham o tipo (o logo nas Configurações).
+    projectData: project ? retypeFooters(fixPageRoots(project)) : undefined,
     // Plugins rodam antes de carregar o projeto: os tipos do Offer Studio precisam
     // existir para o projeto salvo voltar certo.
     plugins: [
@@ -644,12 +696,14 @@ export function createEditor(containers: EditorContainers, project: unknown | nu
     i18n: { locale: "pt", localeFallback: "pt", detectLocale: false, messages: { pt: ptMessages } },
     colorPicker: colorPickerOptions(),
     richTextEditor: { actions: RTE_ACTIONS as never },
-    undoManager: { maximumStackLength: 150, trackSelection: false },
+    // Sem limite de registros: o limite é de passos do Desfazer (undo-limit.ts).
+    undoManager: { maximumStackLength: Number.POSITIVE_INFINITY, trackSelection: false },
     // "Classes" e "Estado" (ex.: ao passar o mouse) ficam acima do painel de estilo.
     selectorManager: { componentFirst: true, ...(containers.selectors && { appendTo: containers.selectors }) },
     // Clicar num bloco também adiciona (abaixo do item selecionado).
     blockManager: { appendTo: containers.blocks, appendOnClick: (block, ed) => insertBlockOnClick(ed, block) },
-    layerManager: { appendTo: containers.layers },
+    // Sem appendTo: as camadas são desenhadas só quando a aba abre (showLayers).
+    layerManager: {},
     styleManager: { appendTo: containers.styles, sectors: SECTORS as never },
     traitManager: { appendTo: containers.traits },
     deviceManager: { devices: grapesDevices() as never },
@@ -661,6 +715,11 @@ export function createEditor(containers: EditorContainers, project: unknown | nu
       autoAdd: true,
     },
   });
+  // storageManager: false não desliga o "autosave" do GrapesJS: cada mudança montava o
+  // projeto inteiro (getProjectData) para jogar fora. Quem salva é o editor-app.
+  editor.Storage.setAutosave(false);
+  pendingLayers.set(editor, containers.layers);
+  editor.on("destroy", () => pendingLayers.delete(editor));
   keepSingleSelectorPanel(editor, containers.selectors);
   syncPageFonts(editor);
   titleCanvasFrame(editor);
@@ -672,5 +731,7 @@ export function createEditor(containers: EditorContainers, project: unknown | nu
   installImportantMirror(editor);
   installCanvasMediaOrder(editor);
   installStyleHints(editor);
+  installUndoLimit(editor);
+  forgetShownColors(editor);
   return editor;
 }

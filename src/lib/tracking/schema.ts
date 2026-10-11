@@ -22,6 +22,8 @@ export const TRACKING_EVENTS = [
   "CONTACT",
   "ADD_TO_CART",
   "PURCHASE",
+  /** Só da página de checkout do Offer Studio (PIX gerado / pagamento iniciado): não vira regra. */
+  "ADD_PAYMENT_INFO",
 ] as const;
 export type TrackingEventId = (typeof TRACKING_EVENTS)[number];
 
@@ -56,6 +58,7 @@ export const TRACKING_EVENT_LABEL: Record<TrackingEventId, string> = {
   CONTACT: "Contato / WhatsApp (Contact)",
   ADD_TO_CART: "Adicionou ao carrinho (AddToCart)",
   PURCHASE: "Compra (Purchase)",
+  ADD_PAYMENT_INFO: "Adicionou dados de pagamento (AddPaymentInfo)",
 };
 
 export const EVENT_TRIGGER_LABEL: Record<EventTriggerId, string> = {
@@ -203,12 +206,18 @@ export const CONSENT_THEME_LABEL: Record<(typeof CONSENT_THEMES)[number], string
   light: "Claro",
   dark: "Escuro",
 };
-export const CURRENCIES = ["BRL", "USD", "EUR"] as const;
-export const CURRENCY_LABEL: Record<(typeof CURRENCIES)[number], string> = {
+/** Moedas do "Valor da oferta" (as mesmas da moeda da oferta, na mesma ordem). */
+export const CURRENCIES = ["BRL", "MXN", "EUR", "USD"] as const;
+export type ValueCurrency = (typeof CURRENCIES)[number];
+export const CURRENCY_LABEL: Record<ValueCurrency, string> = {
   BRL: "Real (R$)",
-  USD: "Dólar (US$)",
+  MXN: "Peso mexicano ($)",
   EUR: "Euro (€)",
+  USD: "Dólar (US$)",
 };
+const isValueCurrency = (v: unknown): v is ValueCurrency => (CURRENCIES as readonly unknown[]).includes(v);
+const asObject = (v: unknown): Record<string, unknown> =>
+  typeof v === "object" && v !== null && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 
 /** Nome de parâmetro repassado (utm_source, fbclid, sck…). */
 export const FORWARD_PARAM_RE = /^[A-Za-z0-9_.-]+$/;
@@ -283,21 +292,74 @@ export const LEGACY_NOTICE_TEXT =
   "Usamos cookies e tecnologias parecidas para melhorar sua experiência e medir nossos anúncios. Ao continuar navegando, você concorda com isso.";
 
 /**
+ * Textos prontos do aviso em espanhol e inglês (botões "Usar textos em
+ * espanhol/inglês" da seção Privacidade: só preenchem o formulário, a pessoa
+ * confere e salva). Na Europa (RGPD) o aviso precisa estar no idioma do visitante.
+ */
+export const CONSENT_TEXT_PRESETS = {
+  es: {
+    text: "Usamos cookies y tecnologías similares para mejorar tu experiencia y medir nuestros anuncios. Puedes aceptarlas o rechazarlas.",
+    noticeText: "Usamos cookies y tecnologías similares para mejorar tu experiencia y medir nuestros anuncios.",
+    acceptLabel: "Aceptar",
+    rejectLabel: "Rechazar",
+    noticeLabel: "Entendido",
+    policyLabel: "Política de privacidad",
+  },
+  en: {
+    text: "We use cookies and similar technologies to improve your experience and measure our ads. You can accept or decline them.",
+    noticeText: "We use cookies and similar technologies to improve your experience and measure our ads.",
+    acceptLabel: "Accept",
+    rejectLabel: "Decline",
+    noticeLabel: "Got it",
+    policyLabel: "Privacy policy",
+  },
+} as const;
+export type ConsentPresetLang = keyof typeof CONSENT_TEXT_PRESETS;
+
+/** Textos padrão de cada modo: [com Aceitar/Recusar, só avisar] (português e os prontos). */
+const CONSENT_TEXT_PAIRS: [string, string][] = [
+  [DEFAULT_CONSENT_TEXT, DEFAULT_NOTICE_TEXT],
+  ...Object.values(CONSENT_TEXT_PRESETS).map((p): [string, string] => [p.text, p.noticeText]),
+];
+
+/**
  * Texto do aviso para o modo escolhido: o texto padrão de um modo vira o padrão
- * do outro (o de "Pedir permissão" fala em aceitar ou recusar, que o modo "Só
- * avisar" não tem). O padrão antigo do "Só avisar" vira o novo. Texto escrito
- * pela pessoa fica como está.
+ * do outro, no mesmo idioma (o de "Pedir permissão" fala em aceitar ou recusar,
+ * que o modo "Só avisar" não tem). O padrão antigo do "Só avisar" vira o novo.
+ * Texto escrito pela pessoa fica como está.
  */
 export function consentTextFor(mode: ConsentModeId, text: string): string {
   const current = text.trim();
-  const isDefault = (t: string) => current === t;
-  if (mode === "NOTICE" && (isDefault(DEFAULT_CONSENT_TEXT) || isDefault(LEGACY_NOTICE_TEXT))) {
-    return DEFAULT_NOTICE_TEXT;
-  }
-  if (mode !== "NOTICE" && (isDefault(DEFAULT_NOTICE_TEXT) || isDefault(LEGACY_NOTICE_TEXT))) {
-    return DEFAULT_CONSENT_TEXT;
+  const notice = mode === "NOTICE";
+  if (current === LEGACY_NOTICE_TEXT) return notice ? DEFAULT_NOTICE_TEXT : DEFAULT_CONSENT_TEXT;
+  for (const [withChoice, onlyNotice] of CONSENT_TEXT_PAIRS) {
+    if (notice && current === withChoice) return onlyNotice;
+    if (!notice && current === onlyNotice) return withChoice;
   }
   return text;
+}
+
+/**
+ * Idioma sugerido para os textos do aviso: o de "Idioma das páginas" (es/en)
+ * ou, sem ele, o da moeda (peso → espanhol; dólar e euro → os dois). null =
+ * oferta em real (os botões ficam discretos).
+ */
+export function consentLanguageHint(language: string, currency: string): ConsentPresetLang | "both" | null {
+  if (language === "es" || language === "en") return language;
+  if (currency === "MXN") return "es";
+  return currency === "USD" || currency === "EUR" ? "both" : null;
+}
+
+/** Textos prontos do idioma para o rascunho do aviso (o texto do aviso conforme o modo). */
+export function consentPreset(lang: ConsentPresetLang, mode: ConsentModeId) {
+  const p = CONSENT_TEXT_PRESETS[lang];
+  return {
+    text: mode === "NOTICE" ? p.noticeText : p.text,
+    acceptLabel: p.acceptLabel,
+    rejectLabel: p.rejectLabel,
+    noticeLabel: p.noticeLabel,
+    policyLabel: p.policyLabel,
+  };
 }
 
 /** Texto padrão do link da política de privacidade e do botão do modo "Só avisar". */
@@ -389,10 +451,18 @@ export const TrackingSettingsSchema = z.object({
 });
 export type TrackingSettings = z.infer<typeof TrackingSettingsSchema>;
 
-/** Lê Offer.tracking com valores padrão; JSON inválido volta ao padrão sem quebrar a página. */
-export function parseTrackingSettings(value: unknown): TrackingSettings {
+/**
+ * Lê Offer.tracking com valores padrão; JSON inválido volta ao padrão sem
+ * quebrar a página. `offerCurrency` (a moeda da oferta, Offer.settings): a
+ * moeda do "Valor da oferta" que ainda não foi salva é ela — numa oferta em
+ * peso mexicano, o valor digitado vai para os pixels em MXN, não em real.
+ */
+export function parseTrackingSettings(value: unknown, offerCurrency?: string): TrackingSettings {
   const parsed = TrackingSettingsSchema.safeParse(value ?? {});
-  return parsed.success ? parsed.data : TrackingSettingsSchema.parse({});
+  const settings = parsed.success ? parsed.data : TrackingSettingsSchema.parse({});
+  const saved = asObject(asObject(value).value).currency;
+  if (!isValueCurrency(saved) && isValueCurrency(offerCurrency)) settings.value.currency = offerCurrency;
+  return settings;
 }
 
 /** Regra de evento (tabela EventRule). */

@@ -3,6 +3,7 @@
  * (src/runtime) e pelo editor (valores de exemplo no canvas). Sem efeitos
  * colaterais e sem dependências — entram no script minificado das páginas.
  */
+import type { PageTextKey } from "@/lib/page-texts";
 
 /** Fuso usado quando a data do contador não diz o fuso (horário de Brasília). */
 export const BR_TZ = "-03:00";
@@ -21,7 +22,7 @@ export function parsePeople(text: string): Person[] {
   for (const raw of text.split(/\r?\n|;/)) {
     const line = raw.trim();
     if (!line) continue;
-    const m = /^(.+?)\s*(?:\||\s[-–—]\s|,)\s*(.+)$/.exec(line);
+    const m = /^(.+?)\s*(?:\||\s[-\u2013\u2014]\s|,)\s*(.+)$/.exec(line);
     out.push(m ? { name: m[1].trim(), city: m[2].trim() } : { name: line, city: "" });
   }
   return out;
@@ -64,26 +65,37 @@ export function onlyDigits(s: string) {
   return s.replace(/\D/g, "");
 }
 
-/** Número de WhatsApp no formato internacional: DDD + número ganha o 55 do Brasil. */
-export function normalizePhone(input: string): string {
-  const d = onlyDigits(input).replace(/^0+/, "");
-  return d.length === 10 || d.length === 11 ? `55${d}` : d;
+/**
+ * Número de WhatsApp no formato internacional (só dígitos). Com "+" ou "00" na
+ * frente, o número já tem o código do país e fica como está (sem o "00"). Sem
+ * isso, DDD + número (10 ou 11 dígitos) ganha o 55 do Brasil — só em oferta em
+ * real (`brazil`, o padrão); nas outras moedas o número fica como foi digitado.
+ */
+export function normalizePhone(input: string, brazil = true): string {
+  const raw = onlyDigits(input);
+  const d = raw.replace(/^0+/, "");
+  if (/^\D*\+/.test(input) || raw.slice(0, 2) === "00") return d;
+  return brazil && (d.length === 10 || d.length === 11) ? `55${d}` : d;
 }
 
-/** Link de conversa do WhatsApp (wa.me) com mensagem inicial opcional. */
-export function whatsappUrl(phone: string, message = ""): string {
+/** Link de conversa do WhatsApp (wa.me) com mensagem inicial opcional (`brazil`: ver normalizePhone). */
+export function whatsappUrl(phone: string, message = "", brazil = true): string {
   const text = message.trim();
-  return `https://wa.me/${normalizePhone(phone)}${text ? `?text=${encodeURIComponent(text)}` : ""}`;
+  return `https://wa.me/${normalizePhone(phone, brazil)}${text ? `?text=${encodeURIComponent(text)}` : ""}`;
 }
 
 export function isValidEmail(v: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(v.trim());
 }
 
-/** Telefone com DDD (10–11 dígitos), com ou sem +55, ou internacional até 15 dígitos. */
-export function isValidPhone(v: string) {
+/**
+ * Telefone com DDD (10–11 dígitos), com ou sem +55, ou internacional até 15
+ * dígitos. `intl` (oferta fora do real ou página em espanhol/inglês): a partir
+ * de 8 dígitos, com ou sem o código do país (celular da Espanha: 612 345 678).
+ */
+export function isValidPhone(v: string, intl = false) {
   const d = onlyDigits(v).replace(/^0+/, "");
-  return d.length >= 10 && d.length <= 15;
+  return d.length >= (intl ? 8 : 10) && d.length <= 15;
 }
 
 /**
@@ -120,19 +132,38 @@ export function withScheme(value: string): string {
 
 export type LeadFieldKind = "name" | "email" | "phone" | "other";
 
-const EMPTY_MESSAGE: Record<LeadFieldKind, string> = {
-  name: "Digite seu nome.",
-  email: "Digite seu e-mail.",
-  phone: "Digite seu WhatsApp com DDD.",
-  other: "Preencha este campo.",
+/**
+ * Texto no idioma da página (t de ./texts, que lê o #os-textos); o padrão
+ * devolve o português. Recebido de fora: estas funções continuam puras.
+ */
+export type PageText = (key: PageTextKey, pt: string) => string;
+const inPortuguese: PageText = (_key, pt) => pt;
+
+const EMPTY_MESSAGE: Record<LeadFieldKind, [PageTextKey, string]> = {
+  name: ["lfName", "Digite seu nome."],
+  email: ["lfEmail", "Digite seu e-mail."],
+  phone: ["lfPhone", "Digite seu WhatsApp com DDD."],
+  other: ["lfField", "Preencha este campo."],
 };
 
-/** Mensagem de erro (pt-BR) de um campo do formulário de captura, ou "" se está ok. */
-export function leadFieldError(kind: LeadFieldKind, value: string, required: boolean): string {
+/**
+ * Mensagem de erro de um campo do formulário de captura, ou "" se está ok.
+ * Em pt-BR; `text` traz a do idioma da página. `intl`: telefone de fora do
+ * Brasil (isValidPhone).
+ */
+export function leadFieldError(
+  kind: LeadFieldKind,
+  value: string,
+  required: boolean,
+  text: PageText = inPortuguese,
+  intl = false,
+): string {
   const v = value.trim();
-  if (!v) return required ? EMPTY_MESSAGE[kind] : "";
-  if (kind === "email" && !isValidEmail(v)) return "Digite um e-mail válido (ex.: nome@gmail.com).";
-  if (kind === "phone" && !isValidPhone(v)) return "Digite um WhatsApp válido com DDD (ex.: (11) 91234-5678).";
-  if (kind === "name" && v.length < 2) return EMPTY_MESSAGE.name;
+  const empty = text(EMPTY_MESSAGE[kind][0], EMPTY_MESSAGE[kind][1]);
+  if (!v) return required ? empty : "";
+  if (kind === "email" && !isValidEmail(v)) return text("lfEmailBad", "Digite um e-mail válido (ex.: nome@gmail.com).");
+  if (kind === "phone" && !isValidPhone(v, intl))
+    return text("lfPhoneBad", "Digite um WhatsApp válido com DDD (ex.: (11) 91234-5678).");
+  if (kind === "name" && v.length < 2) return empty;
   return "";
 }

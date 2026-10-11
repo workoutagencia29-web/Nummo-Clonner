@@ -6,6 +6,7 @@
  * explicam cada problema.
  */
 import {
+  amountProblem,
   methodAllows,
   methodCurrencyProblem,
   type PaymentCurrencyId,
@@ -61,6 +62,8 @@ export interface PaymentCheckProduct {
   label: string;
   currency: PaymentCurrencyId;
   methods: PaymentMethodId[];
+  /** Valor em centavos (sem ele, a faixa de valor das formas de pagamento não é conferida). */
+  amountCents?: number;
   /** Idioma da janela para o comprador. */
   locale: PaymentLocaleId;
   /** Página de obrigado escolhida (null = nenhuma). */
@@ -99,6 +102,13 @@ export type PaymentIssue =
       access: boolean;
       /** Método marcado que a moeda não aceita (texto pronto), ou null. */
       methods: string | null;
+      /**
+       * Valor fora da faixa das formas de pagamento marcadas (texto pronto:
+       * "Com SPEI, o valor máximo é…"), ou null. A Kyvo recusa a cobrança —
+       * acontece, por exemplo, depois de trocar a moeda da oferta (o número
+       * fica o mesmo).
+       */
+      amount: string | null;
     }
   | { kind: "accessBlock"; pageName: string; documentId: string; labels: string[] }
   /**
@@ -129,7 +139,8 @@ export function paymentIssues(check: PaymentCheck): PaymentIssue[] {
   if (check.key !== "ok") out.push({ kind: "key", state: check.key });
   for (const p of check.products) {
     const methods = methodsProblem(p.currency, p.methods);
-    if (!p.thankYou || !p.hasAccessUrl || methods) {
+    const amount = !methods && p.amountCents !== undefined ? amountProblem(p.amountCents, p.currency, p.methods) : null;
+    if (!p.thankYou || !p.hasAccessUrl || methods || amount) {
       out.push({
         kind: "product",
         linkId: p.linkId,
@@ -137,6 +148,7 @@ export function paymentIssues(check: PaymentCheck): PaymentIssue[] {
         thankYou: !p.thankYou,
         access: !p.hasAccessUrl,
         methods,
+        amount,
       });
     }
   }

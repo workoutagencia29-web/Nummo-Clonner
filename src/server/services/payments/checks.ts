@@ -1,6 +1,6 @@
 /**
  * Dados do que falta para o pagamento na página funcionar no site publicado
- * (regras em src/lib/payments/checks.ts): chave do gateway, página de
+ * (regras em src/lib/payments/checks.ts): chave do gateway da oferta, página de
  * obrigado com o bloco "Acesso ao produto", link de acesso, métodos e regras
  * de Purchase que contariam a compra duas vezes. Usado pelo "Próximos passos"
  * e pelos avisos do ZIP. Nunca devolve a chave nem o link de acesso.
@@ -14,12 +14,16 @@ import {
   type PaymentCheck,
   type PaymentKeyState,
 } from "@/lib/payments/checks";
-import type { PaymentProviderId } from "@/lib/payments/rules";
+import { type PaymentMethodId, type PaymentProviderId, windowCurrency } from "@/lib/payments/rules";
 
-/** A chave do gateway está cadastrada, legível e não foi recusada no último "Testar conexão"? */
-export async function paymentKeyState(provider: PaymentProviderId, db: Db = prisma): Promise<PaymentKeyState> {
+/** A chave do gateway DA OFERTA está cadastrada, legível e não foi recusada no último "Testar conexão"? */
+export async function paymentKeyState(
+  offerId: string,
+  provider: PaymentProviderId,
+  db: Db = prisma,
+): Promise<PaymentKeyState> {
   const row = await db.paymentGateway.findUnique({
-    where: { provider },
+    where: { offerId_provider: { offerId, provider } },
     select: { apiKeyEnc: true, checkStatus: true },
   });
   return gatewayKeyState({
@@ -29,8 +33,9 @@ export async function paymentKeyState(provider: PaymentProviderId, db: Db = pris
   });
 }
 
-/** Gatilhos que disparam a regra sozinhos, sem o comprador fazer nada. */
-const AUTO_TRIGGERS = ["PAGE_LOAD", "TIME_ON_PAGE", "SCROLL_DEPTH"] as const;
+/** Gatilhos que disparam a regra sozinhos, sem o comprador fazer nada (também no checkout do Offer Studio). */
+export const PURCHASE_AUTO_TRIGGERS = ["PAGE_LOAD", "TIME_ON_PAGE", "SCROLL_DEPTH"] as const;
+const AUTO_TRIGGERS = PURCHASE_AUTO_TRIGGERS;
 
 /** null = a oferta não tem link de "Pagamento na página" com produto. */
 export async function offerPaymentCheck(offerId: string, db: Db = prisma): Promise<PaymentCheck | null> {
@@ -39,6 +44,7 @@ export async function offerPaymentCheck(offerId: string, db: Db = prisma): Promi
     orderBy: [{ link: { position: "asc" } }, { link: { createdAt: "asc" } }],
     select: {
       provider: true,
+      amountCents: true,
       currency: true,
       methods: true,
       locale: true,
@@ -52,7 +58,7 @@ export async function offerPaymentCheck(offerId: string, db: Db = prisma): Promi
   const provider = rows[0].provider;
   const pageIds = [...new Set(rows.flatMap((r) => (r.thankYouPage ? [r.thankYouPage.id] : [])))];
   const [key, docs, withAccess, rules] = await Promise.all([
-    paymentKeyState(provider, db),
+    paymentKeyState(offerId, provider, db),
     pageIds.length
       ? db.pageDocument.findMany({
           where: { variant: { pageId: { in: pageIds } } },
@@ -100,8 +106,9 @@ export async function offerPaymentCheck(offerId: string, db: Db = prisma): Promi
     products: rows.map((r) => ({
       linkId: r.linkId,
       label: r.link.label,
-      currency: r.currency,
-      methods: r.methods,
+      currency: windowCurrency(r.currency),
+      methods: r.methods.filter((m): m is PaymentMethodId => m !== "PIX"),
+      amountCents: r.amountCents,
       locale: r.locale,
       thankYou: r.thankYouPage
         ? {

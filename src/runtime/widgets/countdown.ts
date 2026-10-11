@@ -8,12 +8,20 @@
  * data-os-expired   ao acabar: "zero" (fica 00:00), "hide" (esconde),
  *                   "text" (mostra data-os-expired-text) ou "restart" (recomeça)
  *
+ * data-os-cd-style "bar" = Contagem no topo (barra); sem atributo = caixas grandes
+ * data-os-sticky    na barra: "1" (padrão) fica fixa no topo ao rolar, com
+ *                   espaço reservado no começo da página (src/runtime/widgets/top.ts);
+ *                   "0" fica no lugar onde está. Dentro de um bloco que começa
+ *                   escondido (HIDDEN_HOST) também fica no lugar.
+ *
  * Os números ficam em [data-os-cd="d|h|m|s"]; a unidade "dias" some quando
  * falta menos de um dia (as horas passam a somar os dias): data-os-cd-days="0"
  * + regra [data-os-cd-days="0"] [data-os-cd-unit=d] (CSS da página e WIDGET_CSS).
  */
+import { HIDDEN_HOST } from "@/lib/countdown-bar";
 import { pad2, parseDeadline, splitTime } from "./options";
-import { load, num, opt, save, widgets } from "./util";
+import { fitTop, pinTop } from "./top";
+import { flag, load, num, opt, save, widgets } from "./util";
 
 type Tick = () => boolean;
 
@@ -47,6 +55,12 @@ function setup(el: HTMLElement): Tick {
     if (node && node.textContent !== text) node.textContent = text;
   };
 
+  // Dentro de um bloco que começa escondido (aparece depois de N segundos,
+  // popup de saída, etapa do quiz, "só para quem ganhou/não ganhou"), a barra
+  // fica no lugar: presa no topo ela sairia do bloco e apareceria para todos.
+  const pinned = opt(el, "cd-style") === "bar" && flag(el, "sticky", true) && !el.parentElement?.closest(HIDDEN_HOST);
+  if (pinned) pinTop(el);
+
   const expire = () => {
     el.setAttribute("data-os-state", "expired");
     if (onEnd === "hide") el.style.display = "none";
@@ -59,6 +73,7 @@ function setup(el: HTMLElement): Tick {
       if (units) units.after(msg);
       else el.appendChild(msg);
     }
+    if (pinned) fitTop();
   };
 
   return () => {
@@ -72,6 +87,8 @@ function setup(el: HTMLElement): Tick {
     write(nums.h, showDays ? t.h : t.h + t.d * 24);
     write(nums.m, t.m);
     write(nums.s, t.s);
+    // A fonte da página pode chegar depois e mudar a altura da barra.
+    if (pinned) fitTop();
     if (left > 0) return true;
     expire();
     return false;

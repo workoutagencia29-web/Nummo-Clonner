@@ -5,7 +5,7 @@
  * O realce ao passar o mouse e o pulso vão no CSS da própria página.
  */
 import type { Component, Editor } from "grapesjs";
-import { type Def, onMobile, PROP_AUTO_LINK, type Style, text } from "@/editor/blocks/shared";
+import { AUTO_LINK_OWN_CHECKOUT, type Def, onMobile, PROP_AUTO_LINK, type Style, text } from "@/editor/blocks/shared";
 import { withScheme } from "@/runtime/widgets/options";
 import type { TraitDef } from "./traits";
 
@@ -101,21 +101,28 @@ export interface ButtonOptions {
   checkout?: boolean;
   /** Com checkout: liga sozinho ao primeiro link de checkout da oferta (padrão: sim). */
   auto?: boolean;
+  /**
+   * "Botão de checkout": botão de compra que liga sozinho ao primeiro link
+   * "Checkout do Offer Studio" da oferta (sem nenhum, pede o link como o de
+   * compra; o "＋ Criar link da oferta…" já vem com esse destino).
+   */
+  own?: boolean;
 }
 
 /** Botão pronto (os-button). */
 export function buttonDef(label: string, opts: ButtonOptions = {}): Def {
-  const auto = opts.checkout && opts.auto !== false;
+  const checkout = opts.checkout || opts.own;
+  const auto = checkout && opts.auto !== false;
   const def = text(
     "a",
     label,
     { ...CTA_STYLE, ...opts.style },
     {
       type: "os-button",
-      name: opts.checkout ? "Botão do checkout" : "Botão",
-      attributes: { href: "#", ...(opts.checkout && { "data-os-link": "" }) },
+      name: opts.own ? "Botão de checkout" : opts.checkout ? "Botão do checkout" : "Botão",
+      attributes: { href: "#", ...(checkout && { "data-os-link": "" }) },
       classes: [BUTTON_CLASS, ...(opts.pulse ? [PULSE_CLASS] : [])],
-      ...(auto && { [PROP_AUTO_LINK]: "CHECKOUT" }),
+      ...(auto && { [PROP_AUTO_LINK]: opts.own ? AUTO_LINK_OWN_CHECKOUT : "CHECKOUT" }),
     },
   );
   return onMobile(def, { width: "100%", padding: "18px 20px", "font-size": "18px", ...opts.mobile });

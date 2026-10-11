@@ -71,15 +71,16 @@ beforeEach(async () => {
 });
 
 interface Setup {
-  key?: boolean;
+  /** true = KYVO_KEY; texto = outra chave (outra conta da Kyvo). */
+  key?: boolean | string;
   thanks?: boolean;
   access?: string;
   block?: boolean;
 }
 
-async function paymentOffer(opts: Setup = {}) {
-  const { key = true, thanks = true, access = ACCESS_URL, block = true } = opts;
-  const offer = await createOffer({ name: "Oferta" });
+async function paymentOffer(opts: Setup & { name?: string } = {}) {
+  const { key = true, thanks = true, access = ACCESS_URL, block = true, name = "Oferta" } = opts;
+  const offer = await createOffer({ name });
   const home = await prisma.page.findFirstOrThrow({ where: { offerId: offer.id, isHome: true } });
   const thanksPage = await createPage({ offerId: offer.id, name: "Obrigado", type: "THANK_YOU" });
   await prisma.pageDocument.updateMany({ where: { variant: { pageId: home.id } }, data: { html: SALES } });
@@ -88,8 +89,8 @@ async function paymentOffer(opts: Setup = {}) {
     data: { html: block ? THANKS : THANKS_NO_BLOCK },
   });
   const link = await createOfferLink(offer.id, { label: "Checkout principal", url: "", kind: "CHECKOUT" });
-  // A chave fica na tabela do gateway: entre testes, o resetDatabase limpa.
-  if (key) await savePaymentGatewayKey("KYVO", KYVO_KEY);
+  // A chave é da oferta (some com ela): entre testes, o resetDatabase limpa.
+  if (key) await savePaymentGatewayKey(offer.id, "KYVO", typeof key === "string" ? key : KYVO_KEY);
   await savePaymentProduct(link.id, {
     name: "Curso de Repostería",
     amount: "497",
@@ -242,11 +243,11 @@ describe("pagamento na página no ZIP", () => {
     expect(r.items.find((i) => i.id === "pagamento")).toMatchObject({
       title: "Cadastrar a chave da Kyvo",
       detail:
-        "O pagamento na página precisa da chave da API da Kyvo para cobrar no site publicado. Depois, falta mais 1 ajuste no pagamento.",
+        "O pagamento na página precisa da chave da API da Kyvo desta oferta para cobrar no site publicado. Depois, falta mais 1 ajuste no pagamento.",
       done: false,
       optional: false,
-      cta: "Abrir Configurações",
-      target: { settings: "pagamentos" },
+      cta: "Abrir a conta da Kyvo",
+      target: { paymentAccount: true },
     });
 
     // O ZIP sai mesmo assim, com a chave vazia (o pagamento.php responde "configuracao").
@@ -256,7 +257,7 @@ describe("pagamento na página no ZIP", () => {
     expect(result.warnings).toContain(keyWarning);
     expect(text("LEIA-ME.txt")).toContain("ainda não tem a chave da Kyvo");
 
-    await savePaymentGatewayKey("KYVO", KYVO_KEY);
+    await savePaymentGatewayKey(o.offerId, "KYVO", KYVO_KEY);
     check = await offerPaymentCheck(o.offerId);
     r = computeReadiness(
       {
@@ -301,13 +302,69 @@ describe("pagamento na página no ZIP", () => {
     });
 
     // Chave salva com outra APP_ENCRYPTION_KEY (backup de outro Mac sem a chave): ilegível.
-    await prisma.paymentGateway.update({ where: { provider: "KYVO" }, data: { apiKeyEnc: "v1:lixo:lixo:lixo" } });
+    await prisma.paymentGateway.update({
+      where: { offerId_provider: { offerId: o.offerId, provider: "KYVO" } },
+      data: { apiKeyEnc: "v1:lixo:lixo:lixo" },
+    });
     const again = await exportPlan(o.offerId);
     const unreadable = again.warnings.find((w) => w.includes("não pôde ser lida"));
     expect(unreadable).toBeDefined();
     expect(exportWarningFix(unreadable as string)).toEqual({ kind: "paymentKey" });
     const { text } = await zip(o.offerId);
     expect(text(PAGAMENTO_CONFIG_FILE)).toContain("'chave' => '',");
+  });
+});
+
+describe("chave por oferta", () => {
+  it("duas ofertas com contas diferentes: cada ZIP leva a chave da própria oferta", async () => {
+    const OTHER = "kyvo_live_outraContaDaKyvo0000000000";
+    const a = await paymentOffer({ name: "Oferta México" });
+    const b = await paymentOffer({ name: "Oferta Espanha", key: OTHER });
+    const c = await paymentOffer({ name: "Oferta sem chave", key: false });
+
+    const za = await zip(a.offerId, "a.zip");
+    expect(za.text(PAGAMENTO_CONFIG_FILE)).toContain(`'chave' => '${KYVO_KEY}',`);
+    expect(za.text(PAGAMENTO_CONFIG_FILE)).not.toContain(OTHER);
+    const zb = await zip(b.offerId, "b.zip");
+    expect(zb.text(PAGAMENTO_CONFIG_FILE)).toContain(`'chave' => '${OTHER}',`);
+    expect(zb.text(PAGAMENTO_CONFIG_FILE)).not.toContain(KYVO_KEY);
+    // A chave das outras ofertas não vale para esta: sai vazia, com o aviso e o conserto no cartão da oferta.
+    const zc = await zip(c.offerId, "c.zip");
+    expect(zc.text(PAGAMENTO_CONFIG_FILE)).toContain("'chave' => '',");
+    const warning = zc.result.warnings.find((w) => w.includes("ainda não tem a chave da Kyvo"));
+    expect(warning).toContain("“Links e checkouts”");
+    expect(exportWarningFix(warning as string)).toEqual({ kind: "paymentKey" });
+    for (const z of [za, zb, zc]) {
+      for (const [name, entry] of z.entries) {
+        if (name === PAGAMENTO_CONFIG_FILE) continue;
+        const body = entry.data.toString("utf8");
+        expect(body.includes(KYVO_KEY) || body.includes(OTHER), name).toBe(false);
+      }
+    }
+
+    // "Próximos passos" de cada oferta olha só a chave dela.
+    const stepOf = async (offerId: string) =>
+      (await getOfferReadiness({ id: offerId, liveUrl: null, links: await listOfferLinks(offerId) })).items.find(
+        (i) => i.id === "pagamento",
+      );
+    expect(await stepOf(a.offerId)).toMatchObject({ done: true });
+    expect(await stepOf(c.offerId)).toMatchObject({
+      title: "Cadastrar a chave da Kyvo",
+      done: false,
+      cta: "Abrir a conta da Kyvo",
+      target: { paymentAccount: true },
+    });
+    // Recusa no teste de uma oferta não afeta a outra.
+    await prisma.paymentGateway.update({
+      where: { offerId_provider: { offerId: b.offerId, provider: "KYVO" } },
+      data: { checkStatus: "invalid_key" },
+    });
+    expect(await stepOf(b.offerId)).toMatchObject({ title: "Trocar a chave da Kyvo", done: false });
+    expect(await stepOf(a.offerId)).toMatchObject({ done: true });
+
+    // Excluir a oferta apaga a chave dela (cascata); a das outras fica.
+    await prisma.offer.delete({ where: { id: a.offerId } });
+    expect(await prisma.paymentGateway.findMany({ select: { offerId: true } })).toEqual([{ offerId: b.offerId }]);
   });
 });
 
@@ -343,7 +400,10 @@ describe("chave recusada no “Testar conexão”", () => {
       (await getOfferReadiness({ id: o.offerId, liveUrl: null, links })).items.find((i) => i.id === "pagamento");
     expect(await step()).toMatchObject({ title: "Pagamento na página pronto", done: true });
 
-    await prisma.paymentGateway.update({ where: { provider: "KYVO" }, data: { checkStatus: "invalid_key" } });
+    await prisma.paymentGateway.update({
+      where: { offerId_provider: { offerId: o.offerId, provider: "KYVO" } },
+      data: { checkStatus: "invalid_key" },
+    });
     let plan = await exportPlan(o.offerId);
     const rejected = plan.warnings.find((w) => w.includes("recusou a chave"));
     expect(rejected).toBeDefined();
@@ -351,14 +411,17 @@ describe("chave recusada no “Testar conexão”", () => {
     expect(await step()).toMatchObject({
       title: "Trocar a chave da Kyvo",
       done: false,
-      cta: "Abrir Configurações",
-      target: { settings: "pagamentos" },
+      cta: "Abrir a conta da Kyvo",
+      target: { paymentAccount: true },
     });
     // Não vai uma chave recusada para o site: o pagamento.php responde "configuracao" em vez de cobrar.
     const { text } = await zip(o.offerId);
     expect(text(PAGAMENTO_CONFIG_FILE)).toContain("'chave' => '',");
 
-    await prisma.paymentGateway.update({ where: { provider: "KYVO" }, data: { checkStatus: "missing_scope" } });
+    await prisma.paymentGateway.update({
+      where: { offerId_provider: { offerId: o.offerId, provider: "KYVO" } },
+      data: { checkStatus: "missing_scope" },
+    });
     plan = await exportPlan(o.offerId);
     const scope = plan.warnings.find((w) => w.includes("transactions:read"));
     expect(scope).toBeDefined();
@@ -366,12 +429,18 @@ describe("chave recusada no “Testar conexão”", () => {
     expect(await step()).toMatchObject({ title: "Trocar a chave da Kyvo", done: false });
 
     // Passageiros (sem conexão, Kyvo fora do ar) não bloqueiam.
-    await prisma.paymentGateway.update({ where: { provider: "KYVO" }, data: { checkStatus: "offline" } });
+    await prisma.paymentGateway.update({
+      where: { offerId_provider: { offerId: o.offerId, provider: "KYVO" } },
+      data: { checkStatus: "offline" },
+    });
     expect(await step()).toMatchObject({ title: "Pagamento na página pronto", done: true });
 
-    await prisma.paymentGateway.update({ where: { provider: "KYVO" }, data: { checkStatus: "invalid_key" } });
+    await prisma.paymentGateway.update({
+      where: { offerId_provider: { offerId: o.offerId, provider: "KYVO" } },
+      data: { checkStatus: "invalid_key" },
+    });
     // Chave nova: o resultado do teste antigo deixa de valer.
-    await savePaymentGatewayKey("KYVO", `${KYVO_KEY}x`);
+    await savePaymentGatewayKey(o.offerId, "KYVO", `${KYVO_KEY}x`);
     expect(await step()).toMatchObject({ title: "Pagamento na página pronto", done: true });
     expect((await exportPlan(o.offerId)).warnings.some((w) => w.includes("recusou a chave"))).toBe(false);
   });

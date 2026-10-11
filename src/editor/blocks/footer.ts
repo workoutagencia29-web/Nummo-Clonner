@@ -2,8 +2,10 @@
  * Rodapé com links de Termos de uso e Política de privacidade (ligados às
  * páginas legais do funil quando existem), "Preferências de cookies" (reabre o
  * aviso de cookies da LGPD), copyright com o ano atual e o aviso legal comum
- * em ofertas brasileiras.
+ * em ofertas brasileiras. É o tipo "Rodapé" (logo opcional nas Configurações,
+ * desligado ao nascer: src/editor/widgets/footer.ts).
  */
+import { FOOTER_TYPE, FT_LOGO_ATTR } from "@/editor/widgets/footer-content";
 import { C, type Def, el, icon, type OsBlock, PROP_LEGAL, type Style, text } from "./shared";
 
 export const DISCLAIMER =
@@ -77,6 +79,7 @@ const footer = el(
       }),
     ]),
   ],
+  { type: FOOTER_TYPE, attributes: { [FT_LOGO_ATTR]: "0" } },
 );
 
 const disclaimer = text(

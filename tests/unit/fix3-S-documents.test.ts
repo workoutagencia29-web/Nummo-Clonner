@@ -5,6 +5,8 @@
  * - #19: restaurar versão só grava se ninguém salvou no meio (sem revisão repetida);
  * - #20: versões podadas e documentos excluídos não deixam arquivos no disco;
  * - #21: restaurar a "Versão original" não cria outra "Versão original".
+ * - Erro depois de gravar (disco cheio na versão automática, data da oferta):
+ *   a gravação vale e a seguinte não dá "alterada em outra aba" sem outra aba.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, readdir, rm, utimes, writeFile } from "node:fs/promises";
@@ -256,6 +258,65 @@ describe("ofertas na lixeira (#4)", () => {
 });
 
 // ─── #12 ─────────────────────────────────────────────────────────────────────
+
+describe("erro depois de gravar não vira conflito falso", () => {
+  it("disco cheio na versão automática: devolve a revisão nova e a gravação seguinte passa", async () => {
+    const { docId } = await newDoc();
+    const first = await save(docId, 0, "v1");
+    // A última versão automática ficou velha: a próxima gravação cria outra.
+    await prisma.pageVersion.updateMany({
+      where: { documentId: docId, kind: "AUTO" },
+      data: { createdAt: new Date(Date.now() - DAY) },
+    });
+    const autos = async () => (await listVersions(docId)).filter((v) => v.kind === "AUTO").length;
+    const before = await autos();
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    beforeVersionWrite.fn = async () => {
+      throw Object.assign(new Error("ENOSPC: no space left on device, write"), { code: "ENOSPC" });
+    };
+    let second: Awaited<ReturnType<typeof save>>;
+    let logged: unknown[][];
+    try {
+      second = await save(docId, first.revision, "v2");
+    } finally {
+      logged = [...errors.mock.calls];
+      errors.mockRestore();
+    }
+    expect(second.revision).toBe(first.revision + 1);
+    expect(logged).toContainEqual(["[editor] versão automática:", expect.any(Error)]);
+    expect(beforeVersionWrite.fn).toBeNull(); // a falha aconteceu mesmo
+    expect(await autos()).toBe(before);
+    expect(await versionFiles(docId)).toEqual(await versionKeys(docId));
+
+    // O editor guarda a revisão devolvida: a próxima gravação não dá conflito.
+    const third = await save(docId, second.revision, "v3");
+    expect(third.revision).toBe(second.revision + 1);
+    expect((await getEditorPayload(docId)).revision).toBe(third.revision);
+    // E o histórico volta a ser gravado.
+    expect(await autos()).toBe(before + 1);
+  });
+
+  it("erro ao atualizar a data da página/oferta: a gravação vale do mesmo jeito", async () => {
+    const { docId } = await newDoc();
+    const first = await save(docId, 0, "v1");
+    const errors = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const offerUpdate = vi
+      .spyOn(prisma.offer, "update")
+      .mockRejectedValueOnce(new Error("Can't reach database server"));
+    try {
+      const second = await save(docId, first.revision, "v2");
+      expect(second.revision).toBe(first.revision + 1);
+      expect(offerUpdate).toHaveBeenCalled();
+      expect(errors).toHaveBeenCalledWith("[editor] data de alteração da página/oferta:", expect.any(Error));
+    } finally {
+      offerUpdate.mockRestore();
+      errors.mockRestore();
+    }
+    const doc = await prisma.pageDocument.findUniqueOrThrow({ where: { id: docId } });
+    expect(doc.html).toContain("v2");
+    await expect(save(docId, first.revision + 1, "v3")).resolves.toMatchObject({ revision: first.revision + 2 });
+  });
+});
 
 describe("modo da clonagem no editor (#12)", () => {
   it("getEditorPayload informa cloneMode (EDITABLE por padrão, PRESERVE_JS nas páginas com scripts)", async () => {

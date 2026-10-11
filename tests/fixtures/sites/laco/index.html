@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Script em laço – teste de prazo</title>
+  <link rel="stylesheet" href="/estilo.css">
+</head>
+<body>
+  <h1>Página com um script que nunca termina</h1>
+  <p>Logo depois de carregar, um script desta página entra num laço sem fim e prende o navegador.
+  O clonador precisa desistir com uma mensagem clara, sem travar a fila.</p>
+  <script>
+    window.addEventListener("load", function () {
+      setTimeout(function () {
+        for (;;) {}
+      }, 50);
+    });
+  </script>
+</body>
+</html>

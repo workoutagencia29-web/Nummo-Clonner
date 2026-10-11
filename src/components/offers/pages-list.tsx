@@ -64,6 +64,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Spinner } from "@/components/ui/spinner";
 import { useAction } from "@/hooks/use-action";
 import { PAGE_TYPE_LABEL } from "@/lib/labels";
+import { DEFAULT_CURRENCY, type StoreCurrency } from "@/lib/store";
 import { cn } from "@/lib/utils";
 import { offerPreviewUrlAction } from "@/server/actions/editor";
 import {
@@ -108,11 +109,14 @@ export function PagesList({
   offerId,
   pages,
   existingFunnel = NO_FUNNEL,
+  offerCurrency = DEFAULT_CURRENCY,
 }: {
   offerId: string;
   pages: PageRow[];
   /** Páginas que já têm quiz / roleta (o funil em 1 clique avisa antes de criar outro). */
   existingFunnel?: ExistingFunnelPages;
+  /** Moeda da oferta ("Nova página" e versão A/B: modelo com preço escrito em R$ avisa em outra moeda). */
+  offerCurrency?: StoreCurrency;
 }) {
   const [items, setItems] = useState(pages);
   // id estável entre servidor e navegador (evita aviso de hidratação do dnd-kit).
@@ -223,6 +227,7 @@ export function PagesList({
         offerId={offerId}
         page={dialogPage}
         existingSlugs={items.filter((p) => p.id !== dialogPage?.id).map((p) => p.slug)}
+        offerCurrency={offerCurrency}
       />
 
       <FunnelDialog
@@ -235,7 +240,7 @@ export function PagesList({
 
       <PageSeoDialog offerId={offerId} page={seoPage} onClose={() => setSeoPage(null)} />
 
-      <VariantsDialog page={abPage} onClose={() => setAbPage(null)} />
+      <VariantsDialog page={abPage} onClose={() => setAbPage(null)} offerCurrency={offerCurrency} />
 
       <DeletePageDialog
         page={deleting}
@@ -256,9 +261,17 @@ export function PagesList({
 
 const NO_REDIRECT = "__nenhuma__";
 
+/** "“A”, “B” e mais 2" (no máximo 3 nomes). */
+function quotedNames(names: string[], max = 3) {
+  const shown = names.slice(0, max).map((n) => `“${n}”`);
+  if (names.length > shown.length) return `${shown.join(", ")} e mais ${names.length - shown.length}`;
+  return shown.length > 1 ? `${shown.slice(0, -1).join(", ")} e ${shown[shown.length - 1]}` : (shown[0] ?? "");
+}
+
 /**
  * Confirmação de exclusão. Avisa quantas outras páginas têm botões ou links que
- * levam a esta, e deixa escolher para onde eles passam a levar.
+ * levam a esta (e se ela é a página de produtos de uma vitrine), e deixa
+ * escolher para onde eles passam a levar.
  */
 function DeletePageDialog({
   page,
@@ -275,7 +288,11 @@ function DeletePageDialog({
 }) {
   const refs = useAction(pageReferencesAction);
   const runRefs = refs.run;
-  const [references, setReferences] = useState<{ count: number; pages: { id: string; name: string }[] } | null>(null);
+  const [references, setReferences] = useState<{
+    count: number;
+    pages: { id: string; name: string }[];
+    products?: { pageId: string; pageName: string; names: string[] }[];
+  } | null>(null);
   const [redirect, setRedirect] = useState(NO_REDIRECT);
   const pageId = page?.id;
 
@@ -299,6 +316,9 @@ function DeletePageDialog({
     referring.length > names.length
       ? `${names.join(", ")} e mais ${referring.length - names.length}`
       : names.join(", ");
+  // Página de produto: os cartões da vitrine que levam a ela.
+  const products = references?.products ?? [];
+  const productCount = products.reduce((n, p) => n + p.names.length, 0);
 
   return (
     <AlertDialog open={page !== null} onOpenChange={(open) => !open && onClose()}>
@@ -323,6 +343,13 @@ function DeletePageDialog({
               {references.count === 1 ? "Uma outra página tem" : `${references.count} outras páginas têm`} botões ou
               links que levam a esta página ({namesText}).
             </p>
+            {products.map((p) => (
+              <p key={p.pageId}>
+                {p.names.length === 1
+                  ? `Ela é a página do produto ${quotedNames(p.names)}, da vitrine da página “${p.pageName}”.`
+                  : `Ela é a página de ${p.names.length} produtos da vitrine da página “${p.pageName}”: ${quotedNames(p.names)}.`}
+              </p>
+            ))}
             <div className="flex flex-col gap-1.5">
               <Label htmlFor="os-delete-redirect" className="font-normal text-xs text-muted-foreground">
                 Depois de excluir, esses botões e links passam a levar para:
@@ -340,6 +367,12 @@ function DeletePageDialog({
                   ))}
                 </SelectContent>
               </Select>
+              {productCount > 0 && redirect === NO_REDIRECT && (
+                <p className="text-xs text-muted-foreground">
+                  {productCount === 1 ? "O produto fica" : "Os produtos ficam"} sem página: a vitrine avisa no editor, e
+                  dá para criar outra com “Criar as páginas que faltam”, nas Configurações da vitrine.
+                </p>
+              )}
             </div>
           </div>
         )}

@@ -114,8 +114,10 @@ async function answerQuiz(page: Page) {
 
 describe("funil em 1 clique no ZIP", () => {
   it("o ZIP não avisa de botão sem destino nem de prêmio sem link", () => {
-    // (Só o aviso dos dados da empresa, que vale para qualquer modelo.)
-    expect(warnings.filter((w) => !w.includes("{{EMPRESA}}"))).toEqual([]);
+    // (Só o aviso dos dados da empresa e o dos links de Política/Termos/Contato do rodapé, que valem para qualquer modelo.)
+    expect(
+      warnings.filter((w) => !w.includes("{{EMPRESA}}") && !w.includes("links de páginas legais e de contato")),
+    ).toEqual([]);
   });
 
   it("anúncio → quiz (raiz) → roleta → página de vendas com o desconto ganho", async () => {
@@ -148,7 +150,7 @@ describe("funil em 1 clique no ZIP", () => {
     await page.waitForURL((u) => u.pathname === `${PREFIX}principal/`);
 
     await expect.poll(() => page.locator(".os-pz").count()).toBe(1);
-    expect(await page.locator(".os-pz-msg").textContent()).toMatch(/^🎉 Você ganhou 20% OFF/);
+    expect(await page.locator(".os-pz-msg").textContent()).toBe("20% OFF liberado! Use o cupom no pagamento");
     expect(await page.locator(".os-pz-cp code").textContent()).toBe("VINTE");
     const hrefs = await page
       .locator('[data-os-link-kind="checkout"]')

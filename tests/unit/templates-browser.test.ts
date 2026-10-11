@@ -91,13 +91,27 @@ async function openOffline(html: string, width: number, height = 812) {
 }
 
 async function layoutReport(page: Page) {
-  return page.evaluate(() => {
+  return page.evaluate(async () => {
+    // Fotos com loading="lazy" (vitrines da loja) também precisam abrir: carrega todas.
+    await Promise.all(
+      Array.from(document.images).map((img) => {
+        img.loading = "eager";
+        return img.decode().catch(() => {});
+      }),
+    );
     const width = document.documentElement.clientWidth;
     const outside: string[] = [];
+    /** Dentro de uma faixa que rola para o lado (carrossel, categorias): a rolagem é dentro dela. */
+    const inScroller = (el: Element) => {
+      for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
+        if (/^(auto|scroll|hidden)$/.test(getComputedStyle(p).overflowX)) return true;
+      }
+      return false;
+    };
     for (const el of Array.from(document.body.querySelectorAll("*"))) {
       const r = el.getBoundingClientRect();
       if (!r.width && !r.height) continue;
-      if (r.right > width + 1 || r.left < -1) {
+      if ((r.right > width + 1 || r.left < -1) && !inScroller(el)) {
         outside.push(
           `${el.tagName.toLowerCase()}.${el.getAttribute("class") ?? ""} (${Math.round(r.left)}→${Math.round(r.right)})`,
         );
@@ -138,7 +152,8 @@ describe.each(cases)("modelo %s publicado", (id, html) => {
       if (state.popup !== null) expect(state.popup).toBe(false);
       if (state.notification !== null) expect(state.notification).toBe(false);
       for (const d of state.digits) expect(d).toMatch(/^\d{2}$/);
-      expect(Number.parseFloat(state.h1)).toBeGreaterThanOrEqual(26);
+      // Na página do produto, o h1 é o nome do produto (tamanho de marketplace).
+      expect(Number.parseFloat(state.h1)).toBeGreaterThanOrEqual(id === "produto" ? 20 : 26);
       // Dá tempo para qualquer script terminar antes de conferir os erros.
       await page.waitForTimeout(150);
       expect(problems, id).toEqual([]);
@@ -177,6 +192,10 @@ interface CanvasResult {
   notification: { display: string; label: string } | null;
   placeholder: string | null;
   videoTag: string | null;
+  /** Fundo de cada texto provisório da página do produto (.os-pp-todo), no canvas. */
+  todo: string[];
+  /** Selo do canvas no "‹ Voltar para a loja" (null = a página não tem). */
+  back: string | null;
 }
 
 /** Abre o documento (já convertido por htmlForEditor) no GrapesJS e devolve o que o editor salvaria. */
@@ -246,6 +265,11 @@ async function roundTripInEditor(editorHtml: string) {
         notification: widget('[data-os-widget="sales-notification"]'),
         placeholder: ph ? view.getComputedStyle(ph).backgroundColor : null,
         videoTag: video?.firstElementChild?.tagName ?? null,
+        todo: Array.from(doc.querySelectorAll(".os-pp-todo")).map((el) => view.getComputedStyle(el).backgroundColor),
+        back: (() => {
+          const el = doc.querySelector("a[data-os-pd-back]");
+          return el ? view.getComputedStyle(el, "::after").content : null;
+        })(),
       };
     }, editorHtml);
     return { result, errors };
@@ -313,9 +337,16 @@ describe.each(cases)("modelo %s no editor", (id, html) => {
     expect(tagCounts(saved)).toEqual(tagCounts(html));
     expect($saved("title").text()).toBe(cheerio.load(html)("title").text());
     expect($saved('meta[name="viewport"]')).toHaveLength(1);
-    // Os estilos do modelo continuam na folha base: o editor não criou regras por id.
-    expect(result.css).not.toMatch(/#[a-z][\w-]*\s*\{/i);
-    expect($saved("[style]")).toHaveLength(0);
+    // Os estilos do modelo continuam na folha base: o editor não criou regras por id —
+    // só as das vitrines da loja que têm cores próprias (como num bloco solto).
+    const widgetIds = new Set(
+      $saved("[data-os-widget][id]")
+        .map((_, el) => $saved(el).attr("id"))
+        .get(),
+    );
+    for (const m of result.css.matchAll(/#([a-z][\w-]*)\s*\{/gi)) expect(widgetIds.has(m[1]), m[0]).toBe(true);
+    // Estilo no HTML salvo só dentro das partes geradas (estrelas com a largura da nota).
+    expect($saved("[style]").not("[data-os-pd-part] *")).toHaveLength(0);
 
     // No canvas, os widgets aparecem no estado final e os dados a trocar ficam destacados.
     if (result.popup) {
@@ -328,5 +359,12 @@ describe.each(cases)("modelo %s no editor", (id, html) => {
     }
     if (result.placeholder) expect(result.placeholder).toBe("rgb(254, 240, 138)");
     if (id === "vsl") expect(result.videoTag).not.toBe("IFRAME");
+    if (id === "produto") {
+      // Todos os textos provisórios em amarelo, também os das linhas pares da tabela.
+      expect(result.todo.length).toBeGreaterThanOrEqual(10);
+      expect(new Set(result.todo)).toEqual(new Set(["rgb(254, 249, 195)"]));
+      // Sem a página da loja (logo e "Voltar" sem destino): o "Voltar" avisa.
+      expect(result.back).toMatch(/^"Escolha a página da loja nas Configurações do cabeçalho/);
+    }
   }, 60_000);
 });
