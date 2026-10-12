@@ -38,7 +38,7 @@ export interface CheckoutOrderProduct {
   currency: CheckoutCurrencyId;
   methods: CheckoutMethodId[];
   amountCents: number;
-  config: Pick<CheckoutConfig, "fields" | "address" | "shipping" | "bumps">;
+  config: Pick<CheckoutConfig, "fields" | "address" | "shipping" | "bumps" | "maxQuantity">;
 }
 
 /** Quem compra, já limpo (só os dados pedidos). */
@@ -98,9 +98,11 @@ export function checkCheckoutOrder(req: CheckoutCreateRequest, p: CheckoutOrderP
       bumps: p.config.bumps.map((b) => ({ id: b.id, valor: b.priceCents })),
       fretes: p.config.shipping.map((s) => ({ id: s.id, valor: s.priceCents })),
       endereco: address,
+      maxQtd: p.config.maxQuantity,
     },
     req.bumps,
     address ? req.frete : null,
+    req.quantidade,
   );
   if (!total) return { ok: false, erro: "invalido" };
   if (checkoutAmountProblem(total.total, p.provider, p.currency, [method])) return { ok: false, erro: "configuracao" };

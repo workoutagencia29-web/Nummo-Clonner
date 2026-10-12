@@ -116,7 +116,7 @@ export interface CheckoutProductInput extends CheckoutProductBase {
 function maxTotal(amountCents: number, config: CheckoutConfig): number {
   const bumps = config.bumps.reduce((n, b) => n + b.priceCents, 0);
   const shipping = config.address ? Math.max(0, ...config.shipping.map((s) => s.priceCents)) : 0;
-  return amountCents + bumps + shipping;
+  return amountCents * Math.max(1, config.maxQuantity) + bumps + shipping;
 }
 
 /** Erro do primeiro problema (com o campo, para o formulário pôr o foco). */
@@ -159,9 +159,16 @@ export async function saveCheckoutProduct(linkId: string, input: CheckoutProduct
   const total = maxTotal(amountCents, config);
   const totalProblem = checkoutAmountProblem(total, input.provider, currency, input.methods);
   if (totalProblem && total !== amountCents) {
+    // O maior total possível: a maior quantidade do produto + todos os bumps + o frete mais caro.
+    const parts = [
+      config.maxQuantity > 1 ? `${config.maxQuantity} unidades` : "",
+      config.bumps.length ? "todos os order bumps" : "",
+      config.address ? "o frete mais caro" : "",
+    ].filter(Boolean);
+    const list = parts.length <= 1 ? parts[0] : `${parts.slice(0, -1).join(", ")} e ${parts.at(-1)}`;
     throw new UserError(
-      `Com todos os order bumps${config.address ? " e o frete mais caro" : ""}, o total fica em ${formatAmount(total, currency)}: ${totalProblem.charAt(0).toLowerCase()}${totalProblem.slice(1)}`,
-      config.bumps.length ? "bumps" : "shipping",
+      `Com ${list}, o total fica em ${formatAmount(total, currency)}: ${totalProblem.charAt(0).toLowerCase()}${totalProblem.slice(1)}`,
+      config.maxQuantity > 1 ? "maxQuantity" : config.bumps.length ? "bumps" : "shipping",
     );
   }
   const foreign = await foreignImages(link.offerId, config, db);

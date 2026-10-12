@@ -160,6 +160,13 @@ export interface CheckoutFixedTexts {
   /** Selo do topo ("Pagamento seguro"). */
   secure: string;
   chooseShipping: string;
+  /** Placeholder do frete antes do CEP ("Preencha seu CEP para encontrar o melhor frete"). */
+  cepForShipping: string;
+  cepForShippingHint: string;
+  /** Seletor de quantidade (rótulos para leitores de tela). */
+  quantity: string;
+  qtyLess: string;
+  qtyMore: string;
   cepSearching: string;
   optional: string;
   fixErrors: string;
@@ -231,7 +238,12 @@ const FIXED: Record<CheckoutLang, CheckoutFixedTexts> = {
     unavailable: "Pagamento indisponível no momento. Tente de novo em alguns minutos.",
     tryAgain: "Tentar de novo",
     secure: "Pagamento seguro",
-    chooseShipping: "Escolha o frete",
+    chooseShipping: "Escolha o melhor frete para você",
+    cepForShipping: "Preencha seu CEP para encontrar o melhor frete",
+    cepForShippingHint: "Após preenchido, encontraremos as melhores opções pra você",
+    quantity: "Quantidade",
+    qtyLess: "Diminuir a quantidade",
+    qtyMore: "Aumentar a quantidade",
     cepSearching: "Buscando o endereço…",
     optional: "opcional",
     fixErrors: "Confira os campos marcados em vermelho.",
@@ -296,7 +308,12 @@ const FIXED: Record<CheckoutLang, CheckoutFixedTexts> = {
     unavailable: "Pago no disponible en este momento. Inténtalo de nuevo en unos minutos.",
     tryAgain: "Intentar de nuevo",
     secure: "Pago seguro",
-    chooseShipping: "Elige el envío",
+    chooseShipping: "Elige el mejor envío para ti",
+    cepForShipping: "Introduce tu código postal para ver el mejor envío",
+    cepForShippingHint: "Al completarlo, te mostramos las mejores opciones",
+    quantity: "Cantidad",
+    qtyLess: "Disminuir la cantidad",
+    qtyMore: "Aumentar la cantidad",
     cepSearching: "Buscando la dirección…",
     optional: "opcional",
     fixErrors: "Revisa los campos marcados en rojo.",
@@ -361,7 +378,12 @@ const FIXED: Record<CheckoutLang, CheckoutFixedTexts> = {
     unavailable: "Payment unavailable right now. Please try again in a few minutes.",
     tryAgain: "Try again",
     secure: "Secure payment",
-    chooseShipping: "Choose shipping",
+    chooseShipping: "Choose the best shipping for you",
+    cepForShipping: "Enter your ZIP code to find the best shipping",
+    cepForShippingHint: "Once filled in, we'll show you the best options",
+    quantity: "Quantity",
+    qtyLess: "Decrease quantity",
+    qtyMore: "Increase quantity",
     cepSearching: "Looking up the address…",
     optional: "optional",
     fixErrors: "Please check the fields marked in red.",

@@ -62,6 +62,7 @@ export const CHECKOUT_SIM_TEXTS = {
   expireSpei: SIM_TEXTS.expire,
   note: "Prévia do Offer Studio: este PIX é de exemplo (nenhum banco consegue pagar). Simule o resultado:",
   noteKyvo: "Prévia do Offer Studio: nada é cobrado e estes dados são de exemplo. Simule o resultado:",
+  realNote: SIM_TEXTS.realNote,
   noThanks: SIM_TEXTS.noThanks,
   documentPreview:
     "Na prévia de uma página só, o checkout não vai para a página de obrigado. Use “Ver página” da oferta ou “Ver checkout” em Links e checkouts.",
@@ -428,6 +429,18 @@ export function createFlow(
     return wrap;
   }
 
+  /** Aviso de pagamento REAL na prévia (chave do gateway salva): para você, em pt-BR. */
+  function realNote() {
+    return make("p", "osc-sim", CHECKOUT_SIM_TEXTS.realNote);
+  }
+
+  /** Simular (prévia) OU avisar que o pagamento é real (prévia com chave salva). */
+  function previewExtra(list: [string, "pago" | "recusado" | "expirado"][]): Node | null {
+    if (order?.simulacao) return simButtons(list);
+    if (cfg.testeReal) return realNote();
+    return null;
+  }
+
   function waiting(text: string) {
     const p = make("p", "osc-wait");
     p.setAttribute("role", "status");
@@ -447,7 +460,7 @@ export function createFlow(
               ? fx.declined
               : fx.unavailable;
     // Na prévia, o código ajuda você a achar o problema (o comprador nunca vê).
-    return sim ? `${msg} (Prévia: o servidor de pagamento respondeu “${code}”.)` : msg;
+    return sim || cfg.testeReal ? `${msg} (Prévia: o servidor de pagamento respondeu “${code}”.)` : msg;
   }
 
   // ── Cobrança ───────────────────────────────────────────────────────────
@@ -489,6 +502,7 @@ export function createFlow(
       metodo: metodo,
       nome: buyer.nome,
       email: buyer.email,
+      quantidade: form.qtd(),
       bumps: bumps,
       frete: frete,
       metadata: meta,
@@ -580,15 +594,12 @@ export function createFlow(
       nodes.push(exp);
     }
     nodes.push(make("p", "osc-steps", fx.pixSteps), waiting(fx.pixWaiting), changeButton(false));
-    if (o.simulacao) {
-      nodes.push(
-        simButtons([
-          [CHECKOUT_SIM_TEXTS.approve, "pago"],
-          [CHECKOUT_SIM_TEXTS.decline, "recusado"],
-          [CHECKOUT_SIM_TEXTS.expire, "expirado"],
-        ]),
-      );
-    }
+    const extra = previewExtra([
+      [CHECKOUT_SIM_TEXTS.approve, "pago"],
+      [CHECKOUT_SIM_TEXTS.decline, "recusado"],
+      [CHECKOUT_SIM_TEXTS.expire, "expirado"],
+    ]);
+    if (extra) nodes.push(extra);
     show(nodes, copy);
     announce(fx.pixWaiting);
     if (pix.expiraEm) startClock(o, pix.expiraEm, clock, exp);
@@ -662,14 +673,11 @@ export function createFlow(
     if (until) rows.appendChild(copyRow(pt.expires, until, null));
     const nodes: Node[] = [heading(pt.methods.spei[0]), amount, make("p", "osc-note", pt.speiIntro), rows];
     nodes.push(waiting(pt.waitSpei), make("p", "osc-note", pt.waitNote), changeButton(true));
-    if (o.simulacao) {
-      nodes.push(
-        simButtons([
-          [CHECKOUT_SIM_TEXTS.approve, "pago"],
-          [CHECKOUT_SIM_TEXTS.expireSpei, "expirado"],
-        ]),
-      );
-    }
+    const extra = previewExtra([
+      [CHECKOUT_SIM_TEXTS.approve, "pago"],
+      [CHECKOUT_SIM_TEXTS.expireSpei, "expirado"],
+    ]);
+    if (extra) nodes.push(extra);
     show(nodes, rows.querySelector<HTMLElement>("button"));
     announce(pt.waitSpei);
   }
@@ -691,6 +699,8 @@ export function createFlow(
           [CHECKOUT_SIM_TEXTS.decline, "recusado"],
         ]),
       );
+    } else if (cfg.testeReal) {
+      nodes.push(realNote());
     }
     const change = changeLink();
     if (change) nodes.push(change);

@@ -704,6 +704,27 @@ export function CheckoutProductForm({
           error={errors.image}
           shape="square"
         />
+        <Field className="sm:max-w-xs">
+          <FieldLabel htmlFor={f("maxQuantity")}>Quantidade máxima por compra</FieldLabel>
+          <Input
+            id={f("maxQuantity")}
+            type="number"
+            inputMode="numeric"
+            min={1}
+            max={CHECKOUT_LIMITS.quantityMax}
+            value={config.maxQuantity}
+            onChange={(e) => {
+              const n = Math.round(Number(e.target.value));
+              patchConfig({
+                maxQuantity: Number.isFinite(n) ? Math.min(Math.max(n, 1), CHECKOUT_LIMITS.quantityMax) : 1,
+              });
+            }}
+          />
+          <FieldDescription>
+            O comprador escolhe de 1 até esse número (com um seletor “− 1 +” no resumo). Deixe em 1 para não mostrar o
+            seletor.
+          </FieldDescription>
+        </Field>
         <div className="grid gap-4 sm:grid-cols-2">
           <Field data-invalid={Boolean(errors.thankYouPageId)}>
             <FieldLabel htmlFor={f("thankYouPageId")}>Página de obrigado</FieldLabel>

@@ -30,12 +30,15 @@ import { saveCheckoutProduct } from "@/server/services/checkout/products";
 import { createOfferLink } from "@/server/services/offer-links";
 import { createOffer } from "@/server/services/offers";
 import { createPage } from "@/server/services/pages";
+import { savePaymentGatewayKey } from "@/server/services/payments/gateways";
 import { resetDatabase } from "../setup/per-file";
+import { FAKE_PIX_CODE, type FakePix, FLEVO_KEY, startFakeFlevopay } from "./pix-fakes";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const SHOTS = process.env.OS_CHECKOUT_SHOTS ?? "";
 let port = 0;
 let child: ChildProcess | null = null;
+let flevo: FakePix;
 let output = "";
 let browser: Browser;
 
@@ -53,10 +56,12 @@ function freePort() {
 beforeAll(async () => {
   expect(process.env.DATABASE_URL).toMatch(/\/offerstudio_test_\d+$/);
   if (SHOTS) mkdirSync(SHOTS, { recursive: true });
+  // FlevoPay FALSA: o processo da prévia cobra nela quando a oferta tem a chave salva.
+  flevo = await startFakeFlevopay();
   port = await freePort();
   child = spawn(path.join(ROOT, "node_modules/.bin/tsx"), ["src/preview/server.ts"], {
     cwd: ROOT,
-    env: { ...process.env, PREVIEW_PORT: String(port) },
+    env: { ...process.env, PREVIEW_PORT: String(port), OS_FLEVOPAY_API_BASE: flevo.base },
     stdio: ["ignore", "pipe", "pipe"],
   });
   child.stdout?.on("data", (c) => {
@@ -76,6 +81,7 @@ beforeAll(async () => {
 afterAll(async () => {
   await browser?.close();
   child?.kill("SIGTERM");
+  await flevo?.close();
 });
 
 beforeEach(async () => {
@@ -178,7 +184,7 @@ async function brlOffer() {
     config,
   });
   const token = await createPreviewToken({ kind: "offer", offerId: offer.id });
-  return { key: link.key, thanksId: thanks.id, base: `http://${token}.localhost:${port}` };
+  return { offerId: offer.id, key: link.key, thanksId: thanks.id, base: `http://${token}.localhost:${port}` };
 }
 
 async function mxnOffer() {
@@ -326,7 +332,13 @@ describe("página de checkout na prévia (PIX)", () => {
       await fillBuyer(page);
       expect(await page.locator("#osc-telefone").inputValue()).toBe("(11) 98765-4321");
       expect(await page.locator("#osc-documento").inputValue()).toBe("529.982.247-25");
+      // Entrega: no começo só o CEP; rua/bairro/cidade/UF escondidos e o frete pedindo o CEP.
+      expect(await page.locator("#osc-cep").isVisible()).toBe(true);
+      expect(await page.locator("#osc-rua").isVisible()).toBe(false);
+      expect(await page.locator("[data-osc-ship-empty]").isVisible()).toBe(true);
       await fillAddress(page);
+      // Depois do CEP, os campos de endereço aparecem (preenchidos pela BrasilAPI).
+      expect(await page.locator("#osc-rua").isVisible()).toBe(true);
       expect(await page.locator("#osc-bairro").inputValue()).toBe("Bela Vista");
       expect(await page.locator("#osc-cidade").inputValue()).toBe("São Paulo");
       expect(await page.locator("#osc-uf").inputValue()).toBe("SP");
@@ -341,7 +353,12 @@ describe("página de checkout na prévia (PIX)", () => {
       expect(await text(page, "[data-osc-pay-amount]")).toBe("R$ 303,80");
       expect(
         (await page.locator("[data-osc-lines] li").allTextContents()).map((t) => t.replace(/\u00a0/g, " ")),
-      ).toEqual(["Apostila de receitas (PDF)R$ 27,00", "Mentoria ao vivoR$ 49,90", "FreteR$ 29,90"]);
+      ).toEqual([
+        "SubtotalR$ 273,90",
+        "Apostila de receitas (PDF)R$ 27,00",
+        "Mentoria ao vivoR$ 49,90",
+        "FreteR$ 29,90",
+      ]);
       // Desmarcar um bump tira do total.
       await page.locator(".osc-bump", { hasText: "Mentoria" }).click();
       await expect.poll(() => text(page, "[data-osc-total]")).toBe("R$ 253,90");
@@ -374,6 +391,7 @@ describe("página de checkout na prévia (PIX)", () => {
         "metadata",
         "metodo",
         "nome",
+        "quantidade",
         "telefone",
       ]);
       expect(await text(page, ".osc-amount")).toContain("R$ 253,90");
@@ -425,6 +443,72 @@ describe("página de checkout na prévia (PIX)", () => {
       await s.close();
     }, 90_000);
   }
+
+  it("quantidade muda o subtotal e o total; o frete só aparece depois do CEP", async () => {
+    const o = await brlOffer();
+    const s = await open(`${o.base}/checkout/${o.key}`);
+    const { page } = s;
+    const read = (sel: string) =>
+      page.evaluate((x) => (document.querySelector(x)?.textContent ?? "").replace(/\u00a0/g, " "), sel);
+    const shown = (sel: string) =>
+      page.evaluate((x) => (document.querySelector(x) as HTMLElement | null)?.offsetParent != null, sel);
+    await expect.poll(() => read("[data-osc-qtd]")).toBe("1");
+    // Sem o CEP, o frete fica escondido e o aviso "Preencha seu CEP…" aparece.
+    expect(await shown("[data-osc-ship-empty]")).toBe(true);
+    expect(await shown("[data-osc-ship]")).toBe(false);
+    expect(await read("[data-osc-subtotal]")).toBe("R$ 197,00");
+    expect(await read("[data-osc-total]")).toBe("R$ 197,00");
+    // "+" leva a 2 unidades: subtotal e total dobram.
+    await page.locator('[data-osc-qty="+"]').click();
+    await expect.poll(() => read("[data-osc-qtd]")).toBe("2");
+    await expect.poll(() => read("[data-osc-subtotal]")).toBe("R$ 394,00");
+    await expect.poll(() => read("[data-osc-total]")).toBe("R$ 394,00");
+    // "-" volta para 1.
+    await page.locator('[data-osc-qty="-"]').click();
+    await expect.poll(() => read("[data-osc-qtd]")).toBe("1");
+    // CEP preenchido: o frete aparece (e some o aviso).
+    await page.locator("#osc-cep").pressSequentially("01310100");
+    await expect.poll(() => shown("[data-osc-ship]")).toBe(true);
+    expect(await shown("[data-osc-ship-empty]")).toBe(false);
+    await shot(page, "quantidade-e-frete");
+    expect(s.errors).toEqual([]);
+    await s.close();
+  }, 90_000);
+
+  it("autocomplete de e-mail e ✓ de válido (menos fricção)", async () => {
+    const o = await brlOffer();
+    const s = await open(`${o.base}/checkout/${o.key}`);
+    const { page } = s;
+    const okClass = (sel: string) =>
+      page.locator(sel).evaluate((el) => el.closest(".osc-f")?.classList.contains("osc-valid") ?? false);
+
+    // Autocomplete: digita o começo do domínio e aparecem as sugestões.
+    await page.locator("#osc-email").click();
+    await page.locator("#osc-email").pressSequentially("maria@g");
+    await expect.poll(() => page.locator(".osc-ac-i").first().textContent()).toBe("maria@gmail.com");
+    await shot(page, "email-autocomplete");
+    await page.locator(".osc-ac-i", { hasText: "maria@gmail.com" }).click();
+    expect(await page.locator("#osc-email").inputValue()).toBe("maria@gmail.com");
+    // A sugestão escolhida é um e-mail válido → ganha o ✓.
+    await expect.poll(() => okClass("#osc-email")).toBe(true);
+
+    // CPF válido ganha o ✓; inválido não.
+    await page.locator("#osc-documento").pressSequentially("52998224725");
+    await expect.poll(() => okClass("#osc-documento")).toBe(true);
+    await page.locator("#osc-documento").fill("");
+    await page.locator("#osc-documento").pressSequentially("11111111111");
+    expect(await okClass("#osc-documento")).toBe(false);
+
+    // Telefone válido ganha o ✓.
+    await page.locator("#osc-telefone").pressSequentially("11987654321");
+    await expect.poll(() => okClass("#osc-telefone")).toBe(true);
+    await page.locator("#osc-nome").fill("Maria da Silva");
+    await page.locator("#osc-documento").fill("");
+    await page.locator("#osc-documento").pressSequentially("52998224725");
+    await shot(page, "campos-validos");
+    expect(s.errors).toEqual([]);
+    await s.close();
+  }, 60_000);
 
   it("PIX expirado → novo PIX; recusado → tentar de novo; CEP não encontrado deixa digitar", async () => {
     const o = await brlOffer();
@@ -504,6 +588,39 @@ describe("página de checkout na prévia (Kyvo)", () => {
     ]);
     expect(events[4]).toMatchObject({ value: 497, currency: "MXN" });
     expect(s.outside).toEqual([]);
+    expect(s.errors).toEqual([]);
+    await s.close();
+  }, 60_000);
+});
+
+describe("prévia com pagamento real (chave do gateway salva)", () => {
+  it("FlevoPay: PIX de verdade, sem botões de simular, pago → página de obrigado", async () => {
+    const o = await brlOffer();
+    await savePaymentGatewayKey(o.offerId, "FLEVOPAY", FLEVO_KEY);
+    const s = await open(`${o.base}/checkout/${o.key}`);
+    const { page } = s;
+    await expect.poll(() => text(page, "[data-osc-total]")).toBe("R$ 197,00");
+    await fillBuyer(page);
+    await fillAddress(page);
+    await page.locator("[data-osc-pay]").click();
+    await expect.poll(() => page.locator("[data-osc-flow]").isVisible()).toBe(true);
+    // O PIX é o de verdade do gateway (não o de exemplo da simulação).
+    await expect.poll(() => page.locator(".osc-code input").inputValue()).toBe(FAKE_PIX_CODE);
+    // Nada de botões de simular; e o aviso de pagamento REAL para você.
+    expect(await page.getByRole("button", { name: "Simular pagamento aprovado" }).count()).toBe(0);
+    expect(await text(page, "[data-osc-flow] .osc-sim")).toContain("pagamento REAL");
+    await shot(page, "computador-real-pix");
+
+    // Pago no banco (gateway falso) → a prévia confirma pela API e vai ao obrigado.
+    const gid = [...flevo.transactions.keys()].sort((a, b) => Number(b) - Number(a))[0];
+    expect(gid).toBeTruthy();
+    flevo.setStatus(gid, "approved");
+    await expect
+      .poll(() => page.locator("[data-osc-flow] h2").textContent(), { timeout: 10_000 })
+      .toBe("Pagamento aprovado!");
+    await page.waitForURL(new RegExp(`/p/${o.thanksId}$`), { timeout: 10_000 });
+    await expect.poll(() => page.locator("[data-os-ac-go]").isVisible(), { timeout: 10_000 }).toBe(true);
+    expect(await page.locator("[data-os-ac-go]").getAttribute("href")).toBe(PRODUCT_ACCESS);
     expect(s.errors).toEqual([]);
     await s.close();
   }, 60_000);

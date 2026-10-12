@@ -1,10 +1,11 @@
 /**
  * Worker do Offer Studio: processo separado do painel que executa o trabalho
- * pesado. Três filas, cada uma fazendo uma coisa por vez — as filas são as
- * próprias tabelas do banco, lidas aqui a cada segundo:
- * - clonagens (tabela CloneJob) e, com a fila vazia, a limpeza automática dos
- *   arquivos de clonagens antigas (ao iniciar e a cada 6 horas);
- * - ZIPs do "Baixar ZIP" (tabela Export), com a limpeza dos ZIPs antigos;
+ * pesado. Três filas — as filas são as próprias tabelas do banco, lidas aqui
+ * a cada segundo:
+ * - clonagens (tabela CloneJob), até CLONE_SLOTS ao mesmo tempo, e, com a fila
+ *   vazia, a limpeza automática dos arquivos de clonagens antigas (ao iniciar e
+ *   a cada 6 horas);
+ * - ZIPs do "Baixar ZIP" (tabela Export), um por vez, com a limpeza dos ZIPs antigos;
  * - backups (tabela Backup: "Fazer backup agora" e o automático diário) e
  *   restaurações (tabela BackupRestore), que pausam as outras duas filas.
  * Registra sinal de vida a cada 10 s, que o painel mostra em Configurações.
@@ -52,38 +53,63 @@ async function heartbeat() {
   });
 }
 
-/** Busca a próxima clonagem da fila e executa; repete até o processo parar. */
-async function cloneLoop() {
+/**
+ * Clonagens ao mesmo tempo. Clonar o funil inteiro põe muitas páginas na fila
+ * (quiz, roleta, loja, cada produto…); com uma de cada vez, uma loja de 20
+ * produtos levaria meia hora. Cada vaga abre o próprio Chromium.
+ */
+const CLONE_SLOTS = Math.min(6, Math.max(1, Number(process.env.OS_CLONE_SLOTS) || 3));
+let cloneBusy = 0;
+/** Limpeza automática rodando: nenhuma vaga pega clonagem nova até ela acabar. */
+let cleaning = false;
+
+function setCloneBusy(delta: number) {
+  cloneBusy += delta;
+  workerState.cloning = cloneBusy > 0;
+}
+
+/** Uma vaga de clonagem: busca a próxima da fila e executa; repete até o processo parar. */
+async function cloneSlot(slot: number) {
   while (!stopping) {
-    let jobId: string | null = null;
-    // Restauração de backup em andamento: nada de pegar clonagens nem limpar arquivos.
-    if (isPaused()) {
+    // Restauração de backup em andamento (ou limpeza): nada de pegar clonagens.
+    if (isPaused() || cleaning) {
       await new Promise((r) => setTimeout(r, POLL_MS));
       continue;
     }
+    let jobId: string | null = null;
     // Ocupado desde já: a restauração não pode começar entre olhar a pausa e pegar a clonagem.
-    workerState.cloning = true;
+    setCloneBusy(1);
     try {
       // Resultados que não puderam ser gravados (banco fora do ar por um instante).
-      await settlePendingJobs();
+      if (slot === 0) await settlePendingJobs();
       jobId = await claimNextJob();
       if (jobId) {
         console.log(`[worker] clonando ${jobId}`);
         await runCloneJob(jobId);
-        workerState.cloning = false;
         continue;
       }
-      // Fila vazia: hora de apagar arquivos de clonagens antigas (nunca lança erro).
-      await cleanup.runIfDue();
-      workerState.cloning = false;
+      // Fila vazia e nenhuma outra vaga trabalhando: hora de apagar arquivos de clonagens antigas.
+      if (cloneBusy === 1 && !cleaning) {
+        cleaning = true;
+        try {
+          await cleanup.runIfDue();
+        } finally {
+          cleaning = false;
+        }
+      }
     } catch (err) {
-      workerState.cloning = false;
       console.error("[worker] erro na fila de clonagem:", err);
       // Clonagem já pega da fila não pode ficar "rodando" para sempre.
       if (jobId) deferJobFailure(jobId);
+    } finally {
+      setCloneBusy(-1);
     }
     await new Promise((r) => setTimeout(r, POLL_MS));
   }
+}
+
+async function cloneLoop() {
+  await Promise.all(Array.from({ length: CLONE_SLOTS }, (_, i) => cloneSlot(i)));
 }
 
 async function main() {

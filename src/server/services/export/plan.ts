@@ -4,6 +4,7 @@
  */
 import * as cheerio from "cheerio";
 import { ZIP_CHECKOUT_DIR } from "@/lib/checkout/contract";
+import { offerRoutes } from "@/lib/clone-routes";
 import { prisma } from "@/lib/db";
 import { zipCheckoutDir } from "@/lib/export/checkout-pages";
 import { type Layout, layoutTree, planLayout } from "@/lib/export/layout";
@@ -20,6 +21,7 @@ import {
 import { ASSETS_DIR } from "@/lib/export/paths";
 import { PAGAMENTO_CONFIG_FILE, PAGAMENTO_FILE, PAGAMENTO_HTACCESS_FILE } from "@/lib/export/payment-php";
 import { EVENTOS_CONFIG_FILE, EVENTOS_FILE, HTACCESS_FILE } from "@/lib/export/php";
+import { planRouteRedirects, type RouteRedirect } from "@/lib/export/routes";
 import {
   COMPANY_MARKER_FIELD,
   checkoutHostingWarning,
@@ -152,6 +154,12 @@ export interface PlanContext {
   payment: PaymentExport | null;
   /** Páginas de checkout do Offer Studio no ZIP ("checkout/<chave>/index.html"). */
   checkoutPages: string[];
+  /**
+   * Funil clonado "Com scripts": index.html nos caminhos originais das páginas
+   * que ficaram em outra pasta ("produto/camiseta/" → "camiseta/"), só nos
+   * caminhos livres (src/lib/export/routes.ts).
+   */
+  redirects: RouteRedirect[];
   warnings: string[];
   tree: ExportTreeItem[];
 }
@@ -218,6 +226,20 @@ export function planFrom(
   const preserve: PreservePlan = preservePages.length
     ? planPreserveFiles(source, layout, reservedZipPaths(layout, [SCRIPT_PLACEHOLDER, ...checkoutPages]))
     : { entries: [], collisions: [], blocked: [] };
+  // Por último (nunca no lugar de outro arquivo): os caminhos originais das páginas
+  // do funil clonado, que o JavaScript das páginas "Com scripts" ainda usa.
+  const redirects = preservePages.length
+    ? planRouteRedirects(
+        offerRoutes(source.pages),
+        source.pages,
+        layout.pageDirs,
+        [
+          ...reservedZipPaths(layout, [SCRIPT_PLACEHOLDER, ...checkoutPages]),
+          ...preserve.entries.map((e) => e.zipPath),
+        ],
+        checkoutPages.length ? [checkoutRoot] : [],
+      )
+    : [];
   if (preserve.collisions.length) {
     const list = preserve.collisions.slice(0, 3).join(", ");
     warnings.push(
@@ -279,6 +301,7 @@ export function planFrom(
     preserve,
     payment,
     checkoutPages,
+    redirects,
     warnings,
     tree,
   };

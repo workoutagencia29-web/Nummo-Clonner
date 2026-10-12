@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; connect-src 'self'; script-src 'self' 'unsafe-inline'">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Loja CSP</title>
+</head>
+<body>
+  <main><img src="/logo.svg" alt="Loja" width="120" height="32"><h1>Ofertas</h1><p>Entrega: <strong id="endereco">—</strong></p></main>
+  <div id="overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center">
+    <div style="background:#fff;padding:24px;border-radius:12px"><h2>Informe seu CEP</h2><input id="cep" placeholder="CEP"><button id="ok" type="button">Confirmar</button></div>
+  </div>
+  <script>
+    document.getElementById("ok").addEventListener("click", function () {
+      var cep = (document.getElementById("cep").value || "").replace(/\D/g, "");
+      if (cep.length !== 8) return;
+      fetch("https://viacep.com.br/ws/" + cep + "/json/").then(function (r) { return r.json(); }).then(function (d) {
+        if (d.erro) return;
+        document.getElementById("endereco").textContent = d.logradouro + " — " + d.localidade + "/" + d.uf;
+        document.getElementById("overlay").style.display = "none";
+      });
+    });
+  </script>
+</body>
+</html>

@@ -11,8 +11,8 @@
  *   pasta como a hospedagem; criar (SPEI, cartão, Bizum, MB WAY), status e
  *   acesso com os mesmos contratos da prévia; valor e moeda só do config.php;
  *   pedido os_<código>_<20> = Idempotency-Key; metadata filtrada + ip/ua;
- *   origem, tamanho, campos, método × moeda, produto sem link de acesso,
- *   erros da Kyvo traduzidos (nunca crus), nova tentativa com a mesma
+ *   origem, tamanho, campos, método × moeda, produto sem link de acesso (cobra
+ *   normal: o link é opcional), erros da Kyvo traduzidos (nunca crus), nova tentativa com a mesma
  *   Idempotency-Key, Kyvo fora do ar, limites por IP em pagamento-dados/, envio
  *   sem cURL (allow_url_fopen) e a chave nunca numa resposta.
  */
@@ -344,12 +344,17 @@ describe.skipIf(!PHP)("pagamento.php no PHP de verdade (Kyvo falsa)", () => {
     expect((await post({ acao: "criar", produto: `${"a".repeat(75)}-2`, metodo: "spei", ...buyer })).json.erro).toBe(
       "produto_desconhecido",
     );
-    // Sem link de acesso: não cobra.
-    expect(await post({ acao: "criar", produto: "sem-acesso", metodo: "spei", ...buyer })).toEqual({
-      status: 503,
-      json: { ok: false, erro: "configuracao" },
-    });
     expect(kyvo.requests.length).toBe(before);
+  });
+
+  it("produto sem link de acesso: a cobrança funciona normal (link de acesso é opcional)", async () => {
+    // Muita venda high-ticket não tem entregável por link (a entrega é por fora): não pode exigir
+    // o link só para cobrar.
+    const before = kyvo.requests.length;
+    const r = await post({ acao: "criar", produto: "sem-acesso", metodo: "spei", ...buyer });
+    expect(r.status).toBe(201);
+    expect(r.json).toMatchObject({ ok: true, metodo: "spei" });
+    expect(kyvo.requests.length).toBeGreaterThan(before);
   });
 
   it("pedidos inválidos, outra origem, corpo grande e a ação da prévia", async () => {

@@ -29,6 +29,39 @@ import type { CheckoutItem } from "./store";
 export const BRASIL_API_CEP = "https://brasilapi.com.br/api/cep/v2/";
 const CEP_TIMEOUT_MS = 6000;
 
+/** Domínios de e-mail sugeridos (os mais comuns no Brasil), em ordem de uso. */
+export const EMAIL_DOMAINS = [
+  "gmail.com",
+  "hotmail.com",
+  "outlook.com",
+  "yahoo.com.br",
+  "yahoo.com",
+  "icloud.com",
+  "hotmail.com.br",
+  "bol.com.br",
+  "uol.com.br",
+  "live.com",
+  "terra.com.br",
+  "globo.com",
+];
+
+/**
+ * Sugestões de e-mail para o autocomplete: "<o que a pessoa digitou>@" + os
+ * domínios que começam com o que ela escreveu depois do "@". Máx. 6. Vazio
+ * quando não há "@", quando há mais de um, ou quando o domínio já está completo.
+ */
+export function emailSuggestions(value: string): string[] {
+  const v = String(value || "").trim();
+  const at = v.indexOf("@");
+  if (at < 1) return [];
+  if (v.indexOf("@", at + 1) >= 0) return [];
+  const local = v.slice(0, at);
+  if (!/^[^\s@]+$/.test(local)) return [];
+  const typed = v.slice(at + 1).toLowerCase();
+  const matches = typed ? EMAIL_DOMAINS.filter((d) => d.indexOf(typed) === 0 && d !== typed) : EMAIL_DOMAINS.slice();
+  return matches.slice(0, 6).map((d) => `${local}@${d}`);
+}
+
 /** Dados de quem compra, como vão ao endpoint (só os campos pedidos). */
 export interface BuyerData {
   nome: string;
@@ -43,6 +76,8 @@ export interface CheckoutForm {
   bumps(): string[];
   frete(): string | null;
   metodo(): CheckoutPayMethod;
+  /** Quantidade do produto principal escolhida. */
+  qtd(): number;
   /** Total da tela (centavos). */
   total(): number;
   /** Itens (produto + bumps marcados) para os pixels. */
@@ -61,6 +96,97 @@ type Field = HTMLInputElement | HTMLSelectElement;
 
 function byName(form: HTMLFormElement, name: string): Field | null {
   return form.querySelector<Field>(`[name="${name}"]`);
+}
+
+/**
+ * Autocomplete de e-mail: conforme a pessoa digita, mostra "<o que escreveu>@"
+ * + os domínios mais comuns (gmail, hotmail…). Clicar ou Enter preenche; setas
+ * navegam; Esc fecha. Menos fricção = mais conversão. Caixa própria (nada de
+ * <datalist>, que varia muito entre navegadores).
+ */
+function setupEmailSuggest(input: HTMLInputElement) {
+  const wrap = input.closest(".osc-f");
+  if (!wrap) return;
+  wrap.classList.add("osc-f-ac");
+  const box = document.createElement("div");
+  box.className = "osc-ac";
+  box.setAttribute("role", "listbox");
+  box.hidden = true;
+  wrap.appendChild(box);
+  let items: string[] = [];
+  let active = -1;
+
+  input.setAttribute("role", "combobox");
+  input.setAttribute("aria-autocomplete", "list");
+  input.setAttribute("aria-expanded", "false");
+
+  function close() {
+    if (box.hidden) return;
+    box.hidden = true;
+    input.setAttribute("aria-expanded", "false");
+    input.removeAttribute("aria-activedescendant");
+    active = -1;
+  }
+
+  function choose(value: string) {
+    input.value = value;
+    close();
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
+  function paint() {
+    for (let i = 0; i < box.children.length; i++) {
+      box.children[i].setAttribute("aria-selected", i === active ? "true" : "false");
+    }
+    if (active >= 0) input.setAttribute("aria-activedescendant", `osc-ac-${active}`);
+    else input.removeAttribute("aria-activedescendant");
+  }
+
+  function open() {
+    items = emailSuggestions(input.value);
+    if (!items.length) return close();
+    box.textContent = "";
+    active = -1;
+    for (let i = 0; i < items.length; i++) {
+      const value = items[i];
+      const opt = document.createElement("div");
+      opt.className = "osc-ac-i";
+      opt.id = `osc-ac-${i}`;
+      opt.setAttribute("role", "option");
+      opt.textContent = value;
+      opt.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        choose(value);
+      });
+      box.appendChild(opt);
+    }
+    box.style.top = `${input.offsetTop + input.offsetHeight + 4}px`;
+    box.hidden = false;
+    input.setAttribute("aria-expanded", "true");
+  }
+
+  input.addEventListener("input", open);
+  input.addEventListener("focus", () => {
+    if (input.value.indexOf("@") > 0) open();
+  });
+  input.addEventListener("blur", () => setTimeout(close, 150));
+  input.addEventListener("keydown", (e) => {
+    if (box.hidden || !items.length) return;
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      active = (active + 1) % items.length;
+      paint();
+    } else if (e.key === "ArrowUp") {
+      e.preventDefault();
+      active = (active - 1 + items.length) % items.length;
+      paint();
+    } else if (e.key === "Enter" && active >= 0) {
+      e.preventDefault();
+      choose(items[active]);
+    } else if (e.key === "Escape") {
+      close();
+    }
+  });
 }
 
 /** Troca o valor mantendo o cursor depois do mesmo número de algarismos. */
@@ -98,7 +224,17 @@ export function setupForm(
   const linesBox = document.querySelector<HTMLElement>("[data-osc-lines]");
   const totalBox = document.querySelector<HTMLElement>("[data-osc-total]");
   const cepStatus = form.querySelector<HTMLElement>("[data-osc-cep-status]");
+  const qtyNum = document.querySelector<HTMLElement>("[data-osc-qtd]");
+  const shipBox = form.querySelector<HTMLElement>("[data-osc-ship]");
+  const shipEmpty = form.querySelector<HTMLElement>("[data-osc-ship-empty]");
+  // Rua/número/bairro/cidade/UF só aparecem depois do CEP (a BrasilAPI preenche o endereço).
+  const addrBox = form.querySelector<HTMLElement>("[data-osc-addr]");
   const defaultLabel = payLabel ? payLabel.textContent || "" : "";
+  // Quantidade do produto (1 a cfg.maxQtd) e se o frete já pode aparecer (depois do CEP).
+  const maxQtd = cfg.maxQtd && cfg.maxQtd > 1 ? Math.floor(cfg.maxQtd) : 1;
+  let qtd = 1;
+  // Com endereço e opções de frete, o frete só conta depois do CEP (a tela pede o CEP antes).
+  let shipReady = !(cfg.endereco && cfg.fretes.length);
 
   // ── Erros ──────────────────────────────────────────────────────────────
   function setError(el: Field, msg: string) {
@@ -144,6 +280,13 @@ export function setupForm(
     return msg;
   };
 
+  /** Mostra o ✓ verde (campo preenchido e válido) — o validador visível, menos fricção. */
+  function markValid(el: Field) {
+    if (el.tagName !== "INPUT") return;
+    const wrap = el.closest(".osc-f");
+    if (wrap) wrap.classList.toggle("osc-valid", el.value.trim() !== "" && !problem(el.name, el.value));
+  }
+
   for (const el of fields) {
     el.addEventListener("blur", () => {
       if (el.value.trim()) touched[el.name] = true;
@@ -153,8 +296,10 @@ export function setupForm(
       // Errado e já mostrado: some assim que fica certo (sem reclamar a cada tecla).
       if (el.getAttribute("aria-invalid") === "true" && !problem(el.name, el.value)) setError(el, "");
       if (alertBox && !alertBox.hidden && !form.querySelector("[aria-invalid=true]")) alertBox.hidden = true;
+      markValid(el);
     });
     if (el.tagName === "SELECT") el.addEventListener("change", () => check(el));
+    markValid(el);
   }
 
   // ── Máscaras ───────────────────────────────────────────────────────────
@@ -167,6 +312,10 @@ export function setupForm(
     masked("documento", formatCpf);
   }
   masked("cep", formatCep);
+
+  // ── Autocomplete de e-mail ───────────────────────────────────────────────
+  const emailEl = byName(form, "email");
+  if (emailEl && emailEl.tagName === "INPUT") setupEmailSuggest(emailEl as HTMLInputElement);
 
   // ── CEP (BrasilAPI) ────────────────────────────────────────────────────
   const cep = byName(form, "cep") as HTMLInputElement | null;
@@ -187,11 +336,13 @@ export function setupForm(
       // CEP novo que a busca não achou: o endereço do CEP anterior não pode ficar.
       if (auto) el.value = "";
       el.removeAttribute("data-osc-auto");
+      markValid(el);
       return;
     }
     el.value = value;
     el.setAttribute("data-osc-auto", "1");
     setError(el, "");
+    markValid(el);
   };
   for (const name of AUTO_FIELDS) {
     const el = byName(form, name);
@@ -244,14 +395,24 @@ export function setupForm(
   if (cep) {
     cep.addEventListener("input", () => {
       const d = onlyDigits(cep.value);
-      if (d.length === 8 && d !== lastCep && isValidCep(d)) {
-        lastCep = d;
-        lookupCep(d);
+      if (d.length === 8 && isValidCep(d)) {
+        // Com o CEP preenchido, mostra o endereço e as opções de frete (a BrasilAPI preenche o resto).
+        revealAddress();
+        revealShipping();
+        if (d !== lastCep) {
+          lastCep = d;
+          lookupCep(d);
+        }
       } else if (d.length < 8 && cepStatus) {
         cepStatus.textContent = "";
         lastCep = "";
       }
     });
+    // CEP já preenchido ao abrir (preenchimento do navegador): mostra o endereço na hora.
+    if (isValidCep(onlyDigits(cep.value))) {
+      revealAddress();
+      revealShipping();
+    }
   }
 
   // ── Frete, bumps, forma de pagamento e total ───────────────────────────
@@ -272,7 +433,10 @@ export function setupForm(
       .map((b) => b.value);
   }
   function frete(): string | null {
-    return cfg.endereco ? checked("frete") || cfg.freteInicial : null;
+    if (!cfg.endereco || !cfg.fretes.length) return null;
+    // Antes do CEP o frete não conta (a tela mostra "Preencha seu CEP…").
+    if (!shipReady) return null;
+    return checked("frete") || cfg.freteInicial;
   }
   function metodo(): CheckoutPayMethod {
     return (checked("metodo") || cfg.metodos[0]) as CheckoutPayMethod;
@@ -282,11 +446,15 @@ export function setupForm(
     for (let i = 0; i < cfg.fretes.length; i++) if (cfg.fretes[i].id === id) return cfg.fretes[i].valor;
     return 0;
   }
-  function total(): number {
-    let sum = cfg.valor + shippingCents();
+  /** Produto × quantidade + bumps marcados (sem o frete). */
+  function subtotal(): number {
+    let sum = cfg.valor * qtd;
     const chosen = bumps();
     for (let i = 0; i < cfg.bumps.length; i++) if (chosen.indexOf(cfg.bumps[i].id) >= 0) sum += cfg.bumps[i].valor;
     return sum;
+  }
+  function total(): number {
+    return subtotal() + shippingCents();
   }
   function items(): CheckoutItem[] {
     const out: CheckoutItem[] = [{ id: cfg.chave, nome: cfg.nome, valor: cfg.valor }];
@@ -313,6 +481,11 @@ export function setupForm(
     const chosen = bumps();
     if (linesBox) {
       linesBox.textContent = "";
+      // "Subtotal" (produto × quantidade + bumps); a marca fica no valor para a tela acompanhar.
+      const subLi = line(fx.subtotal, money(subtotal()));
+      const subVal = subLi.lastChild as HTMLElement | null;
+      if (subVal) subVal.setAttribute("data-osc-subtotal", "");
+      linesBox.appendChild(subLi);
       for (let i = 0; i < cfg.bumps.length; i++) {
         const b = cfg.bumps[i];
         if (chosen.indexOf(b.id) >= 0) linesBox.appendChild(line(b.titulo, money(b.valor)));
@@ -326,6 +499,31 @@ export function setupForm(
     const sum = money(total());
     if (totalBox) totalBox.textContent = sum;
     if (payAmount) payAmount.textContent = sum;
+  }
+
+  // ── Quantidade ──────────────────────────────────────────────────────────
+  function setQtd(next: number) {
+    const v = next < 1 ? 1 : next > maxQtd ? maxQtd : next;
+    if (v === qtd) return;
+    qtd = v;
+    if (qtyNum) qtyNum.textContent = String(qtd);
+    refresh();
+  }
+  for (const btn of Array.from(document.querySelectorAll<HTMLElement>("[data-osc-qty]"))) {
+    btn.addEventListener("click", () => setQtd(qtd + (btn.getAttribute("data-osc-qty") === "+" ? 1 : -1)));
+  }
+
+  // ── Endereço e frete revelados depois do CEP ─────────────────────────────
+  /** Mostra os campos de endereço (rua, número, bairro, cidade, UF). */
+  function revealAddress() {
+    if (addrBox) addrBox.hidden = false;
+  }
+  function revealShipping() {
+    if (shipReady) return;
+    shipReady = true;
+    if (shipBox) shipBox.hidden = false;
+    if (shipEmpty) shipEmpty.hidden = true;
+    refresh();
   }
 
   for (const name of ["frete", "bump", "metodo"]) {
@@ -343,6 +541,11 @@ export function setupForm(
     for (const b of radios("bump")) b.checked = chosen.indexOf(b.value) >= 0;
     for (const f of radios("frete")) if (shipping) f.checked = f.value === shipping;
     for (const m of radios("metodo")) m.checked = m.value === method || (!method && m.checked);
+    // Pedido restaurado (cobrança aberta): se já havia frete escolhido, mostra endereço e opções.
+    if (shipping) {
+      revealAddress();
+      revealShipping();
+    }
     for (const name of ["frete", "bump", "metodo"]) for (const input of radios(name)) markOn(input);
     refresh();
   }
@@ -356,6 +559,8 @@ export function setupForm(
   function validate(): BuyerData | null {
     const bad: Field[] = [];
     for (const el of fields) {
+      // Campo de endereço ainda escondido (sem CEP): não valida nem marca erro (a pessoa nem o vê).
+      if (addrBox?.hidden && addrBox.contains(el)) continue;
       touched[el.name] = true;
       if (check(el)) bad.push(el);
     }
@@ -402,5 +607,5 @@ export function setupForm(
     showAlert(fx.unavailable);
   }
 
-  return { bumps, frete, metodo, total, items, select, validate, busy, alert: showAlert };
+  return { bumps, frete, metodo, qtd: () => qtd, total, items, select, validate, busy, alert: showAlert };
 }

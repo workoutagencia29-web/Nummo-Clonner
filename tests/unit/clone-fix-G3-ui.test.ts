@@ -13,6 +13,7 @@ vi.mock("@/server/actions/clone", () => ({
   retryCloneAction: vi.fn(),
   saveCloneAction: vi.fn(),
   startFunnelClonesAction: vi.fn(),
+  stopFunnelAction: vi.fn(),
   startHtmlCloneAction: vi.fn(),
   startUrlCloneAction: vi.fn(),
 }));
@@ -153,6 +154,21 @@ const child = (c: Partial<Child> & Pick<Child, "id" | "status">): Child => ({
   title: null,
   devices: [],
   matchKey: "loja.exemplo.com/upsell",
+  from: "main",
+  depth: 1,
+  order: 0,
+  via: "manual",
+  linkLabel: "",
+  product: false,
+  kind: null,
+  name: "",
+  finalKey: null,
+  suggestedMode: null,
+  thumbnailKey: null,
+  duplicate: false,
+  checkouts: 0,
+  checkoutPlatform: null,
+  exploreStop: null,
   ...c,
 });
 
@@ -193,6 +209,44 @@ describe("revisão da clonagem", () => {
     expect(html).not.toContain(IMPORT_HINT);
     expect(html).toContain("Esta página tem proteção contra robôs (Cloudflare).");
     expect(tag(html, 'aria-label="Tentar de novo https://loja.exemplo.com/upsell"')).toContain("button");
+  });
+
+  it("funil inteiro: mapa com as etapas, o modo de cada página e 'Parar de procurar' (sem a lista simples)", () => {
+    const html = review(
+      [
+        child({
+          id: "c1",
+          status: "REVIEW",
+          kind: "WHEEL",
+          name: "Roleta",
+          from: "p1",
+          via: "click",
+          linkLabel: "Ver meu resultado",
+          suggestedMode: "PRESERVE_JS",
+          sourceUrl: "https://loja.exemplo.com/roleta",
+          matchKey: "loja.exemplo.com/roleta",
+        }),
+        child({
+          id: "c2",
+          status: "RUNNING",
+          progress: 40,
+          from: "c1",
+          depth: 2,
+          product: true,
+          sourceUrl: "https://loja.exemplo.com/p/1",
+          matchKey: "loja.exemplo.com/p/1",
+        }),
+      ],
+      { funnelSearch: { on: true, stopped: false } },
+    );
+    expect(html).toContain("Mapa do funil");
+    expect(html).toContain("Botão “Ver meu resultado”");
+    expect(tag(html, 'aria-label="Modo da cópia de Roleta"')).toContain("button");
+    expect(tag(html, 'aria-label="Incluir Roleta na oferta"')).toContain("button");
+    expect(tag(html, 'aria-label="Cancelar /p/1"')).toContain("button");
+    expect(html).toContain("Parar de procurar");
+    expect(html).toContain("Clonando o funil… (2 de 3)");
+    expect(html).toContain("Adicionar páginas ao funil");
   });
 
   it("ativa (na fila/clonando): sugestão marcada e botão de cancelar; Salvar explica como não esperar", () => {

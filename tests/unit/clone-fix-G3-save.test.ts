@@ -20,6 +20,7 @@ import {
 import {
   cancelClone,
   FUNNEL_LIMIT_MESSAGE,
+  FUNNEL_PAGE_LIMIT,
   funnelMatchKey,
   getCloneStatus,
   restoreSnippets,
@@ -428,7 +429,7 @@ describe("data#10 — uma regra só para comparar endereços do funil", () => {
   });
 });
 
-describe("data#11 — limite de 15 páginas do funil", () => {
+describe("data#11 — limite de páginas do funil", () => {
   async function children(parentJobId: string, n: number, status: JobStatus = "REVIEW") {
     for (let i = 0; i < n; i++) {
       await prisma.cloneJob.create({
@@ -437,16 +438,16 @@ describe("data#11 — limite de 15 páginas do funil", () => {
     }
   }
 
-  it("a 16ª página é recusada com uma mensagem que explica o limite", async () => {
+  it("a página além do limite é recusada com uma mensagem que explica o limite", async () => {
     const main = await makeJob({ finalUrl: "https://loja.exemplo.com/" });
-    await children(main.id, 15);
+    await children(main.id, FUNNEL_PAGE_LIMIT);
     await expectUserError(
       startFunnelClones(main.id, ["https://loja.exemplo.com/extra"]),
       new RegExp(FUNNEL_LIMIT_MESSAGE),
     );
     // Falhas e canceladas não contam.
     const other = await makeJob({ finalUrl: "https://outra.exemplo.com/" });
-    await children(other.id, 14);
+    await children(other.id, FUNNEL_PAGE_LIMIT - 1);
     await children(other.id, 3, "FAILED");
     await expectUserError(
       startFunnelClones(other.id, ["https://outra.exemplo.com/a", "https://outra.exemplo.com/b"]),
@@ -457,7 +458,7 @@ describe("data#11 — limite de 15 páginas do funil", () => {
 
   it("as ações explicam o limite em português (sem a mensagem técnica do zod)", async () => {
     const main = await makeJob({ finalUrl: "https://loja.exemplo.com/" });
-    const urls = Array.from({ length: 16 }, (_, i) => `https://loja.exemplo.com/p${i}`);
+    const urls = Array.from({ length: FUNNEL_PAGE_LIMIT + 1 }, (_, i) => `https://loja.exemplo.com/p${i}`);
     const start = await startFunnelClonesAction({ parentId: main.id, urls });
     expect(start).toMatchObject({ ok: false });
     expect(!start.ok && start.error).toContain(FUNNEL_LIMIT_MESSAGE);
@@ -465,7 +466,7 @@ describe("data#11 — limite de 15 páginas do funil", () => {
       jobId: main.id,
       name: "X",
       mode: "EDITABLE",
-      childJobIds: Array.from({ length: 16 }, (_, i) => `c${i}`),
+      childJobIds: Array.from({ length: FUNNEL_PAGE_LIMIT + 1 }, (_, i) => `c${i}`),
     });
     expect(!save.ok && save.error).toContain(FUNNEL_LIMIT_MESSAGE);
   });

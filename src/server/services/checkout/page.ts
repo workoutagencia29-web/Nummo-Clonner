@@ -32,6 +32,8 @@ export interface CheckoutPageRenderOptions {
   /** Endpoint relativo à página (prévia /__os/pagamento). */
   endpoint: string;
   simulation: boolean;
+  /** Prévia com a chave do gateway salva: a cobrança é real (aviso em pt-BR, sem simular). */
+  realTest?: boolean;
   /** Endereço de uma página do funil a partir da página de checkout (página de obrigado). */
   pageHref: (pageId: string) => string;
   /** Chave do storage → endereço da imagem (padrão: /os-assets/<arquivo>, o da prévia). */
@@ -58,6 +60,7 @@ export async function renderCheckoutPage(
   const config = publicCheckoutConfig(product, {
     endpoint: opts.endpoint,
     simulation: opts.simulation,
+    realTest: opts.realTest,
     imageHref: opts.imageHref ?? checkoutImageSrc,
     thankYouHref: product.thankYouPageId ? opts.pageHref(product.thankYouPageId) : null,
   });

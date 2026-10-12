@@ -164,7 +164,10 @@ describe("produto do checkout", () => {
     await expectUserError(
       saveCheckoutProduct(
         link.id,
-        input({ amount: "30.000,00", config: { ...emptyConfig(), bumps: [bump("bump0001"), bump("bump0002")] } }),
+        input({
+          amount: "30.000,00",
+          config: { ...emptyConfig(), maxQuantity: 1, bumps: [bump("bump0001"), bump("bump0002")] },
+        }),
       ),
       /Com todos os order bumps, o total fica em R\$\s110\.000,00: o valor máximo do PIX é/,
       "bumps",
@@ -252,7 +255,7 @@ describe("chave da FlevoPay e da BlackCat por oferta", () => {
 });
 
 describe("Próximos passos e avisos do ZIP", () => {
-  it("chave, página de obrigado, acesso (do produto e do bump), bloco de acesso e frete sem endereço", async () => {
+  it("chave, página de obrigado e frete sem endereço (o link de acesso do produto e dos bumps é opcional)", async () => {
     const { offer, thanks, link } = await setup();
     await saveCheckoutProduct(
       link.id,
@@ -290,9 +293,10 @@ describe("Próximos passos e avisos do ZIP", () => {
 
     const checkout = await loadCheckoutExport(offer.id);
     const warnings = checkoutWarnings(checkout);
+    // O link de acesso (do produto e dos bumps) é opcional: não entra como "falta".
     expect(warnings).toEqual([
       "O checkout “Checkout principal” não cobra no site publicado: falta a chave da FlevoPay desta oferta. Para resolver, abra a conta da FlevoPay em “Links e checkouts”, cadastre ou troque a chave, clique em “Testar conexão” e gere o ZIP de novo.",
-      "O checkout “Checkout principal” precisa de ajustes. Falta a página de obrigado, o link de acesso e o link de acesso do bump “Apostila”: quem pagar não recebe tudo o que comprou. Para resolver, abra o link em “Links e checkouts”, complete o checkout e gere o ZIP de novo.",
+      "O checkout “Checkout principal” precisa de ajustes. Falta a página de obrigado: quem pagar não recebe tudo o que comprou. Para resolver, abra o link em “Links e checkouts”, complete o checkout e gere o ZIP de novo.",
       expect.stringContaining("tem frete pago cadastrado (até R$"),
     ]);
     expect(warnings.map(exportWarningFix)).toEqual([

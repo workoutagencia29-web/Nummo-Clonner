@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Loja CEP próprio</title></head>
+<body>
+  <main><img src="/logo.svg" alt="Loja" width="120" height="32"><h1>Ofertas</h1><p>Entrega em: <strong id="endereco">—</strong></p></main>
+  <div id="overlay" style="position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center">
+    <div style="background:#fff;padding:24px;border-radius:12px">
+      <h2>Informe seu CEP</h2>
+      <input id="cep" placeholder="CEP"><button id="ok" type="button">Confirmar</button>
+    </div>
+  </div>
+  <script>
+    document.getElementById("ok").addEventListener("click", function () {
+      var cep = (document.getElementById("cep").value || "").replace(/\D/g, "");
+      if (cep.length !== 8) return;
+      // API do PRÓPRIO site (backend que não existe numa cópia estática).
+      fetch("__ORIGIN__/api/cep/" + cep)
+        .then(function (r) { return r.json(); })
+        .then(function (d) {
+          document.getElementById("endereco").textContent = d.rua + " — " + d.cidade + "/" + d.uf;
+          document.getElementById("overlay").style.display = "none";
+        });
+    });
+  </script>
+</body>
+</html>

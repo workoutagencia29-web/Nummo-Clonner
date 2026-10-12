@@ -7,6 +7,7 @@ import { createPreviewToken, previewUrl } from "@/lib/preview";
 import { STORE_CURRENCY_IDS } from "@/lib/store";
 import { protectedAction } from "@/server/action";
 import * as clone from "@/server/services/clone";
+import { stopFunnel } from "@/server/services/clone-funnel";
 import type { CloneResult } from "@/worker/clone/types";
 
 const id = z.string().min(1, "Item inválido.");
@@ -23,7 +24,11 @@ const HTML_MAX_BYTES = 10 * 1024 * 1024;
 const HTML_TOO_BIG = "O HTML pode ter no máximo 10 MB. Para páginas maiores, use o ZIP.";
 
 export const startUrlCloneAction = protectedAction(
-  startOptions.extend({ url: z.string().max(4000, "Link muito longo.") }),
+  startOptions.extend({
+    url: z.string().max(4000, "Link muito longo."),
+    /** "Clonar o funil inteiro" (quiz, roleta, loja, produtos…). */
+    funnel: z.boolean().default(false),
+  }),
   async ({ url, ...options }) => clone.startUrlClone(url, options),
 );
 
@@ -55,6 +60,8 @@ export const startFunnelClonesAction = protectedAction(
   async ({ parentId, urls }) => ({ created: await clone.startFunnelClones(parentId, urls) }),
 );
 
+export const stopFunnelAction = protectedAction(z.object({ id }), async ({ id }) => stopFunnel(id));
+
 export const clonePreviewUrlAction = protectedAction(
   z.object({ jobId: id, device: z.enum(["desktop", "mobile"]), mode: z.enum(["EDITABLE", "PRESERVE_JS"]) }),
   async ({ jobId, device, mode }) => {
@@ -81,6 +88,11 @@ export const saveCloneAction = protectedAction(
       .array(id)
       .max(clone.FUNNEL_PAGE_LIMIT, `${clone.FUNNEL_LIMIT_MESSAGE} Desmarque algumas páginas do funil.`)
       .default([]),
+    /** Modo de cada página (id da clonagem → modo). */
+    modes: z
+      .record(id, z.enum(["EDITABLE", "PRESERVE_JS"]))
+      .refine((m) => Object.keys(m).length <= clone.FUNNEL_PAGE_LIMIT + 1, "Páginas demais.")
+      .optional(),
   }),
   async (input) => {
     const offer = await clone.saveClone({ ...input, folderId: input.folderId ?? null });

@@ -90,6 +90,8 @@ export function CloneStartForm({ initialTab = "link" }: { initialTab?: CloneTab 
   const router = useRouter();
   const [devices, setDevices] = useState<DeviceKey[]>(["desktop", "mobile"]);
   const [maxVideoMb, setMaxVideoMb] = useState(200);
+  // Clonar o funil inteiro (quiz, roleta, loja, produtos…): ligado por padrão.
+  const [funnel, setFunnel] = useState(true);
   const [url, setUrl] = useState("");
   const [urlError, setUrlError] = useState<string | null>(null);
   const [html, setHtml] = useState("");
@@ -114,7 +116,7 @@ export function CloneStartForm({ initialTab = "link" }: { initialTab?: CloneTab 
     if (!url.trim()) return setUrlError("Cole o link da página que você quer clonar.");
     if (noDevice) return setUrlError(noDevice);
     void startUrl.run(
-      { url, devices, maxVideoMb },
+      { url, devices, maxVideoMb, funnel },
       { silentError: true, onError: setUrlError, onSuccess: (job) => goTo(job.id) },
     );
   }
@@ -206,11 +208,30 @@ export function CloneStartForm({ initialTab = "link" }: { initialTab?: CloneTab 
                     />
                     <Button type="submit" disabled={startUrl.pending} className="sm:w-40">
                       {startUrl.pending && <Spinner />}
-                      Clonar página
+                      {funnel ? "Clonar funil" : "Clonar página"}
                     </Button>
                   </div>
                   <FieldError>{urlError}</FieldError>
                 </Field>
+                <div className="flex items-start gap-2.5 rounded-lg border bg-muted/30 px-3 py-2.5">
+                  <Checkbox
+                    id="clone-funnel"
+                    className="mt-0.5"
+                    checked={funnel}
+                    onCheckedChange={(v) => setFunnel(v === true)}
+                    aria-describedby="clone-funnel-note"
+                  />
+                  <div className="min-w-0">
+                    <Label htmlFor="clone-funnel" className="font-medium">
+                      Clonar o funil inteiro
+                    </Label>
+                    <p id="clone-funnel-note" className="mt-0.5 text-xs text-muted-foreground">
+                      Seguimos os botões e links do site a partir deste link — respondemos o quiz, giramos a roleta,
+                      entramos na loja e em cada produto — e clonamos todas as páginas do funil (até 40). Você confere
+                      tudo no mapa do funil antes de salvar.
+                    </p>
+                  </div>
+                </div>
                 <DeviceOptions
                   devices={devices}
                   onChange={setDevices}

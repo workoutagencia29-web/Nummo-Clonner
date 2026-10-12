@@ -103,6 +103,12 @@ export interface PaymentPageConfig {
   endpoint: string;
   /** Prévia do app: nada é cobrado; a janela mostra "Simular pagamento aprovado/recusado". */
   simulacao: boolean;
+  /**
+   * Prévia do app com a chave da Kyvo salva: a cobrança é REAL (para testar).
+   * A janela mostra um aviso em pt-BR, para você, e não os botões de simular.
+   * No ZIP nunca vem (lá é sempre real, sem aviso).
+   */
+  testeReal?: boolean;
   /** Chave do link da oferta → produto. */
   produtos: Record<string, PublicPaymentProduct>;
 }

@@ -99,6 +99,8 @@ export interface PagamentoCheckout {
   address: boolean;
   shipping: { id: string; name: string; priceCents: number }[];
   bumps: { id: string; title: string; priceCents: number; accessUrl: string }[];
+  /** Quantidade máxima do produto (1 = sem seletor). */
+  maxQtd: number;
   /** Pasta da página de obrigado no ZIP, só para referência (null = sem). */
   thankYou: string | null;
   /** Link de acesso entregue a quem pagou ("" = não vende). */
@@ -130,6 +132,8 @@ export interface PagamentoCheckoutSource {
   config: {
     fields: Partial<Record<BuyerField, boolean>>;
     address: boolean;
+    /** Quantidade máxima (ausente = 1). */
+    maxQuantity?: number;
     shipping: { id: string; name: string; priceCents: number }[];
     bumps: { id: string; title: string; priceCents: number; accessUrl: string }[];
   };
@@ -163,6 +167,7 @@ export function pagamentoCheckoutOf(
     address,
     shipping: address ? p.config.shipping.map((s) => ({ id: s.id, name: s.name, priceCents: s.priceCents })) : [],
     bumps: p.config.bumps.map((b) => ({ id: b.id, title: b.title, priceCents: b.priceCents, accessUrl: b.accessUrl })),
+    maxQtd: p.config.maxQuantity ?? 1,
     thankYou: opts.thankYou,
     accessUrl: p.accessUrl,
     locale: LANG[p.locale],
@@ -205,6 +210,7 @@ function checkoutEntry(c: PagamentoCheckout): string {
     `      'endereco' => ${c.address ? "true" : "false"},`,
     `      'fretes' => array(${shipping ? `\n        ${shipping},\n      ` : ""}),`,
     `      'bumps' => array(${bumps ? `\n        ${bumps},\n      ` : ""}),`,
+    `      'max_qtd' => ${Number.isSafeInteger(c.maxQtd) && c.maxQtd >= 1 ? c.maxQtd : 1},`,
     `      'obrigado' => ${c.thankYou === null ? "null" : phpString(c.thankYou)},`,
     `      'acesso' => ${phpString(c.accessUrl)},`,
     `      'idioma' => ${phpString(c.locale)},`,
@@ -389,10 +395,18 @@ function os_parse_checkout($o)
         'telefone' => '',
         'documento' => '',
         'endereco' => null,
+        'quantidade' => 1,
         'bumps' => array(),
         'frete' => null,
         'metadata' => array(),
     );
+    if (isset($o['quantidade']) && $o['quantidade'] !== null) {
+        $qtd = is_int($o['quantidade']) ? $o['quantidade'] : (is_string($o['quantidade']) && ctype_digit($o['quantidade']) ? (int) $o['quantidade'] : -1);
+        if ($qtd < 1 || $qtd > 99) {
+            return null;
+        }
+        $out['quantidade'] = $qtd;
+    }
     $telefone = os_digits((string) os_text(os_field($o, 'telefone')));
     if ($telefone !== '') {
         if (strlen($telefone) < 8 || strlen($telefone) > 15) {
@@ -510,8 +524,13 @@ function os_checkout_buyer($req, $c)
  * (checkoutTotal). null = bump desconhecido ou repetido; frete faltando,
  * desconhecido ou mandado sem endereço.
  */
-function os_checkout_total($c, $bumpIds, $freteId)
+function os_checkout_total($c, $bumpIds, $freteId, $quantidade = 1)
 {
+    $maxQtd = isset($c['max_qtd']) && is_int($c['max_qtd']) && $c['max_qtd'] >= 1 ? $c['max_qtd'] : 1;
+    $qtd = is_int($quantidade) ? $quantidade : 1;
+    if ($qtd < 1 || $qtd > $maxQtd) {
+        return null;
+    }
     $valorBumps = 0;
     $chosen = array();
     foreach ($bumpIds as $id) {
@@ -532,12 +551,14 @@ function os_checkout_total($c, $bumpIds, $freteId)
     } elseif ($freteId !== null) {
         return null;
     }
+    $produto = $c['valor'] * $qtd;
     return array(
-        'produto' => $c['valor'],
+        'quantidade' => $qtd,
+        'produto' => $produto,
         'bumps' => $chosen,
         'frete' => $frete,
         'valorFrete' => $valorFrete,
-        'total' => $c['valor'] + $valorBumps + $valorFrete,
+        'total' => $produto + $valorBumps + $valorFrete,
     );
 }
 
@@ -1128,7 +1149,7 @@ function os_checkout_request($config, $checkouts, $req, $trustProxy, $host)
         os_fail('invalido');
     }
     // O valor sai SÓ do config.php: o navegador mandou os ids dos bumps e do frete.
-    $total = os_checkout_total($c, $req['bumps'], !empty($c['endereco']) ? $req['frete'] : null);
+    $total = os_checkout_total($c, $req['bumps'], !empty($c['endereco']) ? $req['frete'] : null, $req['quantidade']);
     if ($total === null) {
         os_fail('invalido');
     }
@@ -1136,10 +1157,11 @@ function os_checkout_request($config, $checkouts, $req, $trustProxy, $host)
     if (!is_array($range) || !isset($range[0], $range[1]) || $total['total'] < $range[0] || $total['total'] > $range[1]) {
         os_fail('configuracao');
     }
-    // Sem a chave, sem o link de acesso ou sem onde guardar o pedido, não cobra:
-    // quem pagasse não receberia o produto.
+    // Sem a chave ou sem onde guardar o pedido, não cobra. O link de acesso é OPCIONAL: muita venda
+    // high-ticket não tem entregável por link (mentoria, agência, assessoria — a entrega é por fora).
+    // Sem link, a cobrança funciona normal; o bloco "Acesso ao produto", se usado, é que precisa dele.
     $apiKey = os_gateway_key($config, $c['gateway']);
-    if ($apiKey === '' || trim((string) os_text(os_field($c, 'acesso'))) === '' || os_orders_dir() === null) {
+    if ($apiKey === '' || os_orders_dir() === null) {
         os_fail('configuracao');
     }
     os_create_limits($ip, $req['email'], in_array($req['metodo'], array('card', 'bizum', 'mb_way'), true));

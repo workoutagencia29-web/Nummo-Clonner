@@ -372,6 +372,12 @@ describe("classifyUrl: nunca marca vídeo, fontes, CDNs, pagamentos e checkouts"
     "https://media.licdn.com/dms/image/abc.jpg",
     "https://www.microsoft.com/pt-br/",
     "https://multimedia.getresponse.com/getresponse-AbCdE/photos/123.jpg",
+    // APIs de endereço por CEP (preenchem o endereço na loja/checkout): nunca rastreadores.
+    "https://brasilapi.com.br/api/cep/v2/01001000",
+    "https://viacep.com.br/ws/01001000/json/",
+    "https://ws.apicep.com/cep/01001-000.json",
+    "https://cep.awesomeapi.com.br/json/01001000",
+    "https://buscacepinter.correios.com.br/app/endereco/index.php",
     "https://exemplo.com.br/wp-content/uploads/2024/01/logo.png",
     "/assets/js/app.js",
     "data:image/gif;base64,R0lGODlhAQABAAAAACw=",

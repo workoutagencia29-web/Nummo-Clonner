@@ -179,7 +179,13 @@ describe("página de checkout (JSON e HTML)", () => {
       freteInicial: "pac000001",
       cronometro: 10,
       simulacao: true,
+      maxQtd: 10,
     });
+    // Seletor de quantidade, linha de subtotal e o frete escondido até o CEP.
+    expect(html).toContain("data-osc-qtd");
+    expect(html).toContain("data-osc-subtotal");
+    expect(html).toContain("data-osc-ship-empty");
+    expect(html).toContain("Preencha seu CEP para encontrar o melhor frete");
     expect(cfg?.textos.payButton).toBe("Pagar com PIX");
     expect(cfg?.obrigado).toMatch(/^\/p\/[a-z0-9]+$/);
     expect(cfg?.bumps.map((b) => b.titulo)).toEqual(["Apostila", "Mentoria"]);
@@ -328,7 +334,9 @@ describe("página de checkout (JSON e HTML)", () => {
     expect(html).not.toContain("<img src=x");
     expect(html).not.toContain('Curso "<b>"');
     expect(html).toContain('media="(max-width: 767px)"');
-    expect(html).toMatch(/class="osc-logo" src="\/img\/[^"]+" alt="ACME"/);
+    // O checkout não tem mais a barra de topo (logo + "Pagamento seguro"): só o banner, se houver.
+    expect(html).not.toContain("osc-logo");
+    expect(html).not.toContain("osc-head");
     const body = html.split("</head>")[1];
     expect(body).toContain("Compra 100% segura");
     expect(body).not.toContain("Garantia de 7 dias");

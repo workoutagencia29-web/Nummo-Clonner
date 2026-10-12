@@ -851,8 +851,10 @@ if ($req['acao'] === 'criar') {
     if (!os_method_ok($product, $req['metodo'])) {
         os_fail('metodo_indisponivel');
     }
-    // Sem a chave ou sem o link de acesso, não cobra: quem pagasse não receberia o produto.
-    if ($apiKey === '' || trim((string) os_text(os_field($product, 'acesso'))) === '') {
+    // Sem a chave, não cobra. O link de acesso é OPCIONAL: muita venda high-ticket não tem
+    // entregável por link (a entrega é por fora — call, reunião, outro sistema). Sem link, a
+    // cobrança funciona normal; só o bloco "Acesso ao produto", se usado, precisa dele.
+    if ($apiKey === '') {
         os_fail('configuracao');
     }
     os_create_limits($ip, $req['email'], $req['metodo'] !== 'spei');

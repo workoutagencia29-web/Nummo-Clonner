@@ -50,17 +50,22 @@ import {
   clonePreviewUrlAction,
   saveCloneAction,
   startFunnelClonesAction,
+  stopFunnelAction,
 } from "@/server/actions/clone";
 import type { CloneStatus } from "@/server/services/clone";
 import { IMPORT_HINT } from "@/worker/clone/protection";
 import type { CloneModeValue, CloneResult, Device } from "@/worker/clone/types";
 import { ClonePreview, type ReviewPreviews } from "./clone-preview";
+import { FunnelMap } from "./funnel-map";
+import { funnelLevels, funnelProgress, funnelSummary, type MapNode } from "./funnel-map-logic";
 import { funnelReasonText } from "./review-text";
 import { useCloneStatus } from "./use-clone-status";
 
 export type { ReviewPreviews };
 
 const NO_FOLDER = "__none__";
+/** Funil inteiro: segundos sem nenhuma página na fila antes de parar de consultar (uma acabou de terminar e as próximas ainda vão entrar). */
+const FUNNEL_SETTLE_MS = 12_000;
 const CATEGORY_LABEL: Record<string, string> = {
   PIXEL: "Pixel",
   ANALYTICS: "Análise",
@@ -155,6 +160,7 @@ export function CloneReview({
   offerDeleted = false,
   frozenTimer = false,
   defaultCurrency = DEFAULT_CURRENCY,
+  funnelSearch = { on: false, stopped: false },
 }: {
   jobId: string;
   label: string;
@@ -174,6 +180,11 @@ export function CloneReview({
   frozenTimer?: boolean;
   /** Moeda que vem marcada em "Em qual moeda essa oferta vai rodar?" (a última escolhida). */
   defaultCurrency?: StoreCurrency;
+  /**
+   * "Clonar o funil inteiro": `on` = a caixa estava marcada; `stopped` = a pessoa
+   * clicou em "Parar de procurar".
+   */
+  funnelSearch?: { on: boolean; stopped: boolean };
 }) {
   const router = useRouter();
   const [mode, setMode] = useState<CloneModeValue>(result.suggestedMode);
@@ -193,11 +204,16 @@ export function CloneReview({
   const [unclonedAsk, setUnclonedAsk] = useState<string[] | null>(null);
   // "Clonar e salvar junto": as páginas pedidas; a oferta é salva quando elas terminarem.
   const [saveAfter, setSaveAfter] = useState<string[] | null>(null);
+  // Modo de cada página do funil escolhido no mapa (sem escolha: o recomendado dela).
+  const [childModes, setChildModes] = useState<Record<string, CloneModeValue>>({});
+  const [stopped, setStopped] = useState(funnelSearch.stopped);
+  const searching = funnelSearch.on && !stopped;
 
   const save = useAction(saveCloneAction);
   const startFunnel = useAction(startFunnelClonesAction);
   const openPreview = useAction(clonePreviewUrlAction);
   const cancelChild = useAction(cancelCloneAction);
+  const stopSearch = useAction(stopFunnelAction);
 
   const initial = useMemo(
     () =>
@@ -216,8 +232,10 @@ export function CloneReview({
       }) as CloneStatus,
     [jobId, initialChildren],
   );
+  // Funil inteiro: as próximas páginas entram na fila logo depois que uma termina — a
+  // consulta continua um pouco depois de tudo parar (senão as novas não apareceriam).
   const [pollChildren, setPollChildren] = useState(
-    initialChildren.some((c) => ["QUEUED", "RUNNING"].includes(c.status)),
+    searching || initialChildren.some((c) => ["QUEUED", "RUNNING"].includes(c.status)),
   );
   const { status } = useCloneStatus(jobId, initial, pollChildren, 2000);
   const children = status?.children ?? initialChildren;
@@ -226,7 +244,18 @@ export function CloneReview({
   const [expectedChildren, setExpectedChildren] = useState<string[]>([]);
   const missing = expectedChildren.filter((id) => !children.some((c) => c.id === id));
   const stillRunning = missing.length > 0 || children.some((c) => ["QUEUED", "RUNNING"].includes(c.status));
-  if (pollChildren && !stillRunning && children.length) setPollChildren(false);
+  const [quietSince, setQuietSince] = useState<number | null>(null);
+  useEffect(() => {
+    if (stillRunning) setQuietSince(null);
+    else setQuietSince((prev) => prev ?? Date.now());
+  }, [stillRunning]);
+  useEffect(() => {
+    if (!pollChildren || stillRunning || quietSince === null) return;
+    // Funil procurando: espera alguns segundos de calma antes de parar de consultar.
+    const wait = searching ? Math.max(0, FUNNEL_SETTLE_MS - (Date.now() - quietSince)) : 0;
+    const timer = setTimeout(() => setPollChildren(false), wait);
+    return () => clearTimeout(timer);
+  }, [pollChildren, stillRunning, quietSince, searching]);
   const shownChildren = latestPerPage(children);
   const readyChildren = shownChildren.filter((c) => c.status === "REVIEW");
   const included = new Set(readyChildren.filter((c) => !excludedChildren.has(c.id)).map((c) => c.id));
@@ -287,11 +316,88 @@ export function CloneReview({
     });
   }
 
-  function retryChild(c: Child) {
+  function retryChild(c: { sourceUrl: string | null }) {
     if (c.sourceUrl) queueFunnel([c.sourceUrl]);
   }
 
-  function stopChild(c: Child) {
+  // ─── Mapa do funil ─────────────────────────────────────────────────────────
+  // Mapa do funil: com "Clonar o funil inteiro". Sem ela (páginas sugeridas ou coladas à
+  // mão), a lista simples, em que a página cancelada fica à vista para tentar de novo.
+  const showMap = funnelSearch.on;
+  const rootNode: MapNode = {
+    id: jobId,
+    root: true,
+    status: "REVIEW",
+    progress: 100,
+    name: result.title || result.page?.name || label,
+    kind: result.page?.kind ?? null,
+    url: result.finalUrl,
+    thumbnailKey: result.thumbnailKey ?? null,
+    suggestedMode: result.suggestedMode,
+    from: null,
+    depth: 0,
+    order: 0,
+    via: "",
+    linkLabel: "",
+    errorMessage: null,
+    checkouts: result.checkouts.length,
+    checkoutPlatform: result.checkouts[0]?.platform ?? null,
+    devices: capturedDevices,
+    product: false,
+    exploreStop: result.explored?.stop ?? null,
+  };
+  const levels = funnelLevels(
+    rootNode,
+    children.map((c) => (c.status === "FAILED" ? { ...c, errorMessage: childError(c.errorMessage) } : c)),
+  );
+  const progress = funnelProgress(children);
+  const modeOf = (c: { id: string; suggestedMode: CloneModeValue | null }) =>
+    c.id === jobId ? mode : (childModes[c.id] ?? c.suggestedMode ?? "EDITABLE");
+  const mapModes: Record<string, CloneModeValue> = { [jobId]: mode };
+  for (const c of children) mapModes[c.id] = modeOf(c);
+
+  function changeModes(ids: string[], next: CloneModeValue) {
+    if (ids.includes(jobId)) setMode(next);
+    const rest = ids.filter((id) => id !== jobId);
+    if (rest.length) setChildModes((prev) => ({ ...prev, ...Object.fromEntries(rest.map((id) => [id, next])) }));
+  }
+
+  function changeIncluded(ids: string[], on: boolean) {
+    setExcludedChildren((prev) => {
+      const next = new Set(prev);
+      for (const id of ids) {
+        if (on) next.delete(id);
+        else next.add(id);
+      }
+      return next;
+    });
+  }
+
+  function previewNode(node: MapNode) {
+    void openPreview.run(
+      // Clonagem só de celular não tem versão desktop.
+      { jobId: node.id, device: node.devices.includes("desktop") ? "desktop" : "mobile", mode: modeOf(node) },
+      { onSuccess: (r) => window.open(r.url, "_blank", "noopener") },
+    );
+  }
+
+  function stopFunnel() {
+    void stopSearch.run(
+      { id: jobId },
+      {
+        success: (r) =>
+          r.canceled
+            ? `O robô parou de procurar (${plural(r.canceled, "página cancelada", "páginas canceladas")}). As páginas prontas entram na oferta.`
+            : "O robô parou de procurar. As páginas prontas entram na oferta.",
+        onSuccess: () => {
+          setStopped(true);
+          setPollChildren(true);
+        },
+      },
+    );
+  }
+
+  function stopChild(c: { id: string }) {
     void cancelChild.run(
       { id: c.id },
       {
@@ -355,6 +461,10 @@ export function CloneReview({
         currency,
         keepRemoved: [...keep].map((i) => `${jobId}:${i}`),
         childJobIds: readyChildren.filter((c) => included.has(c.id)).map((c) => c.id),
+        modes: Object.fromEntries([
+          [jobId, mode],
+          ...readyChildren.filter((c) => included.has(c.id)).map((c) => [c.id, modeOf(c)]),
+        ]),
       },
       {
         success: "Oferta salva.",
@@ -406,6 +516,29 @@ export function CloneReview({
           <InfoIcon className="mt-0.5 size-4 shrink-0" />A oferta criada desta clonagem foi excluída. Você pode salvar a
           cópia de novo como uma oferta nova.
         </p>
+      )}
+
+      {showMap && (
+        <FunnelMap
+          levels={levels}
+          progress={progress}
+          summary={funnelSummary(levels)}
+          searching={searching && (stillRunning || pollChildren)}
+          modes={mapModes}
+          onModeChange={changeModes}
+          included={included}
+          onIncludeChange={changeIncluded}
+          onPreview={previewNode}
+          onRetry={(node) => retryChild({ sourceUrl: node.url })}
+          onCancel={stopChild}
+          onStop={stopFunnel}
+          busy={{
+            preview: openPreview.pending,
+            retry: startFunnel.pending,
+            cancel: cancelChild.pending,
+            stop: stopSearch.pending,
+          }}
+        />
       )}
 
       {/* Uma coluna que nunca passa da tela (a barra da prévia quebra a linha) até o xl. */}
@@ -484,18 +617,28 @@ export function CloneReview({
                   </p>
                 </CurrencyPicker>
                 <p className="text-xs text-muted-foreground">
-                  Modo: <strong>{mode === "EDITABLE" ? "Editável" : "Com scripts"}</strong>
-                  {readyChildren.length > 0 &&
-                    ` · ${plural(1 + readyChildren.filter((c) => included.has(c.id)).length, "página", "páginas")} no funil`}
+                  {readyChildren.length > 0 ? (
+                    `${plural(1 + readyChildren.filter((c) => included.has(c.id)).length, "página", "páginas")} no funil · o modo de cada uma está no mapa do funil`
+                  ) : (
+                    <>
+                      Modo: <strong>{mode === "EDITABLE" ? "Editável" : "Com scripts"}</strong>
+                    </>
+                  )}
                 </p>
                 <Button onClick={submit} disabled={save.pending || stillRunning}>
                   {save.pending ? <Spinner /> : <SaveIcon />}
-                  {stillRunning ? "Aguardando páginas do funil…" : "Salvar oferta"}
+                  {stillRunning
+                    ? searching
+                      ? `Clonando o funil… (${progress.ready} de ${progress.total})`
+                      : "Aguardando páginas do funil…"
+                    : "Salvar oferta"}
                 </Button>
                 {stillRunning && (
                   <p className="text-xs text-muted-foreground">
                     {saveAfter && "A oferta é salva sozinha quando elas terminarem. "}
-                    Não quer esperar? Cancele as páginas do funil que ainda estão na fila ou clonando.
+                    {searching
+                      ? "Não quer esperar? Clique em “Parar de procurar” no mapa do funil: as páginas prontas entram na oferta."
+                      : "Não quer esperar? Cancele as páginas do funil que ainda estão na fila ou clonando."}
                   </p>
                 )}
               </FieldGroup>
@@ -634,9 +777,13 @@ export function CloneReview({
 
           <Section
             icon={GitBranchIcon}
-            title="Páginas do funil"
-            count={result.funnel.length}
-            description="Upsell, downsell e obrigado costumam ser configurados na plataforma de checkout. Se não aparecerem aqui, cole o link."
+            title={showMap ? "Adicionar páginas ao funil" : "Páginas do funil"}
+            count={showMap ? undefined : result.funnel.length}
+            description={
+              funnelSearch.on
+                ? "O robô já segue os botões e links do site sozinho. Faltou alguma página (ex.: upsell configurado na plataforma de checkout)? Cole o link."
+                : "Upsell, downsell e obrigado costumam ser configurados na plataforma de checkout. Se não aparecerem aqui, cole o link."
+            }
           >
             <div className="flex flex-col gap-3">
               {result.funnel.length > 0 && (
@@ -683,7 +830,7 @@ export function CloneReview({
                 Clonar páginas selecionadas
               </Button>
 
-              {shownChildren.length > 0 && (
+              {!showMap && shownChildren.length > 0 && (
                 <ul className="flex flex-col gap-2 border-t pt-3">
                   {shownChildren.map((c) => (
                     <li key={c.id} className="flex flex-col gap-1 text-xs">

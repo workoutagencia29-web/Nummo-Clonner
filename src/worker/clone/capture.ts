@@ -24,6 +24,7 @@ import {
   type Route,
 } from "playwright";
 import { decodeText } from "./charset";
+import { exploreCards, explorePage, hasScriptCards } from "./explore";
 import { type GuardedProxy, PROXY_ERROR_HEADER, startGuardedProxy } from "./fetcher";
 import { detectProtection } from "./protection";
 import { classifyRequest } from "./trackers";
@@ -66,6 +67,14 @@ export interface CaptureOptions {
    */
   domReadyTimeoutMs?: number;
   loadTimeoutMs?: number;
+  /**
+   * Clonar o funil inteiro: depois da cópia e do print, o robô clica pela
+   * página (quiz, roleta…) e anota para onde ela leva (explore.ts). Só numa
+   * página "de etapas" (ver shouldExplore).
+   */
+  explore?: boolean;
+  /** Prazo do robô (ms); só os testes mudam. */
+  exploreMs?: number;
 }
 
 /** Captura + avisos para a tela de revisão (página que não terminou de carregar, print que falhou). */
@@ -257,6 +266,85 @@ async function autoScroll(page: Page, device: Device, maxMs: number, signal?: Ab
   await page.waitForTimeout(300);
 }
 
+/**
+ * Navegação da página inteira (não de um iframe). Janela nova (window.open):
+ * o Playwright ainda não tem o frame dela no primeiro pedido — também é.
+ */
+function isTopLevel(request: Request): boolean {
+  try {
+    return !request.frame().parentFrame();
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Mesma página com outra etapa no endereço ("/quiz/2", "?etapa=3"): o quiz
+ * continua, não é uma página nova do funil.
+ */
+export function sameStepPage(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  try {
+    const ua = new URL(a);
+    const ub = new URL(b);
+    if (ua.host !== ub.host) return false;
+    const strip = (u: URL) =>
+      `${u.pathname
+        .replace(/(?:\/\d+)+\/?$/, "")
+        .replace(/\d+/g, "#")
+        .replace(/\/+$/, "")}?${u.search.replace(/\d+/g, "#")}`;
+    return strip(ua) === strip(ub) && /\d/.test(`${ua.pathname}${ua.search}${ub.pathname}${ub.search}`);
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Vale o robô clicar pela página? "steps": página "de etapas" — com palavras de
+ * quiz/roleta, ou curta e com botões que não são links (o próximo passo é
+ * montado por script). "cards": vitrine cujos cartões de produto só abrem por
+ * script (sem link). Página de vendas longa, loja com links e produto: não.
+ */
+async function shouldExplore(page: Page): Promise<"steps" | "cards" | false> {
+  const steps = await page
+    .evaluate(() => {
+      // Texto e botões da página e dos web components (shadow DOM aberto).
+      const hosts = Array.from(document.querySelectorAll("*")).filter((el) => el.shadowRoot);
+      const shadow = hosts.map((el) => el.shadowRoot?.textContent ?? "").join(" ");
+      const text = `${document.body?.innerText ?? ""} ${shadow}`
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .toLowerCase();
+      if (
+        /\b(quiz|pergunta|questionario|responda|etapa \d|passo \d|roleta|gire|girar|roda da sorte|ruleta|spin the wheel)\b/.test(
+          text,
+        )
+      )
+        return true;
+      // Tela de espera (o botão/próxima etapa costuma aparecer depois de alguns segundos).
+      if (
+        text.length < 600 &&
+        /\b(aguarde|aguardando|preparando|preparada|preparamos|carregando|processando|gerando|analisando|calculando|so um momento|segundos?)\b/.test(
+          text,
+        )
+      )
+        return true;
+      if (text.length > 4000) return false;
+      // Vitrine (vários preços): os cartões são tratados à parte ("cards").
+      if ((text.match(/(?:r\$|us\$|mx\$|\$|€)\s?\d/g) ?? []).length >= 3) return false;
+      // Botões e campos de formulário visíveis (um campo de CEP/nome pode revelar o próximo passo).
+      const selector =
+        "button, [role=button], [onclick], input[type=submit], input:not([type=hidden]), select, textarea";
+      const actionable = [document, ...hosts.map((el) => el.shadowRoot as ShadowRoot)]
+        .flatMap((root) => Array.from(root.querySelectorAll(selector)))
+        .filter((el) => (el as HTMLElement).offsetParent !== null || el.getClientRects().length > 0);
+      return actionable.length >= 1;
+    })
+    .catch(() => false);
+  if (steps) return "steps";
+  return (await hasScriptCards(page)) ? "cards" : false;
+}
+
 /** Espera a rede ficar quieta (sem requisições pendentes por 1 s), no máximo maxMs. */
 async function waitForQuiet(inflight: () => number, maxMs: number) {
   const start = Date.now();
@@ -331,12 +419,34 @@ export async function capturePage(opts: CaptureOptions): Promise<CaptureResult> 
     });
     throwIfCanceled(signal);
 
+    // Robô explorando (clonar o funil inteiro): navegações da página principal e
+    // de janelas novas são anotadas e interrompidas — a página fica onde está.
+    const exploring = {
+      active: false,
+      label: "",
+      at: "",
+      /** Abrindo os cartões de uma vitrine: cada navegação é a página de um produto. */
+      product: false,
+      found: [] as { url: string; label: string; product?: boolean }[],
+    };
+    const noteNavigation = (target: string) => {
+      const url = stripHash(target);
+      if (!/^https?:/i.test(url) || url === exploring.at || sameStepPage(url, exploring.at)) return;
+      if (!exploring.found.some((f) => f.url === url)) {
+        exploring.found.push({ url, label: exploring.label, ...(exploring.product ? { product: true } : {}) });
+      }
+    };
+
     // O tsx/esbuild pode envolver funções com __name(); a função de serialização
     // roda dentro da página, então garantimos que esse helper exista lá.
     await context.addInitScript("window.__name = window.__name || function (f) { return f; };");
     await context.route("**/*", async (route: Route, request: Request) => {
       try {
         const reqUrl = request.url();
+        if (exploring.active && request.isNavigationRequest() && isTopLevel(request)) {
+          if (request.method() === "GET") noteNavigation(reqUrl);
+          return await route.abort("aborted");
+        }
         if (reqUrl.startsWith("data:") || reqUrl.startsWith("blob:")) return await route.continue();
         let parsed: URL;
         try {
@@ -373,6 +483,18 @@ export async function capturePage(opts: CaptureOptions): Promise<CaptureResult> 
     });
 
     const page = await context.newPage();
+    // Página de aplicativo (React, Vue…) muda o endereço sem recarregar: anotada também.
+    page.on("framenavigated", (frame) => {
+      if (exploring.active && frame === page.mainFrame()) noteNavigation(frame.url());
+    });
+    // Janela nova (window.open, target=_blank): a navegação dela é anotada (e
+    // interrompida) no context.route; a janela fecha logo depois do pedido.
+    context.on("page", (popup) => {
+      if (popup === page) return;
+      const close = () => void popup.close().catch(() => {});
+      popup.once("request", () => setTimeout(close, 300));
+      setTimeout(close, 3000);
+    });
     const isMainNavigation = (req: Request) => {
       try {
         return req.isNavigationRequest() && req.frame() === page.mainFrame();
@@ -540,10 +662,58 @@ export async function capturePage(opts: CaptureOptions): Promise<CaptureResult> 
       });
     }
 
+    const finalUrl = stripHash(page.url());
+    let explored: CaptureResult["explored"];
+    // Página "quase vazia" (quiz curto montado por script) também é explorada; desafio anti-robô, não.
+    const exploreMode =
+      opts.explore && (!protection || protection.kind === "EMPTY_SHELL") ? await shouldExplore(page) : false;
+    if (exploreMode) {
+      log(
+        "INFO",
+        exploreMode === "cards"
+          ? "Abrindo cada produto da vitrine para achar a página dele…"
+          : "Clicando pela página para achar a próxima etapa do funil (quiz, roleta…)…",
+      );
+      exploring.at = finalUrl;
+      exploring.product = exploreMode === "cards";
+      exploring.active = true;
+      const setLabel = (label: string) => {
+        exploring.label = label;
+      };
+      try {
+        const report =
+          exploreMode === "cards"
+            ? await exploreCards({
+                page,
+                navigations: () => exploring.found.length,
+                setLabel,
+                storeUrl: finalUrl,
+                maxMs: opts.exploreMs,
+                signal,
+              })
+            : await explorePage({
+                page,
+                navigated: () => exploring.found.length > 0,
+                setLabel,
+                maxMs: opts.exploreMs,
+                signal,
+              });
+        explored = { ...report, navigations: exploring.found };
+        if (exploring.found.length) {
+          log("SUCCESS", `A página leva a ${exploring.found.map((f) => f.url).join(", ")}.`);
+        }
+      } catch {
+        throwIfCanceled(signal);
+        explored = { clicks: 0, screens: 0, stop: "stuck", navigations: exploring.found };
+      } finally {
+        exploring.active = false;
+      }
+    }
+
     return {
       device,
       requestedUrl: url,
-      finalUrl: stripHash(page.url()),
+      finalUrl,
       status,
       title,
       originalHtml,
@@ -553,6 +723,7 @@ export async function capturePage(opts: CaptureOptions): Promise<CaptureResult> 
       screenshot,
       protection,
       warnings,
+      ...(explored ? { explored } : {}),
     };
   } catch (err) {
     if (signal?.aborted) throw new CloneCanceledError();

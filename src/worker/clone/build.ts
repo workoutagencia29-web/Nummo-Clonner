@@ -29,9 +29,12 @@ import { env } from "@/lib/env";
 import { putContentAddressed, putFileContentAddressed, putObject } from "@/lib/storage";
 import { cleanClonedSvg } from "@/server/services/assets";
 import type { LogFn, VirtualSite } from "./capture";
+import { cepShimTag, isCepScript, pageUsesCep } from "./cep";
 import { decodeText, fixMetaCharset } from "./charset";
 import { convertJsNavigation, detectCheckouts, markCheckouts } from "./checkouts";
+import { classifyPage } from "./classify";
 import { collectCssRefs, rewriteCss } from "./css";
+import { type CodeSource, discoverPageLinks } from "./discover";
 import {
   convertScriptPlayers,
   convertToggles,
@@ -40,7 +43,7 @@ import {
   sanitizeScriptUrls,
 } from "./editable-compat";
 import { type createFetcher, formatLimit } from "./fetcher";
-import { suggestFunnel } from "./funnel";
+import { registrableDomain, suggestFunnel } from "./funnel";
 import { collectHtmlRefs, documentBase, type HtmlRef, removeBaseTag, rewriteHtmlRefs } from "./html-assets";
 import { normalizeLazy } from "./lazy";
 import { isSyntheticOrigin, relativeToPage, syntheticSource } from "./synthetic";
@@ -56,7 +59,9 @@ import {
   type CloneWarning,
   type Device,
   type DeviceOutput,
+  type FunnelPageInfo,
   type FunnelSuggestion,
+  type PageLinkFound,
   type RemovedTracker,
   type VideoEmbed,
   type VslDelay,
@@ -79,6 +84,11 @@ export interface BuildOptions {
   virtualSite?: VirtualSite;
   /** Nome do arquivo importado (ZIP): título da cópia quando a página não tem <title>. */
   fileName?: string;
+  /**
+   * Clonar o funil inteiro: lê também os endereços no código dos scripts do
+   * próprio site e confere na rede os que só apareceram no código.
+   */
+  funnel?: boolean;
 }
 
 const VIDEO_EXT = /\.(mp4|webm|m4v|mov|ogv)(\?|$)/i;
@@ -466,6 +476,14 @@ function removeOriginMeta($: CheerioAPI) {
       'meta[name="generator"]',
     ].join(", "),
   ).remove();
+  // Content-Security-Policy do site original: na cópia, servida de outra origem,
+  // o `connect-src 'self'`/`default-src` passa a valer para a cópia e bloqueia o
+  // fetch do próprio site (ex.: a consulta de CEP para a BrasilAPI/ViaCEP). A
+  // cópia é hospedada por você; a política do dono original não deve valer nela.
+  $("meta[http-equiv]").each((_, el) => {
+    const v = (($(el).attr("http-equiv") ?? "") as string).trim().toLowerCase();
+    if (v === "content-security-policy" || v === "content-security-policy-report-only") $(el).remove();
+  });
 }
 
 /** Comentários HTML: no modo Editável saem todos; nos dois modos, os de rastreadores. */
@@ -499,6 +517,9 @@ function stripScripts($: CheerioAPI, baseUrl: string) {
     const type = (node.attr("type") ?? "").toLowerCase();
     if (type === "application/ld+json") return;
     if (isPlayerScript(node.attr("src") ?? "", node.html() ?? "", baseUrl)) return;
+    // Mantém o script inline que consulta o CEP (pop-up que preenche o endereço):
+    // no Editável os scripts saem, mas sem este o pop-up para de funcionar ao editar.
+    if (!node.attr("src") && isCepScript(node.html() ?? "")) return;
     node.remove();
   });
   $('link[rel="modulepreload"], link[rel="preload"][as="script"], link[rel="prefetch"][as="script"]').remove();
@@ -605,6 +626,8 @@ interface EditableOutput {
   removed: RemovedTracker[];
   checkouts: CheckoutCandidate[];
   funnel: FunnelSuggestion[];
+  links: PageLinkFound[];
+  page: FunnelPageInfo;
   videos: VideoEmbed[];
   delay: VslDelay | null;
 }
@@ -612,6 +635,29 @@ interface EditableOutput {
 interface BuildContext {
   /** Origem interna de importação (ZIP / HTML colado sem link de origem), ou null. */
   localOrigin: string | null;
+  /** Scripts do próprio site capturados (clonar o funil inteiro: endereços no código). */
+  scripts?: CodeSource[];
+}
+
+/** Scripts do mesmo site (domínio registrável) capturados, em texto. */
+function siteScripts(capture: Capture): CodeSource[] {
+  let domain = "";
+  try {
+    domain = registrableDomain(new URL(capture.finalUrl).hostname);
+  } catch {
+    return [];
+  }
+  const out: CodeSource[] = [];
+  for (const r of capture.responses.values()) {
+    if (!isJsResource(r.url, r.contentType)) continue;
+    try {
+      if (registrableDomain(new URL(r.url).hostname) !== domain) continue;
+    } catch {
+      continue;
+    }
+    out.push({ text: r.body.toString("utf8") });
+  }
+  return out;
 }
 
 async function buildEditable(capture: Capture, store: AssetStore, ctx: BuildContext): Promise<EditableOutput> {
@@ -626,6 +672,22 @@ async function buildEditable(capture: Capture, store: AssetStore, ctx: BuildCont
   const checkouts = detectCheckouts($, baseUrl);
   markCheckouts($, baseUrl, checkouts);
   const funnel = suggestFunnel($, baseUrl, new Set(checkouts.map((c) => c.url)));
+  // Clonar o funil inteiro: páginas do mesmo site a que esta leva (antes de os scripts saírem).
+  const links = discoverPageLinks({
+    $,
+    pageUrl: baseUrl,
+    checkoutUrls: checkouts.map((c) => c.url),
+    scripts: ctx.scripts,
+    clicks: capture.explored?.navigations,
+  });
+  const page = classifyPage({
+    $,
+    pageUrl: baseUrl,
+    links,
+    hasCheckout: checkouts.length > 0,
+    isVsl: videos.some((v) => v.provider !== "NATIVE") || Boolean(delay),
+    explored: capture.explored,
+  });
   unhideDelayed($);
   // O que os scripts faziam e que a página precisa sem eles (antes de removê-los).
   normalizeAnimations($);
@@ -643,9 +705,20 @@ async function buildEditable(capture: Capture, store: AssetStore, ctx: BuildCont
   // Links relativos seguem o <base href> (removido depois, em localizeHtml).
   absolutizeLinks($, documentBase($, baseUrl), ctx.localOrigin);
   await localizeHtml($, baseUrl, store, { includeScripts: false, localOrigin: ctx.localOrigin });
+  // Atalho de CEP no Editável: o script do pop-up foi mantido acima; o atalho faz
+  // a consulta funcionar na cópia (inclusive se o original usava o próprio backend).
+  if (!ctx.localOrigin && pageUsesCep($.html())) {
+    let host = "";
+    try {
+      host = new URL(baseUrl).host;
+    } catch {
+      // endereço estranho: o atalho trata só o mesmo domínio
+    }
+    $("head").prepend(cepShimTag(host ? [host] : []));
+  }
   // O cheerio reescreve qualquer doctype como <!DOCTYPE html>: volta o da página (ou nenhum).
   const html = restoreDoctype(fixMetaCharset($.html()), capture.renderedHtml);
-  return { html, removed, checkouts, funnel, videos, delay };
+  return { html, removed, checkouts, funnel, links, page, videos, delay };
 }
 
 // ─── Preservar JS ────────────────────────────────────────────────────────────
@@ -848,6 +921,17 @@ async function buildPreserveJs(capture: Capture, store: AssetStore, ctx: BuildCo
   for (const [url, target] of await discoverModuleChunks(store, origin, jsSeeds, known)) addToMap(url, target);
 
   const originRefs = ctx.localOrigin ? [] : localizeOriginRefs($, origin, assetMap);
+  // Atalho de CEP: se a página consulta CEP no próprio domínio, a cópia estática
+  // não tem esse backend — o script atende a consulta por uma API pública.
+  if (!ctx.localOrigin && pageUsesCep($.html())) {
+    let host = "";
+    try {
+      host = new URL(baseUrl).host;
+    } catch {
+      // endereço estranho: sem host, o atalho trata só o mesmo domínio
+    }
+    $("head").prepend(cepShimTag(host ? [host] : []));
+  }
   // Marca "Preservar JS": o script do Offer Studio não refaz o que o JS original já faz (menus, FAQ…).
   $(`meta[name="${PRESERVE_JS_META}"]`).remove();
   const marker = `<meta name="${PRESERVE_JS_META}" content="1">`;
@@ -861,6 +945,35 @@ async function storeHtml(jobId: string, device: Device, mode: CloneModeValue, ht
   const key = `clones/${jobId}/${device}-${mode.toLowerCase()}.html`;
   await putObject(key, html);
   return key;
+}
+
+/** Páginas que só apareceram no código, conferidas na rede: no máximo tantas. */
+const CODE_LINKS_CHECKED = 25;
+
+/**
+ * Endereço achado só no código (ex.: rota "/roleta" de um script) pode não
+ * existir: confere na rede se abre uma página (HTML) antes de virar etapa do
+ * funil. Os achados por link ou clique ficam como estão.
+ */
+async function verifyCodeLinks(
+  links: PageLinkFound[],
+  fetcher: Fetcher,
+  signal?: AbortSignal,
+): Promise<PageLinkFound[]> {
+  const fromCode = links.filter((l) => l.via === "code").slice(0, CODE_LINKS_CHECKED);
+  if (!fromCode.length) return links;
+  const ok = new Set<string>();
+  const limit = pLimit(4);
+  await Promise.all(
+    fromCode.map((l) =>
+      limit(async () => {
+        if (signal?.aborted) return;
+        const r = await fetcher.fetchResource(l.url, { accept: "text/html,application/xhtml+xml,*/*;q=0.8" });
+        if (r.ok && /html/i.test(r.contentType)) ok.add(l.url);
+      }),
+    ),
+  );
+  return links.filter((l) => l.via !== "code" || ok.has(l.url));
 }
 
 /** Junta listas de vários dispositivos sem repetir. */
@@ -923,7 +1036,10 @@ export async function buildClone(opts: BuildOptions): Promise<CloneResult> {
   let done = 0;
   for (const capture of toBuild) {
     log("INFO", `Montando a versão ${capture.device === "desktop" ? "desktop" : "celular"}…`);
-    const ctx: BuildContext = { localOrigin: localOriginOf(capture, opts.virtualSite) };
+    const ctx: BuildContext = {
+      localOrigin: localOriginOf(capture, opts.virtualSite),
+      scripts: opts.funnel ? siteScripts(capture) : undefined,
+    };
     const editable = await buildEditable(capture, store, ctx);
     editableResults.push(editable);
     editableHtml.set(capture.device, editable.html);
@@ -995,6 +1111,11 @@ export async function buildClone(opts: BuildOptions): Promise<CloneResult> {
     editableResults.map((r) => r.funnel),
     (f) => f.url,
   );
+  let links = mergeBy(
+    editableResults.map((r) => r.links),
+    (l) => l.url,
+  );
+  if (opts.funnel) links = await verifyCodeLinks(links, opts.fetcher, opts.signal);
   const videos = mergeBy(
     editableResults.map((r) => r.videos),
     (v) => `${v.provider}|${v.videoId ?? v.src ?? ""}`,
@@ -1079,7 +1200,21 @@ export async function buildClone(opts: BuildOptions): Promise<CloneResult> {
     });
   }
 
-  const suggestedMode: CloneModeValue = looksLikeApp(desktop) ? "PRESERVE_JS" : "EDITABLE";
+  const page: FunnelPageInfo = editableResults[0]?.page ?? { kind: "OTHER", name: "" };
+  // Quiz e roleta só funcionam com os scripts do site. No funil inteiro, loja e
+  // produtos ficam "Editável" mesmo num site-aplicativo: a cópia da tela já tem
+  // os cartões e os botões, e os links entre as páginas são ligados ao salvar.
+  // (A consulta de CEP continua funcionando nos DOIS modos: o script do pop-up é
+  // mantido no Editável e o atalho de CEP entra nas duas saídas — buildEditable
+  // e buildPreserveJs.)
+  const suggestedMode: CloneModeValue =
+    page.kind === "QUIZ" || page.kind === "WHEEL"
+      ? "PRESERVE_JS"
+      : opts.funnel && (page.kind === "STORE" || page.kind === "PRODUCT")
+        ? "EDITABLE"
+        : looksLikeApp(desktop)
+          ? "PRESERVE_JS"
+          : "EDITABLE";
   if (suggestedMode === "PRESERVE_JS") {
     warnings.push({
       code: "APP_PAGE",
@@ -1096,6 +1231,17 @@ export async function buildClone(opts: BuildOptions): Promise<CloneResult> {
     removed,
     checkouts,
     funnel,
+    links,
+    page,
+    ...(desktop.explored
+      ? {
+          explored: {
+            clicks: desktop.explored.clicks,
+            screens: desktop.explored.screens,
+            stop: desktop.explored.stop,
+          },
+        }
+      : {}),
     videos,
     delay,
     warnings,

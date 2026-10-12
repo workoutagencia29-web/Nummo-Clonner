@@ -1,0 +1,35 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Descubra o seu estilo</title>
+  <link rel="stylesheet" href="/css.css">
+</head>
+<body>
+  <main class="roleta">
+    <h1>Gire a roleta e ganhe seu desconto</h1>
+    <canvas id="roda" width="300" height="300"></canvas>
+    <p><button class="cta" type="button" id="girar">Girar a roleta</button></p>
+    <div class="modal" id="premio">
+      <h2>Parabéns! Você ganhou 30% OFF</h2>
+      <button class="cta" type="button" id="resgatar">Resgatar meu desconto</button>
+    </div>
+  </main>
+  <script>
+    var ctx = document.getElementById("roda").getContext("2d");
+    ctx.fillStyle = "#e63946"; ctx.beginPath(); ctx.arc(150, 150, 140, 0, Math.PI); ctx.fill();
+    ctx.fillStyle = "#457b9d"; ctx.beginPath(); ctx.arc(150, 150, 140, Math.PI, 2 * Math.PI); ctx.fill();
+    // Só libera o prêmio depois de girar DUAS vezes (sem mudar o texto entre um giro e outro).
+    var giros = 0;
+    document.getElementById("girar").addEventListener("click", function () {
+      giros++;
+      document.getElementById("roda").style.transform = "rotate(" + (giros * 1080) + "deg)";
+      if (giros >= 2) setTimeout(function () { document.getElementById("premio").className = "modal aberto"; }, 1200);
+    });
+    document.getElementById("resgatar").addEventListener("click", function () {
+      location.assign("__ORIGIN__/loja/");
+    });
+  </script>
+</body>
+</html>

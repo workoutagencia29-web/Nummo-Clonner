@@ -516,6 +516,25 @@ export const SAFE_URLS: readonly TrackerUrlRule[] = [
   { host: domains("hotmart.com", "hotmart.com.br", "kiwify.com.br", "kiwify.com", "kiwify.app") },
   { host: domains("eduzz.com", "monetizze.com.br", "braip.com", "greenn.com.br", "perfectpay.com.br", "ticto.com.br") },
   { host: domains("pagar.me", "mercadopago.com", "mercadopago.com.br", "mercadolibre.com", "pagseguro.uol.com.br") },
+  // APIs de endereço por CEP (preenchem o endereço na loja/checkout): são serviços
+  // públicos de consulta, nunca rastreadores — sem elas o campo de CEP para de
+  // funcionar na cópia. BrasilAPI (dados do governo), ViaCEP (Correios) e afins.
+  {
+    host: domains(
+      "brasilapi.com.br",
+      "viacep.com.br",
+      "apicep.com",
+      "cep.la",
+      "cepaberto.com",
+      "republicavirtual.com.br",
+      "postmon.com.br",
+      "cepcerto.com",
+      "opencep.com",
+      "awesomeapi.com.br",
+    ),
+  },
+  // Consulta de CEP dos Correios.
+  { host: exact("buscacepinter.correios.com.br", "viacep.com.br") },
 ];
 
 // ─── third-party-web ─────────────────────────────────────────────────────────

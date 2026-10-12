@@ -156,6 +156,8 @@ export const CheckoutConfigSchema = z.object({
   /** Frete marcado ao abrir (null/sumido = o primeiro). */
   shippingDefault: itemId.nullable().catch(null).default(null),
   bumps: listOf(BumpSchema, CHECKOUT_LIMITS.bumps).default([]),
+  /** Quantidade máxima que o comprador pode escolher (1 = sem seletor). Padrão: 10. */
+  maxQuantity: z.number().int().min(1).max(CHECKOUT_LIMITS.quantityMax).catch(10).default(10),
   bannerDesktopKey: key.default(null),
   bannerMobileKey: key.default(null),
   logoKey: key.default(null),
@@ -253,6 +255,8 @@ export interface CheckoutConfigDraft {
   imageSrc: string | null;
   fields: Record<BuyerField, boolean>;
   address: boolean;
+  /** Quantidade máxima que o comprador pode escolher (1 = sem seletor). */
+  maxQuantity: number;
   shipping: ShippingDraft[];
   shippingDefault: string | null;
   bumps: BumpDraft[];
@@ -285,6 +289,7 @@ export function checkoutConfigDraft(config: CheckoutConfig): CheckoutConfigDraft
     imageSrc: checkoutImageSrc(config.imageKey),
     fields: { ...config.fields },
     address: config.address,
+    maxQuantity: config.maxQuantity,
     shipping: config.shipping.map((s) => ({ id: s.id, name: s.name, eta: s.eta, price: centsText(s.priceCents) })),
     shippingDefault: defaultShipping(config)?.id ?? null,
     bumps: config.bumps.map((b) => ({
@@ -488,6 +493,7 @@ export function checkoutConfigFromDraft(
     imageKey: image(draft.imageSrc, "image"),
     fields,
     address: draft.address,
+    maxQuantity: Math.min(Math.max(Math.floor(draft.maxQuantity) || 1, 1), CHECKOUT_LIMITS.quantityMax),
     shipping,
     shippingDefault,
     bumps,

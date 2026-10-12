@@ -206,6 +206,8 @@ export function publicPaymentProduct(
 export interface PaymentRenderOptions {
   endpoint: string;
   simulation: boolean;
+  /** Prévia com a chave da Kyvo salva: cobrança real, para testar (aviso em pt-BR, sem simular). */
+  realTest?: boolean;
   /** Endereço de uma página do funil a partir da página renderizada (página de obrigado). */
   pageHref: (pageId: string) => string;
   scriptTag?: string;
@@ -227,6 +229,7 @@ export function paymentRenderFor(
   return {
     endpoint: opts.endpoint,
     simulation: opts.simulation,
+    ...(opts.realTest ? { realTest: true } : {}),
     products: out,
     ...(opts.scriptTag ? { scriptTag: opts.scriptTag } : {}),
     ...(checkout ? { checkout: true } : {}),

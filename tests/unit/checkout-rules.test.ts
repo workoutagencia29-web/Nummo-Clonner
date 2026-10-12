@@ -444,6 +444,7 @@ describe("contrato do endpoint", () => {
 
   it("total = produto + bumps escolhidos + frete escolhido (preços do servidor)", () => {
     expect(checkoutTotal(prices, ["bump0002"], "frete001")).toEqual({
+      quantidade: 1,
       produto: 9_700,
       bumps: ["bump0002"],
       valorBumps: 1_000,
@@ -460,6 +461,19 @@ describe("contrato do endpoint", () => {
     // Sem endereço, frete mandado é inválido.
     expect(checkoutTotal({ ...prices, endereco: false }, [], "frete001")).toBeNull();
     expect(checkoutTotal({ ...prices, endereco: false }, ["bump0001"], null)?.total).toBe(12_400);
+  });
+
+  it("quantidade: multiplica o produto e respeita o máximo", () => {
+    const p3 = { ...prices, maxQtd: 3, endereco: false };
+    // Produto 9700 × 3 = 29100, + bump0001 (2700) = 31800.
+    expect(checkoutTotal(p3, ["bump0001"], null, 3)).toMatchObject({ quantidade: 3, produto: 29_100, total: 31_800 });
+    expect(checkoutTotal(p3, [], null, 1)?.total).toBe(9_700);
+    // Fora da faixa (0, acima do máximo, não inteiro): inválido.
+    expect(checkoutTotal(p3, [], null, 0)).toBeNull();
+    expect(checkoutTotal(p3, [], null, 4)).toBeNull();
+    expect(checkoutTotal(p3, [], null, 1.5)).toBeNull();
+    // Sem maxQtd (= 1), qualquer quantidade acima de 1 é inválida.
+    expect(checkoutTotal({ ...prices, endereco: false }, [], null, 2)).toBeNull();
   });
 
   it("lê o pedido: só ids e dados de quem compra (preço do navegador é ignorado)", () => {
@@ -494,6 +508,7 @@ describe("contrato do endpoint", () => {
       email: "maria@exemplo.com.br",
       telefone: "11987654321",
       documento: "529.982.247-25",
+      quantidade: 1,
       bumps: ["bump0001"],
       frete: "frete001",
       endereco: {
@@ -577,7 +592,7 @@ describe("o que falta configurar", () => {
     expect(checkoutIssues(check())).toEqual([]);
   });
 
-  it("chave por gateway, produto incompleto, bump sem acesso, página sem o bloco, frete sem endereço", () => {
+  it("chave por gateway, produto sem página de obrigado, página sem o bloco (produto com link) e frete sem endereço", () => {
     const issues = checkoutIssues(
       check({
         keys: { FLEVOPAY: "missing", BLACKCAT: "rejected" },
@@ -602,14 +617,33 @@ describe("o que falta configurar", () => {
         label: "Checkout",
         currency: null,
         thankYou: true,
-        access: true,
-        bumpsAccess: ["Apostila"],
+        // O link de acesso (do produto e dos bumps) é opcional: nunca entra como "falta".
+        access: false,
+        bumpsAccess: [],
         amount: null,
         address: false,
       },
+      // O "Upsell" tem link de acesso e a página de obrigado está sem o bloco → aviso do bloco.
       { kind: "accessBlock", pageName: "Obrigado", documentId: "doc1", labels: ["Upsell"] },
       { kind: "shipping", linkId: "l2", label: "Upsell", priceCents: 1_990, currency: "BRL" },
     ]);
+  });
+
+  it("link de acesso é opcional: sem ele, nem o produto nem a falta do bloco viram problema", () => {
+    // Produto sem link de acesso, sem bloco de acesso na página de obrigado: nada a resolver.
+    expect(
+      checkoutIssues(
+        check({
+          products: [
+            product({
+              hasAccessUrl: false,
+              bumpsWithoutAccess: ["Apostila"],
+              thankYou: { pageId: "p1", name: "Obrigado", missingAccessDocumentId: "doc1" },
+            }),
+          ],
+        }),
+      ),
+    ).toEqual([]);
   });
 
   it("gateway que não cobra na moeda da oferta (a chave dele não conta) e total fora da faixa", () => {

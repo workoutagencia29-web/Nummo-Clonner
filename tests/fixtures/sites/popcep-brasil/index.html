@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Vagas na sua região</title></head>
+<body>
+  <main><img src="/logo.svg" alt="Loja" width="120" height="32"><h1>Ofertas da sua região</h1></main>
+  <div class="cep-modal" style="position:fixed;inset:0;background:rgba(0,0,0,.6);display:flex;align-items:center;justify-content:center">
+    <div style="background:#fff;padding:24px;border-radius:12px;max-width:360px">
+      <h2>Confirme sua região</h2>
+      <input id="cepInput" placeholder="00000-000" inputmode="numeric">
+      <button id="verificarBtn" type="button">Verificar CEP</button>
+      <div id="erroCep" style="display:none;color:#c00"></div>
+      <div id="localInfo" style="display:none"></div>
+      <button id="confirmarBtn" type="button" style="display:none">Ver as ofertas</button>
+    </div>
+  </div>
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      window.scrollTo(0, 0);
+      const verificarBtn = document.getElementById("verificarBtn");
+      const confirmarBtn = document.getElementById("confirmarBtn");
+      verificarBtn.addEventListener("click", async function () {
+        const cep = document.getElementById("cepInput").value.replace(/\D/g, "");
+        const erroDiv = document.getElementById("erroCep");
+        const localDiv = document.getElementById("localInfo");
+        erroDiv.style.display = "none";
+        localDiv.style.display = "none";
+        confirmarBtn.style.display = "none";
+        if (cep.length !== 8) {
+          erroDiv.innerText = "Formato de CEP inválido. Use 00000-000.";
+          erroDiv.style.display = "block";
+          return;
+        }
+        try {
+          const response = await fetch(`https://brasilapi.com.br/api/cep/v1/${cep}`);
+          const data = await response.json();
+          if (data && data.city && data.state) {
+            localDiv.innerHTML = `📍 <strong>Localização:</strong> ${data.city}/${data.state}<br><small>Foram encontradas 23 ofertas para sua região!</small>`;
+            localDiv.style.display = "block";
+            confirmarBtn.style.display = "block";
+          } else {
+            erroDiv.innerText = "CEP não encontrado.";
+            erroDiv.style.display = "block";
+          }
+        } catch (error) {
+          erroDiv.innerText = "Erro ao consultar o CEP. Tente novamente.";
+          erroDiv.style.display = "block";
+        }
+      });
+      confirmarBtn.addEventListener("click", function () {
+        document.querySelector(".cep-modal").style.display = "none";
+        window.scrollTo(0, 0);
+      });
+    });
+  </script>
+</body>
+</html>

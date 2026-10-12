@@ -140,13 +140,15 @@ export function paymentIssues(check: PaymentCheck): PaymentIssue[] {
   for (const p of check.products) {
     const methods = methodsProblem(p.currency, p.methods);
     const amount = !methods && p.amountCents !== undefined ? amountProblem(p.amountCents, p.currency, p.methods) : null;
-    if (!p.thankYou || !p.hasAccessUrl || methods || amount) {
+    // O link de acesso é OPCIONAL: muita venda high-ticket não tem entregável por link (a entrega é
+    // por fora — call, reunião, outro sistema). Não falta nada para vender.
+    if (!p.thankYou || methods || amount) {
       out.push({
         kind: "product",
         linkId: p.linkId,
         label: p.label,
         thankYou: !p.thankYou,
-        access: !p.hasAccessUrl,
+        access: false,
         methods,
         amount,
       });
@@ -155,7 +157,8 @@ export function paymentIssues(check: PaymentCheck): PaymentIssue[] {
   const pages = new Map<string, { pageName: string; documentId: string; labels: string[] }>();
   for (const p of check.products) {
     const doc = p.thankYou?.missingAccessDocumentId;
-    if (!p.thankYou || !doc) continue;
+    // Só avisa que falta o bloco "Acesso ao produto" quando há o que entregar (o produto tem link).
+    if (!p.thankYou || !doc || !p.hasAccessUrl) continue;
     const entry = pages.get(p.thankYou.pageId) ?? { pageName: p.thankYou.name, documentId: doc, labels: [] };
     if (!entry.labels.includes(p.label)) entry.labels.push(p.label);
     pages.set(p.thankYou.pageId, entry);

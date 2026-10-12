@@ -57,12 +57,17 @@ export default async function CloneJobPage({ params }: PageProps<"/clonar/[jobId
   // Oferta na lixeira: a página dela não abre; a lixeira mostra como restaurar.
   if (job.status === "SAVED" && job.offerId) redirect(job.offer?.deletedAt ? "/lixeira" : `/ofertas/${job.offerId}`);
 
-  const options = job.options as { fileName?: string; devices?: string[] } | null;
+  const options = job.options as {
+    fileName?: string;
+    devices?: string[];
+    funnel?: boolean;
+    funnelStopped?: boolean;
+  } | null;
   const label = job.sourceUrl ?? options?.fileName ?? "HTML colado";
 
   if (job.status === "QUEUED" || job.status === "RUNNING") {
     const status = await getCloneStatus(job.id);
-    return <CloneProgress jobId={job.id} label={label} initial={status} />;
+    return <CloneProgress jobId={job.id} label={label} initial={status} funnel={options?.funnel === true} />;
   }
 
   // Arquivo enviado (ZIP/HTML) apagado pela limpeza automática: não dá para repetir.
@@ -136,6 +141,7 @@ export default async function CloneJobPage({ params }: PageProps<"/clonar/[jobId
       offerDeleted={job.status === "SAVED" && !job.offerId}
       frozenTimer={frozenTimer}
       defaultCurrency={currency}
+      funnelSearch={{ on: options?.funnel === true, stopped: options?.funnelStopped === true }}
     />
   );
 }

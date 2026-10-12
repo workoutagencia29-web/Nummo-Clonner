@@ -22,10 +22,9 @@ import { switchOfferCurrency } from "@/server/services/offer-currency";
 import { createOfferLink } from "@/server/services/offer-links";
 import { createOffer } from "@/server/services/offers";
 import { createPage } from "@/server/services/pages";
-import { savePaymentGatewayKey } from "@/server/services/payments/gateways";
 import { savePaymentProduct } from "@/server/services/payments/products";
 import { resetDatabase } from "../setup/per-file";
-import { type FakeKyvo, KYVO_KEY, startFakeKyvo } from "./kyvo-fake";
+import { type FakeKyvo, startFakeKyvo } from "./kyvo-fake";
 
 const ROOT = path.resolve(import.meta.dirname, "../..");
 const PRINTS = process.env.OS_PRINTS_DIR;
@@ -85,7 +84,8 @@ async function storeOffer() {
   const offer = await createOffer({ name: "Loja", templateId: "loja", currency: "BRL" });
   const product = await createPage({ offerId: offer.id, name: "Fone", templateId: "produto" });
   const link = await createOfferLink(offer.id, { label: "Checkout", url: "", kind: "CHECKOUT" });
-  await savePaymentGatewayKey(offer.id, "KYVO", KYVO_KEY);
+  // Sem a chave da Kyvo salva: a prévia SIMULA a janela (o afterAll confere kyvo.requests === []).
+  // A cobrança real com a chave salva tem testes próprios (payments-live-preview, checkout-preview-browser).
   await savePaymentProduct(link.id, {
     name: "Fone de ouvido",
     amount: "497",

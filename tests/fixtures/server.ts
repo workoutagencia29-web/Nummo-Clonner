@@ -60,9 +60,11 @@ export interface SiteConfig {
   uaSplit: boolean;
   challenge: boolean;
   delayMs: number;
+  /** Site-aplicativo (React/Vite): caminho sem arquivo nem extensão serve o index.html da raiz. */
+  spa: boolean;
 }
 
-const DEFAULT_CONFIG: SiteConfig = { charset: "utf-8", uaSplit: false, challenge: false, delayMs: 0 };
+const DEFAULT_CONFIG: SiteConfig = { charset: "utf-8", uaSplit: false, challenge: false, delayMs: 0, spa: false };
 
 const MOBILE_UA = /iPhone|Android|Mobile/i;
 
@@ -127,6 +129,7 @@ export async function readSiteConfig(site: string): Promise<SiteConfig> {
       uaSplit: raw.uaSplit === true,
       challenge: raw.challenge === true,
       delayMs: typeof raw.delayMs === "number" && raw.delayMs > 0 ? raw.delayMs : 0,
+      spa: raw.spa === true,
     };
   } catch {
     return { ...DEFAULT_CONFIG };
@@ -273,7 +276,11 @@ async function handle(req: http.IncomingMessage, res: http.ServerResponse, reque
   }
 
   const mobile = config.uaSplit && MOBILE_UA.test(req.headers["user-agent"] ?? "");
-  const file = await resolveFile(siteDir, rawUrl, mobile);
+  let file = await resolveFile(siteDir, rawUrl, mobile);
+  // Site-aplicativo: qualquer rota (sem extensão) devolve o index.html, como a hospedagem deles.
+  if (!file && config.spa && !/\.[a-z0-9]{1,6}$/i.test(rawUrl.split("?")[0] ?? "")) {
+    file = await resolveFile(siteDir, "/", mobile);
+  }
   const baseHeaders: Record<string, string> = { "x-fixture-site": site };
   if (config.uaSplit) baseHeaders.vary = "User-Agent";
 

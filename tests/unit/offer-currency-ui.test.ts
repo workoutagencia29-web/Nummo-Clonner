@@ -384,6 +384,7 @@ describe("Salvar como oferta (clonagem)", () => {
           currency: "MXN",
           keepRemoved: [],
           childJobIds: [],
+          modes: { job1: "EDITABLE" },
         },
       },
     ]);

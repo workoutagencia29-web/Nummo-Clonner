@@ -18,7 +18,6 @@ import { createPreviewToken } from "@/lib/preview";
 import { createOfferLink } from "@/server/services/offer-links";
 import { createOffer } from "@/server/services/offers";
 import { createPage } from "@/server/services/pages";
-import { savePaymentGatewayKey } from "@/server/services/payments/gateways";
 import { savePaymentProduct } from "@/server/services/payments/products";
 import { resetDatabase } from "../setup/per-file";
 import { type FakeKyvo, KYVO_KEY, startFakeKyvo } from "./kyvo-fake";
@@ -137,7 +136,10 @@ async function paymentOffer() {
   await prisma.pageDocument.updateMany({ where: { variant: { pageId: home.id } }, data: { html: HTML } });
   const mx = await createOfferLink(offer.id, { label: "Checkout", url: "", kind: "CHECKOUT" });
   const eu = await createOfferLink(offer.id, { label: "Europa", url: "", kind: "UPSELL" });
-  await savePaymentGatewayKey(offer.id, "KYVO", KYVO_KEY);
+  // Sem a chave da Kyvo salva: a prévia SIMULA (nada é cobrado). O OS_KYVO_API_BASE aponta para o
+  // fake só como guarda — na simulação a prévia nunca deve chamar o gateway (afterAll confere
+  // kyvo.requests === []). O caminho de cobrança real (com a chave salva) tem testes próprios
+  // em payments-live-preview.test.ts e checkout-preview-browser.test.ts.
   await savePaymentProduct(mx.id, {
     name: "Curso México",
     amount: "297",

@@ -221,8 +221,10 @@ describe("pagamento na página no ZIP", () => {
     expect(keyWarning).toBeDefined();
     expect(exportWarningFix(keyWarning as string)).toEqual({ kind: "paymentKey" });
     const linkWarning = plan.warnings.find((w) => w.startsWith("O link “Checkout principal”"));
-    expect(linkWarning).toContain("está sem página de obrigado e sem link de acesso");
-    expect(linkWarning).toContain("o pagamento.php não cobra esse produto");
+    // O link de acesso é opcional: só a página de obrigado entra como "falta" (a cobrança funciona).
+    expect(linkWarning).toContain("está sem página de obrigado");
+    expect(linkWarning).not.toContain("sem link de acesso");
+    expect(linkWarning).not.toContain("não cobra esse produto");
     expect(exportWarningFix(linkWarning as string)).toEqual({ kind: "paymentLink" });
     expect(plan.paymentLinks).toEqual([{ linkId: o.linkId, label: "Checkout principal" }]);
 
@@ -274,7 +276,8 @@ describe("pagamento na página no ZIP", () => {
     );
     expect(r.items.find((i) => i.id === "pagamento")).toMatchObject({
       title: "Completar o pagamento de “Checkout principal”",
-      detail: "Falta a página de obrigado e o link de acesso: sem eles, quem pagar não recebe o acesso ao produto.",
+      // O link de acesso é opcional: só a página de obrigado entra como "falta".
+      detail: "Falta a página de obrigado: sem ela, quem pagar não recebe o acesso ao produto.",
       cta: "Abrir o link",
       target: { link: o.linkId },
     });

@@ -137,15 +137,19 @@ export function checkoutIssues(check: CheckoutCheck): CheckoutIssue[] {
     if (!currency && !methodsOk) amount = "Nenhuma forma de pagamento serve para o gateway e a moeda.";
     // Veio de um backup ou de uma gravação de antes da regra: em peso, euro ou dólar não há endereço.
     const address = p.address && (!addressAllowed(check.offerCurrency) || !addressAllowed(p.currency));
-    if (currency || amount || address || !p.thankYou || !p.hasAccessUrl || p.bumpsWithoutAccess.length) {
+    // O link de acesso (do produto e dos bumps) é OPCIONAL: muita venda high-ticket não tem
+    // entregável por link (mentoria, agência, assessoria — a entrega é por fora: call, reunião,
+    // outro sistema). Não falta nada para vender; o bloco "Acesso ao produto", se usado, continua
+    // para quem tem link (o aviso de "adicione o bloco" abaixo só vale aí).
+    if (currency || amount || address || !p.thankYou) {
       out.push({
         kind: "product",
         linkId: p.linkId,
         label: p.label,
         currency,
         thankYou: !p.thankYou,
-        access: !p.hasAccessUrl,
-        bumpsAccess: p.bumpsWithoutAccess,
+        access: false,
+        bumpsAccess: [],
         amount,
         address,
       });
@@ -154,7 +158,9 @@ export function checkoutIssues(check: CheckoutCheck): CheckoutIssue[] {
   const pages = new Map<string, { pageName: string; documentId: string; labels: string[] }>();
   for (const p of check.products) {
     const doc = p.thankYou?.missingAccessDocumentId;
-    if (!p.thankYou || !doc) continue;
+    // Só avisa que falta o bloco "Acesso ao produto" quando há o que entregar (o produto tem link
+    // de acesso). Sem entregável por link, a página de obrigado não precisa do bloco.
+    if (!p.thankYou || !doc || !p.hasAccessUrl) continue;
     const entry = pages.get(p.thankYou.pageId) ?? { pageName: p.thankYou.name, documentId: doc, labels: [] };
     if (!entry.labels.includes(p.label)) entry.labels.push(p.label);
     pages.set(p.thankYou.pageId, entry);

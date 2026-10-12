@@ -19,10 +19,13 @@ export function CloneProgress({
   jobId,
   label,
   initial,
+  funnel = false,
 }: {
   jobId: string;
   label: string;
   initial: CloneStatus | null;
+  /** "Clonar o funil inteiro" ligado: depois desta página, o robô segue para as próximas. */
+  funnel?: boolean;
 }) {
   const router = useRouter();
   const { status, logs, offline } = useCloneStatus(jobId, initial, true);
@@ -43,7 +46,7 @@ export function CloneProgress({
   return (
     <div className="flex max-w-3xl flex-col gap-6">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Clonando…</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">{funnel ? "Clonando o funil…" : "Clonando…"}</h1>
         <p className="mt-1 truncate text-sm text-muted-foreground" title={label}>
           {label}
         </p>
@@ -57,7 +60,9 @@ export function CloneProgress({
           <CardDescription>
             {queued && !workerDown && status?.otherRunning
               ? "Outra clonagem está em andamento. Esta começa em seguida."
-              : "Pode levar de 30 segundos a alguns minutos, dependendo do tamanho da página e dos vídeos."}
+              : funnel
+                ? "Primeiro a página do link (o robô clica pelo quiz ou pela roleta para achar a próxima etapa). Quando ela ficar pronta, a revisão abre com o mapa do funil e as próximas páginas vão aparecendo nele."
+                : "Pode levar de 30 segundos a alguns minutos, dependendo do tamanho da página e dos vídeos."}
           </CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">

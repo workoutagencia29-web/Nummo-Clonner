@@ -324,6 +324,21 @@ function fakeFunnel(s: Session, outcome: Record<string, "REVIEW" | "FAILED"> = {
         title: null,
         devices: ["desktop"],
         matchKey: url.replace(/^https?:\/\//, ""),
+        from: "main",
+        depth: 1,
+        order: 0,
+        via: "manual",
+        linkLabel: "",
+        product: false,
+        kind: null,
+        name: "",
+        finalKey: null,
+        suggestedMode: null,
+        thumbnailKey: null,
+        duplicate: false,
+        checkouts: 0,
+        checkoutPlatform: null,
+        exploreStop: null,
         left: polls,
       });
       created.push(id);
@@ -405,6 +420,8 @@ describe("Revisão da clonagem: páginas do funil marcadas e ainda não clonadas
         currency: "BRL",
         keepRemoved: [],
         childJobIds: ["c1", "c2"],
+        // Modo de cada página (o mapa do funil deixa escolher; aqui, o recomendado).
+        modes: { job1: "EDITABLE", c1: "EDITABLE", c2: "EDITABLE" },
       },
     ]);
     await waitFor(async () => (await navs(page)).length > 0, "a ida para a oferta");

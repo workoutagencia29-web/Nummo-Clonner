@@ -15,6 +15,7 @@ import { prisma } from "@/lib/db";
 import { env } from "@/lib/env";
 import { UserError } from "@/lib/errors";
 import { getObject, mimeFromKey, objectExists, putObject, storagePath } from "@/lib/storage";
+import { expandFunnel } from "@/server/services/clone-funnel";
 import { buildClone } from "./build";
 import { type CaptureResult, CloneCanceledError, capturePage, type LogFn, type VirtualSite } from "./capture";
 import { decodeText } from "./charset";
@@ -34,6 +35,11 @@ export const CloneOptionsSchema = z.object({
   pastedBaseUrl: z.string().url().optional(),
   /** Nome do arquivo enviado (ZIP), para exibir. */
   fileName: z.string().max(300).optional(),
+  /**
+   * Clonar o funil inteiro: o robô clica pela página (quiz, roleta…) e, no
+   * fim, as páginas a que ela leva entram na fila (services/clone-funnel.ts).
+   */
+  funnel: z.boolean().catch(false).default(false),
 });
 export type CloneOptions = z.infer<typeof CloneOptionsSchema>;
 
@@ -70,6 +76,8 @@ export interface CloneLimits {
   /** Espera do DOMContentLoaded e do "load" (ver CaptureOptions); só os testes mudam. */
   domReadyMs?: number;
   loadMs?: number;
+  /** Prazo do robô que clica pela página (funil inteiro); só os testes mudam. */
+  exploreMs?: number;
 }
 
 export const DEFAULT_CLONE_LIMITS: CloneLimits = {
@@ -557,6 +565,9 @@ export async function runCloneJob(jobId: string, limitsOverride: Partial<CloneLi
             virtualSite,
             domReadyTimeoutMs: limits.domReadyMs,
             loadTimeoutMs: limits.loadMs,
+            // O robô clica só no computador (a versão de celular é a mesma página).
+            explore: options.funnel && job.source === "URL" && (device === "desktop" || deviceList.length === 1),
+            exploreMs: limits.exploreMs,
           });
         } finally {
           clearDeadline(watchdog);
@@ -619,6 +630,7 @@ export async function runCloneJob(jobId: string, limitsOverride: Partial<CloneLi
       startedAt,
       virtualSite,
       fileName: options.fileName,
+      funnel: options.funnel && job.source === "URL",
       onProgress: (f) => {
         touch();
         void setProgress(55 + f * 40, "Baixando arquivos e montando a cópia");
@@ -641,6 +653,21 @@ export async function runCloneJob(jobId: string, limitsOverride: Partial<CloneLi
         "SUCCESS",
         `Cópia pronta: ${result.stats.assets} arquivos (${(result.stats.bytes / 1024 / 1024).toFixed(1)} MB), ${result.removed.length} rastreador(es) removido(s), ${result.checkouts.length} link(s) de checkout.`,
       );
+      // Funil inteiro: as próximas páginas entram na fila (ou esta repetiu outra e sai do mapa).
+      if (options.funnel) {
+        try {
+          const next = await withDbRetry(() => expandFunnel(jobId));
+          if (next.duplicateOf) log("INFO", "Esta página é a mesma de outra página do funil: ficou de fora.");
+          else if (next.created.length) {
+            log(
+              "INFO",
+              `${next.created.length === 1 ? "1 página do funil entrou" : `${next.created.length} páginas do funil entraram`} na fila.`,
+            );
+          }
+        } catch (err) {
+          console.error(`[clone ${jobId}] funil:`, err);
+        }
+      }
     } else {
       log("WARN", CANCELED_MESSAGE);
     }

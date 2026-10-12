@@ -214,6 +214,7 @@ export function createPayWindow(cfg: PaymentPageConfig, endpoint: string, key: s
     const price = make("p", "os-pw-p", money(product.valor, product.moeda));
     box.append(x, kicker, name, price);
     if (sim) box.appendChild(make("p", "os-pw-sim", SIM_TEXTS.banner));
+    else if (cfg.testeReal) box.appendChild(make("p", "os-pw-sim", SIM_TEXTS.realNote));
     body = make("div", "os-pw-body");
     live = make("p", "os-pw-sr");
     live.setAttribute("aria-live", "polite");
@@ -866,7 +867,8 @@ export function createPayWindow(cfg: PaymentPageConfig, endpoint: string, key: s
     const again = button("os-pw-go", t.again, () => (retry ? retry() : showForm()));
     const nodes: Node[] = [ctr, again];
     // Na prévia, o código ajuda você a achar o problema (o comprador nunca vê).
-    if (sim) nodes.push(make("p", "os-pw-sim", `Prévia: o servidor de pagamento respondeu “${code}”.`));
+    if (sim || cfg.testeReal)
+      nodes.push(make("p", "os-pw-sim", `Prévia: o servidor de pagamento respondeu “${code}”.`));
     render("error", nodes, again);
   }
 

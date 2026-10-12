@@ -295,6 +295,9 @@ export function payTexts(locale: PayLocale): PayTexts {
 /** Controles da simulação (prévia do Offer Studio): para você, em português do Brasil. */
 export const SIM_TEXTS = {
   banner: "Prévia do Offer Studio: nada é cobrado. Use os botões de simulação para testar.",
+  /** Prévia com a chave do gateway salva: a cobrança é real (para você testar de verdade). */
+  realNote:
+    "Prévia do Offer Studio com pagamento REAL (a chave do gateway está salva). Pague com um valor baixo para testar de ponta a ponta — ninguém mais vê esta página.",
   cardBox:
     "Aqui aparece o formulário de pagamento da Kyvo (cartão, Bizum ou MB WAY). Na prévia, simule o resultado com os botões abaixo.",
   approve: "Simular pagamento aprovado",

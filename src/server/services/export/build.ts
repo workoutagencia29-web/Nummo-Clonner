@@ -22,7 +22,11 @@
  * - /os-assets/<arquivo> → assets/<arquivo> (também dentro dos CSS, que são
  *   copiados com as referências reescritas, recursivamente); com o endereço no
  *   ar, a imagem de compartilhamento (og:image, twitter:image) com endereço
- *   completo.
+ *   completo;
+ * - funil clonado "Com scripts" (src/lib/export/routes.ts): o script de rotas
+ *   põe o caminho original na barra antes dos scripts da página, então os
+ *   endereços relativos dela sobem até a raiz (valem antes e depois da
+ *   troca); nos caminhos originais livres, um index.html que leva à página.
  * O divisor A/B de cada página é montado depois das versões: ele copia do
  * <head> da versão de controle as metas de verificação, de compartilhamento e
  * o ícone (o endereço da página é o que verificadores e o WhatsApp leem).
@@ -31,6 +35,7 @@
 import { createHash } from "node:crypto";
 import sharp from "sharp";
 import { ZIP_CHECKOUT_DIR } from "@/lib/checkout/contract";
+import { offerRoutes } from "@/lib/clone-routes";
 import { UserError } from "@/lib/errors";
 import { rebaseCheckoutLinks, rebaseCheckoutPrizes, zipCheckoutDir } from "@/lib/export/checkout-pages";
 import {
@@ -78,6 +83,7 @@ import {
   type ServerEventPixel,
 } from "@/lib/export/php";
 import { leiaMe } from "@/lib/export/readme";
+import { routeRedirectHtml, zipPageRoutes } from "@/lib/export/routes";
 import { splitterHtml } from "@/lib/export/splitter";
 import {
   clonedCheckoutWarning,
@@ -317,20 +323,26 @@ export async function buildExport(input: BuildInput): Promise<BuildResult> {
     }
     return lighter.apply((f) => sizes.get(f));
   }
+  /** Funil clonado "Com scripts": caminho original de cada página → pasta dela no ZIP. */
+  const routes = offerRoutes(source.pages);
   /** HTML final de cada página (o divisor copia metas da versão de controle). */
   const rendered = new Map<string, string>();
   /** HTML da primeira página do ZIP que não é o divisor (idioma do 404.html). */
   const firstHtml = () => rendered.get(layout.files.find((f) => !f.splitter)?.path ?? "") ?? "";
 
   async function renderFile(file: LayoutFile, page: SourcePage, doc: SourceDocument | null): Promise<string> {
-    const rel = upPrefix(file.dir);
+    // "Com scripts" com o caminho original na barra: os endereços relativos sobem até a raiz
+    // (valem antes e depois da troca do endereço, ver src/lib/export/routes.ts).
+    const pageRoutes = file.preserveJs ? zipPageRoutes(routes, page.id, file.dir, layout.pageDirs) : null;
+    const refDir = pageRoutes?.refDir ?? file.dir;
+    const rel = upPrefix(refDir);
     const pageHref = (id: string) => {
       const dir = layout.pageDirs[id];
       if (dir === undefined) {
         brokenLinks.add(page.name);
         return "#";
       }
-      return relativeDir(file.dir, dir);
+      return relativeDir(refDir, dir);
     };
     const loaded = await loadTracking({
       offerId: source.offer.id,
@@ -347,7 +359,7 @@ export async function buildExport(input: BuildInput): Promise<BuildResult> {
     const pageCode = parsePageCode(page.customCode);
     let out = renderPageHtml(doc?.html ?? blankPageHtml(page.name), {
       // Checkout do Offer Studio: a página checkout/<chave>/ relativa a esta pasta.
-      links: rebaseCheckoutLinks(source.links, file.dir, checkoutRoot),
+      links: rebaseCheckoutLinks(source.links, refDir, checkoutRoot),
       pageHref,
       runtimeTag: `<script src="${rel}${ASSETS_DIR}${runtime.name}" data-os-runtime></script>`,
       // Só entra nas páginas com galeria, caixa de compra ou "Voltar para a loja".
@@ -366,7 +378,7 @@ export async function buildExport(input: BuildInput): Promise<BuildResult> {
       // Moeda da oferta: telefone de fora do Brasil no formulário e NIF de 9 algarismos (como na prévia).
       currency: settings.currency,
       seo,
-      wheel: rebaseCheckoutPrizes(wheel, file.dir, checkoutRoot),
+      wheel: rebaseCheckoutPrizes(wheel, refDir, checkoutRoot),
       // Pagamento na página: o pagamento.php da raiz e a página de obrigado, relativos a esta pasta.
       payments: zipPaymentRender(payment, {
         rel,
@@ -376,6 +388,7 @@ export async function buildExport(input: BuildInput): Promise<BuildResult> {
           : "",
         checkout: checkout !== null,
       }),
+      routes: pageRoutes?.config ?? null,
     });
     // Verificação de domínio (Meta, Google…) colada nos códigos livres: sempre
     // no <head> de verdade. O código em espera do "Aceitar" já a deixa de fora
@@ -488,6 +501,12 @@ export async function buildExport(input: BuildInput): Promise<BuildResult> {
     out = rewriteAssetRefs(out, rel, wanted);
     if (input.options.optimizeHtml) out = optimizeHtml(out);
     generated.set(`${dir}index.html`, Buffer.from(out, "utf8"));
+  }
+
+  // Funil clonado "Com scripts": os caminhos originais livres levam à pasta da página.
+  for (const redirect of plan.redirects) {
+    if (!generated.has(redirect.zipPath))
+      generated.set(redirect.zipPath, Buffer.from(routeRedirectHtml(redirect), "utf8"));
   }
 
   if (brokenLinks.size) {

@@ -84,6 +84,16 @@ async function readableKey(offerId: string, provider: PaymentProviderId, db: Db 
   return tryDecryptSecret(row?.apiKeyEnc);
 }
 
+/**
+ * A oferta tem chave legível deste gateway? (sem lançar) — a prévia decide com
+ * isto se cobra de verdade (chave salva) ou só simula (sem chave). Uma chave
+ * salva mas ilegível (APP_ENCRYPTION_KEY trocada) conta como ausente: a prévia
+ * volta a simular em vez de quebrar.
+ */
+export async function hasGatewayKey(offerId: string, provider: PaymentProviderId, db: Db = prisma): Promise<boolean> {
+  return (await readableKey(offerId, provider, db)) !== null;
+}
+
 /** Outras ofertas (fora da lixeira) com chave legível deste gateway, já decifrada (só aqui no servidor). */
 async function otherOfferKeys(offerId: string, provider: PaymentProviderId, db: Db = prisma) {
   const rows = await db.paymentGateway.findMany({

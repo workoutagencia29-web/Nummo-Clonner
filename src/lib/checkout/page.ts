@@ -110,6 +110,8 @@ export interface PublicCheckoutOptions {
   endpoint: string;
   /** Prévia do app: nada é cobrado. */
   simulation: boolean;
+  /** Prévia com a chave do gateway salva: a cobrança é real (aviso em pt-BR, sem simular). */
+  realTest?: boolean;
   /** Chave do storage → endereço da imagem a partir da página (null = sem imagem). */
   imageHref: (key: string | null) => string | null;
   /** Endereço da página de obrigado a partir da página de checkout (null = sem). */
@@ -136,6 +138,7 @@ export function publicCheckoutConfig(p: CheckoutPageProduct, opts: PublicCheckou
     v: CHECKOUT_CONFIG_VERSION,
     endpoint: opts.endpoint,
     simulacao: opts.simulation,
+    ...(opts.realTest ? { testeReal: true } : {}),
     chave: p.key,
     nome: p.name,
     descricao: c.description,
@@ -158,6 +161,7 @@ export function publicCheckoutConfig(p: CheckoutPageProduct, opts: PublicCheckou
       valorDe: b.compareAtCents !== null && b.compareAtCents > b.priceCents ? b.compareAtCents : null,
       imagem: opts.imageHref(b.imageKey),
     })),
+    maxQtd: c.maxQuantity,
     cor: c.color,
     bannerComputador: opts.imageHref(c.bannerDesktopKey),
     bannerCelular: opts.imageHref(c.bannerMobileKey),
@@ -248,14 +252,8 @@ button,input,select{font:inherit;color:inherit}
 .osc-timer{position:sticky;top:0;z-index:20;display:flex;align-items:center;justify-content:center;gap:8px;padding:10px 16px;background:var(--osc-c);color:var(--osc-on);font-weight:700;font-size:15px;text-align:center}
 .osc-timer svg{width:18px;height:18px;flex:none}
 .osc-clock{display:inline-block;min-width:64px;padding:2px 10px;border-radius:999px;background:rgba(0,0,0,.18);font-variant-numeric:tabular-nums;font-size:16px}
-.osc-banner{display:block;width:100%;max-width:1100px;margin:0 auto}
-.osc-banner img{width:100%;height:auto}
-.osc-head{background:#fff;border-bottom:1px solid #e5e7eb}
-.osc-head .osc-wrap{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:60px}
-.osc-logo{max-height:40px;width:auto}
-.osc-brand{font-weight:800;font-size:17px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.osc-lock{display:inline-flex;align-items:center;gap:6px;color:#15803d;font-size:13px;font-weight:700;white-space:nowrap}
-.osc-lock svg{width:16px;height:16px}
+.osc-banner{display:block;width:100%}
+.osc-banner img{display:block;width:100%;height:auto}
 .osc-grid{display:grid;gap:16px;padding-top:16px;padding-bottom:32px;grid-template-columns:minmax(0,1fr)}
 .osc-card{background:#fff;border:1px solid #e5e7eb;border-radius:14px;padding:18px 16px;box-shadow:0 1px 2px rgba(15,23,42,.04)}
 .osc-main{display:flex;flex-direction:column;gap:16px;min-width:0}
@@ -271,10 +269,15 @@ button,input,select{font:inherit;color:inherit}
 .osc-f input:focus,.osc-f select:focus{border-color:var(--osc-c);box-shadow:0 0 0 3px var(--osc-ring)}
 .osc-f input[aria-invalid=true],.osc-f select[aria-invalid=true]{border-color:#dc2626;box-shadow:0 0 0 3px rgba(220,38,38,.12)}
 .osc-f input[aria-invalid=true]:focus,.osc-f select[aria-invalid=true]:focus{border-color:#991b1b;box-shadow:0 0 0 3px rgba(220,38,38,.4)}
+.osc-f.osc-valid input:not([aria-invalid=true]){padding-right:40px;background-image:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%2316a34a'%20stroke-width='3'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='M20%206%209%2017l-5-5'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:right 13px center;background-size:17px}
+.osc-f-ac{position:relative}
+.osc-ac{position:absolute;left:0;right:0;z-index:30;background:#fff;border:1px solid #d1d5db;border-radius:10px;box-shadow:0 10px 30px rgba(15,23,42,.14);overflow:hidden;max-height:244px;overflow-y:auto}
+.osc-ac-i{padding:11px 14px;font-size:15px;color:#111827;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.osc-ac-i[aria-selected=true],.osc-ac-i:hover{background:var(--osc-tint)}
 .osc-err{color:#b91c1c;font-size:13px;line-height:1.35}
 .osc-note{margin:0;color:#6b7280;font-size:13px}
 [data-osc-cep-status]:empty{display:none}
-.osc-ship{display:flex;flex-direction:column;gap:8px;margin:16px 0 0;padding:0;border:0}
+.osc-ship{display:flex;flex-direction:column;gap:8px;margin:0;padding:0;border:0}
 .osc-ship legend{padding:0;margin:0 0 8px;font-size:14px;font-weight:700;color:#374151}
 .osc-opt{display:flex;align-items:center;gap:12px;padding:12px 14px;border:1px solid #d1d5db;border-radius:10px;cursor:pointer;background:#fff}
 .osc-opt input{width:18px;height:18px;margin:0;flex:none;accent-color:var(--osc-c)}
@@ -324,15 +327,26 @@ button,input,select{font:inherit;color:inherit}
 .osc-t{margin:0;padding:16px;background:#fff;border:1px solid #e5e7eb;border-radius:14px}
 .osc-stars{color:#f59e0b;letter-spacing:2px;font-size:14px}
 .osc-t blockquote{margin:6px 0 10px;font-size:15px;line-height:1.5;color:#1f2937;overflow-wrap:anywhere}
-.osc-t figcaption,.osc-brand,.osc-opt-t{overflow-wrap:anywhere}
+.osc-t figcaption,.osc-opt-t{overflow-wrap:anywhere}
 .osc-t figcaption{display:flex;align-items:center;gap:10px;font-weight:700;font-size:14px}
 .osc-t figcaption img{width:40px;height:40px;border-radius:50%;object-fit:cover}
 .osc-sum .osc-h{margin-bottom:12px}
-.osc-prod{display:flex;gap:12px;align-items:flex-start}
+.osc-prod{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
+.osc-sum .osc-price{white-space:nowrap}
+.osc-prod .osc-qty{margin-left:auto}
 .osc-prod img{width:72px;height:72px;object-fit:cover;border-radius:10px;flex:none;background:#f3f4f6}
 .osc-prod-t{flex:1;min-width:0;overflow-wrap:anywhere}
 .osc-prod-t b{display:block;font-size:16px;line-height:1.3}
 .osc-prod-t p{margin:4px 0 0;color:#6b7280;font-size:13px;line-height:1.4}
+.osc-qty{display:inline-flex;align-items:center;gap:0;border:1px solid #e5e7eb;border-radius:999px;flex:none;align-self:center;overflow:hidden}
+.osc-qty-b{width:34px;height:34px;border:0;background:#fff;color:var(--osc-dark);font-size:20px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center}
+.osc-qty-b:hover{background:var(--osc-tint)}
+.osc-qty-n{min-width:28px;text-align:center;font-weight:700;font-variant-numeric:tabular-nums}
+.osc-shipwrap{margin:16px 0 0}
+.osc-ship-h{margin:0 0 8px;font-size:14px;font-weight:700;color:#374151}
+.osc-ship-empty{border:1px dashed #d1d5db;border-radius:12px;padding:16px;color:#6b7280;text-align:center}
+.osc-ship-empty b{display:block;color:#374151;font-size:15px}
+.osc-ship-empty small{display:block;margin-top:4px;font-size:13px}
 .osc-lines{list-style:none;margin:14px 0 0;padding:12px 0 0;border-top:1px solid #e5e7eb;display:flex;flex-direction:column;gap:8px;font-size:14px}
 .osc-lines li{display:flex;justify-content:space-between;gap:12px}
 .osc-lines li span:first-child{color:#4b5563;min-width:0}
@@ -453,56 +467,56 @@ export function renderCheckoutDocument(cfg: PublicCheckoutConfig, opts: Checkout
         : "";
     banner = `<picture class="osc-banner">${mobile}<img src="${esc(bannerSrc)}" alt="" fetchpriority="high"></picture>`;
   }
-  const brand = cfg.logo
-    ? `<img class="osc-logo" src="${esc(cfg.logo)}" alt="${esc(opts.company?.name || cfg.nome)}">`
-    : `<span class="osc-brand">${esc(opts.company?.name || cfg.nome)}</span>`;
-  const header = `<header class="osc-head"><div class="osc-wrap">${brand}<span class="osc-lock">${ICON.lock}${esc(fx.secure)}</span></div></header>`;
-
-  // ── Resumo ──
+  // ── Resumo ("Seu carrinho") ──
   const productImg = cfg.imagem ? `<img src="${esc(cfg.imagem)}" alt="" width="72" height="72">` : "";
-  const firstShipping = cfg.fretes.find((s) => s.id === cfg.freteInicial) ?? null;
-  const lines: string[] = [];
-  if (firstShipping) {
-    lines.push(
-      `<li data-osc-line="frete"><span>${esc(fx.shipping)}</span><span>${firstShipping.valor ? esc(money(firstShipping.valor)) : `<span class="osc-free">${esc(fx.shippingFree)}</span>`}</span></li>`,
-    );
-  }
-  const total = cfg.valor + (firstShipping ? firstShipping.valor : 0);
+  // O frete só entra no total depois do CEP (a tela mostra "Preencha seu CEP…").
+  const total = cfg.valor;
+  // Seletor de quantidade (só quando o máximo é maior que 1).
+  const stepper =
+    cfg.maxQtd > 1
+      ? `<div class="osc-qty" data-osc-qty-box data-osc-max="${cfg.maxQtd}" role="group" aria-label="${esc(fx.quantity)}"><button type="button" class="osc-qty-b" data-osc-qty="-" aria-label="${esc(fx.qtyLess)}">&minus;</button><b class="osc-qty-n" data-osc-qtd aria-live="polite">1</b><button type="button" class="osc-qty-b" data-osc-qty="+" aria-label="${esc(fx.qtyMore)}">+</button></div>`
+      : "";
   const summary = `<aside class="osc-side"><section class="osc-card osc-sum" aria-labelledby="osc-sum-t"><h2 class="osc-h" id="osc-sum-t">${esc(tx.summaryTitle)}</h2>
-<div class="osc-prod">${productImg}<div class="osc-prod-t"><b>${esc(cfg.nome)}</b>${cfg.descricao ? `<p>${esc(cfg.descricao)}</p>` : ""}<div class="osc-price">${priceHtml(cfg.valor, cfg.valorDe, cfg.moeda, lang)}</div></div></div>
-<ul class="osc-lines" data-osc-lines${lines.length ? "" : " hidden"}>${lines.join("")}</ul>
+<div class="osc-prod">${productImg}<div class="osc-prod-t"><b>${esc(cfg.nome)}</b>${cfg.descricao ? `<p>${esc(cfg.descricao)}</p>` : ""}<div class="osc-price">${priceHtml(cfg.valor, cfg.valorDe, cfg.moeda, lang)}</div></div>${stepper}</div>
+<ul class="osc-lines" data-osc-lines><li data-osc-line="subtotal"><span>${esc(fx.subtotal)}</span><span data-osc-subtotal>${esc(money(cfg.valor))}</span></li></ul>
 <div class="osc-total"><span>${esc(fx.total)}</span><b data-osc-total aria-live="polite">${esc(money(total))}</b></div></section></aside>`;
 
   // ── 1. Seus dados ──
+  // Dois a dois, como na referência: E-mail + Telefone, depois Nome + CPF/CNPJ.
   const asks = (f: string) => cfg.campos.indexOf(f as never) >= 0;
-  const dataFields: string[] = [];
-  if (asks("name")) dataFields.push(field("nome", fx.name, { auto: "name", max: 120 }));
-  const contact: string[] = [];
-  if (asks("email")) contact.push(field("email", fx.email, { type: "email", auto: "email", mode: "email", max: 254 }));
-  if (asks("phone")) {
-    contact.push(
-      field("telefone", fx.phone, {
+  const emailF = asks("email")
+    ? field("email", fx.email, {
+        type: "email",
+        auto: "email",
+        mode: "email",
+        max: 254,
+        placeholder: "email@email.com",
+      })
+    : "";
+  const phoneF = asks("phone")
+    ? field("telefone", fx.phone, {
         type: "tel",
         auto: "tel",
         mode: "tel",
         // Folga para o número colado como aparece ("+55 (11) 98765-4321"): a máscara limita os algarismos.
         max: 25,
-        placeholder: brl ? "(11) 98765-4321" : "",
-      }),
-    );
-  }
-  if (contact.length) dataFields.push(`<div class="osc-row osc-row-2">${contact.join("")}</div>`);
-  if (asks("document")) {
-    dataFields.push(
-      field("documento", brl ? fx.cpf : fx.document, {
+        placeholder: brl ? "(99) 99999-9999" : "",
+      })
+    : "";
+  const nameF = asks("name") ? field("nome", fx.name, { auto: "name", max: 120, placeholder: "Nome e Sobrenome" }) : "";
+  const docF = asks("document")
+    ? field("documento", brl ? fx.cpf : fx.document, {
         auto: "off",
         mode: brl ? "numeric" : undefined,
         max: brl ? 20 : 40,
-        placeholder: brl ? "000.000.000-00" : "",
-      }),
-    );
-  }
-  const dataSection = `<section class="osc-card" aria-labelledby="osc-h-dados">${heading("osc-h-dados", tx.dataTitle)}<div class="osc-row">${dataFields.join("")}</div></section>`;
+        placeholder: brl ? "123.456.789-12" : "",
+      })
+    : "";
+  const dataRows = [
+    emailF || phoneF ? `<div class="osc-row osc-row-2">${emailF}${phoneF}</div>` : "",
+    nameF || docF ? `<div class="osc-row osc-row-2">${nameF}${docF}</div>` : "",
+  ].join("");
+  const dataSection = `<section class="osc-card" aria-labelledby="osc-h-dados">${heading("osc-h-dados", tx.dataTitle)}<div class="osc-row">${dataRows}</div></section>`;
 
   // ── 2. Entrega ──
   let delivery = "";
@@ -517,11 +531,17 @@ export function renderCheckoutDocument(cfg: PublicCheckoutConfig, opts: Checkout
       .join("");
     delivery = `<section class="osc-card" aria-labelledby="osc-h-entrega">${heading("osc-h-entrega", tx.deliveryTitle)}<div class="osc-row">
 <div class="osc-row osc-row-cep">${field("cep", fx.cep, { auto: "postal-code", mode: "numeric", max: 12, placeholder: "00000-000" })}<p class="osc-note" data-osc-cep-status aria-live="polite" style="align-self:end;padding-bottom:14px"></p></div>
+<div class="osc-row" data-osc-addr hidden>
 ${field("rua", fx.street, { auto: "address-line1", max: 120 })}
 <div class="osc-row osc-row-num">${field("numero", fx.number, { auto: "off", max: 20 })}${field("complemento", fx.complement, { auto: "address-line2", max: 120, optional: fx.optional })}</div>
 ${field("bairro", fx.neighborhood, { auto: "off", max: 120 })}
 <div class="osc-row osc-row-city">${field("cidade", fx.city, { auto: "address-level2", max: 120 })}<div class="osc-f"><label for="osc-uf">${esc(fx.state)}</label><select id="osc-uf" name="uf" autocomplete="address-level1" required>${ufOptions.join("")}</select><small class="osc-err" id="osc-uf-e" hidden></small></div></div>
-</div>${shipping ? `<fieldset class="osc-ship"><legend>${esc(fx.chooseShipping)}</legend>${shipping}</fieldset>` : ""}</section>`;
+</div>
+</div>${
+      shipping
+        ? `<div class="osc-shipwrap"><p class="osc-ship-h">${esc(fx.chooseShipping)}</p><div class="osc-ship-empty" data-osc-ship-empty><b>${esc(fx.cepForShipping)}</b><small>${esc(fx.cepForShippingHint)}</small></div><fieldset class="osc-ship" data-osc-ship hidden><legend class="osc-sr">${esc(fx.chooseShipping)}</legend>${shipping}</fieldset></div>`
+        : ""
+    }</section>`;
   }
 
   // ── Order bumps ──
@@ -580,7 +600,7 @@ ${field("bairro", fx.neighborhood, { auto: "off", max: 120 })}
   const title = `${cfg.nome} — ${tx.paymentTitle}`;
   return `<!DOCTYPE html>
 <html lang="${htmlLang}"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="${cfg.cor}"><title>${esc(title)}</title>${style}${json}</head>
-<body class="osc">${timer}${banner}${header}
+<body class="osc">${timer}${banner}
 <div class="osc-wrap osc-grid">${summary}<main class="osc-main">
 <form class="osc-form" data-osc-form novalidate>${dataSection}${delivery}${bumps}${payment}</form>
 <section class="osc-card osc-flow" data-osc-flow tabindex="-1" hidden></section>

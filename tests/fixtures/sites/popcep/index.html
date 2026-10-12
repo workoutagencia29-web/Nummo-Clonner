@@ -1,0 +1,49 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Loja — informe seu CEP</title>
+  <style>
+    body{font-family:Arial,sans-serif;margin:0}
+    .overlay{position:fixed;inset:0;background:rgba(0,0,0,.5);display:flex;align-items:center;justify-content:center}
+    .pop{background:#fff;padding:24px;border-radius:12px;max-width:360px;width:90%}
+    .pop h2{margin:0 0 8px}
+    .pop input{width:100%;padding:12px;font-size:16px;box-sizing:border-box}
+    .pop button{margin-top:12px;padding:12px 20px;background:#e63946;color:#fff;border:0;border-radius:8px;cursor:pointer}
+  </style>
+</head>
+<body>
+  <main><img src="/logo.svg" alt="Loja" width="120" height="32">
+    <h1>Ofertas da semana</h1>
+    <p>Endereço de entrega: <strong id="endereco">—</strong></p>
+  </main>
+  <div class="overlay" id="overlay">
+    <div class="pop">
+      <h2>Informe seu CEP</h2>
+      <p>Para calcular o frete, digite o seu CEP:</p>
+      <input id="cep" inputmode="numeric" placeholder="00000-000" maxlength="9">
+      <button id="confirmar" type="button">Confirmar</button>
+    </div>
+  </div>
+  <script>
+    (function () {
+      var input = document.getElementById("cep");
+      var btn = document.getElementById("confirmar");
+      function buscar() {
+        var cep = (input.value || "").replace(/\D/g, "");
+        if (cep.length !== 8) return;
+        fetch("https://viacep.com.br/ws/" + cep + "/json/")
+          .then(function (r) { return r.json(); })
+          .then(function (d) {
+            if (d.erro) return;
+            document.getElementById("endereco").textContent = d.logradouro + ", " + d.bairro + " — " + d.localidade + "/" + d.uf;
+            document.getElementById("overlay").style.display = "none";
+          });
+      }
+      btn.addEventListener("click", buscar);
+      input.addEventListener("blur", buscar);
+    })();
+  </script>
+</body>
+</html>

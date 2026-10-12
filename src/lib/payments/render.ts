@@ -21,8 +21,10 @@ import {
 export interface PaymentRender {
   /** Endpoint relativo à página (prévia: /__os/pagamento; ZIP: caminho do pagamento.php). */
   endpoint: string;
-  /** Prévia do app: sempre simulação (nada é cobrado). */
+  /** Prévia do app sem a chave da Kyvo: simulação (nada é cobrado). */
   simulation: boolean;
+  /** Prévia do app COM a chave da Kyvo: cobrança real, para testar (aviso em pt-BR, sem simular). */
+  realTest?: boolean;
   /** Chave do link → produto público (com o endereço da página de obrigado já relativo à página). */
   products: Record<string, PublicPaymentProduct>;
   /**
@@ -45,6 +47,7 @@ export function paymentPageConfig(render: PaymentRender | null | undefined): Pay
     v: PAYMENT_CONFIG_VERSION,
     endpoint: render.endpoint,
     simulacao: render.simulation,
+    ...(render.realTest ? { testeReal: true } : {}),
     produtos: render.products,
   };
 }

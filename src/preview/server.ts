@@ -14,9 +14,17 @@
  * Rotas comuns: /os-assets/<arquivo> (arquivos por hash), /os-runtime.js (script do
  * Offer Studio), /os-tracking.js (script de rastreamento), /os-pagamento.js
  * (janela de pagamento), POST /__os/pagamento (pagamento na página e checkout
- * do Offer Studio, SEMPRE simulados na prévia), /checkout/<chave do link>
+ * do Offer Studio — simulados quando a oferta não tem a chave do gateway salva;
+ * com a chave salva, a prévia cobra DE VERDADE para você testar: ver
+ * src/server/services/payments/live-preview.ts), /checkout/<chave do link>
  * (página de checkout do Offer Studio, com o script /os-checkout.js) e, no
  * modo "Preservar JS", os arquivos nos caminhos originais.
+ *
+ * Funil clonado "Com scripts" (src/lib/clone-routes.ts): as páginas nesse modo
+ * levam o script de rotas (o caminho original na barra; navegação para outra
+ * página clonada fica na prévia) e uma navegação (pedido de HTML) ao caminho
+ * original de uma página da oferta ("/roleta") abre essa página — também na
+ * prévia de uma clonagem, no caminho original dela.
  *
  * Rastreamento (Fase 4): páginas de oferta/documento recebem a configuração de
  * pixels da oferta no modo "preview" (pixels NÃO carregam; só aparecem no
@@ -36,6 +44,7 @@ import "dotenv/config";
 import { createReadStream } from "node:fs";
 import { createServer, type IncomingMessage, type ServerResponse } from "node:http";
 import { previewCheckoutPath } from "@/lib/checkout/page";
+import { type OfferRoutes, offerRoutes, originalPath, pageRoutes, routeKey, routePageId } from "@/lib/clone-routes";
 import { prisma } from "@/lib/db";
 import { parseByteRange } from "@/lib/http-range";
 import { effectiveSeo, parseOfferSettings, parsePageSeo } from "@/lib/offer-settings";
@@ -64,8 +73,9 @@ import { loadTracking } from "@/lib/tracking/config";
 import { PIXEL_TEST_ENDPOINT, PIXEL_TEST_MAX_BODY, PIXEL_TEST_PARAM } from "@/lib/tracking/runtime-config";
 import { explicitPageCodeCategory } from "@/lib/tracking/schema";
 import { checkoutProductByKey, renderCheckoutPage } from "@/server/services/checkout/page";
+import { hasGatewayKey } from "@/server/services/payments/gateways";
+import { handlePreviewPayment } from "@/server/services/payments/live-preview";
 import { loadRenderLinks, offerPaymentRender } from "@/server/services/payments/products";
-import { handleSimulatedPayment } from "@/server/services/payments/simulation";
 import { findActivePixelTestSession, PIXEL_TEST_HTTP_STATUS, recordPixelTestEvent } from "@/server/services/pixel-test";
 import { offerWheelRender } from "@/server/services/wheel";
 import type { CloneResult } from "@/worker/clone/types";
@@ -151,6 +161,29 @@ async function sendStorage(req: IncomingMessage, res: ServerResponse, key: strin
   const stream = createReadStream(storagePath(key), range ?? {});
   stream.on("error", () => res.destroy());
   stream.pipe(res);
+}
+
+/**
+ * Pedido de uma página (navegação do navegador: o documento ou um pedido de
+ * HTML), não de um arquivo pedido por script ou imagem.
+ */
+function wantsPage(req: IncomingMessage): boolean {
+  const dest = String(req.headers["sec-fetch-dest"] ?? "").toLowerCase();
+  if (dest === "document") return true;
+  return /\btext\/html\b/i.test(String(req.headers.accept ?? ""));
+}
+
+/** Endereço de cada página da oferta na prévia, sem a barra do começo (o mesmo dos links do funil). */
+const previewCopyPath = (pageId: string) => `p/${pageId}`;
+
+/** Mapa de rotas da oferta (páginas clonadas com o endereço original). */
+async function previewOfferRoutes(offerId: string): Promise<OfferRoutes> {
+  const pages = await prisma.page.findMany({
+    where: { offerId, offer: { deletedAt: null } },
+    orderBy: { position: "asc" },
+    select: { id: true, sourceUrl: true, isHome: true, cloneMode: true },
+  });
+  return offerRoutes(pages);
 }
 
 interface Resolved {
@@ -264,7 +297,7 @@ async function offerPageDocument(
   variantId: string | undefined,
   mobile: boolean,
 ) {
-  const pageSelect = { id: true, customCode: true, seo: true } as const;
+  const pageSelect = { id: true, customCode: true, seo: true, cloneMode: true } as const;
   const page = pageId
     ? await prisma.page.findFirst({ where: { id: pageId, offerId, offer: { deletedAt: null } }, select: pageSelect })
     : await prisma.page.findFirst({ where: { offerId, isHome: true, offer: { deletedAt: null } }, select: pageSelect });
@@ -285,7 +318,14 @@ async function offerPageDocument(
   const wanted = mobile ? "MOBILE" : "DESKTOP";
   const doc = docs.find((d) => d.device === wanted) ?? docs.find((d) => d.device === "ALL") ?? docs[0] ?? null;
   return doc
-    ? { ...doc, pageId: page.id, variantId: variant.id, customCode: pageCodeOf(page.customCode), seo: page.seo }
+    ? {
+        ...doc,
+        pageId: page.id,
+        variantId: variant.id,
+        cloneMode: page.cloneMode,
+        customCode: pageCodeOf(page.customCode),
+        seo: page.seo,
+      }
     : null;
 }
 
@@ -299,10 +339,15 @@ async function resolve(
 
   if (target.kind === "clone") {
     const job = await prisma.cloneJob.findUnique({ where: { id: target.jobId }, select: { result: true } });
-    const out = (job?.result as CloneResult | null | undefined)?.devices?.[target.device]?.outputs?.[target.mode];
+    const result = job?.result as CloneResult | null | undefined;
+    const out = result?.devices?.[target.device]?.outputs?.[target.mode];
     if (!out) return null;
     const assetMap = "assetMap" in out ? (out.assetMap as Record<string, string>) : {};
-    if (!isRoot) return { html: null, assetMap };
+    // "Com scripts": a página vai para o caminho original (o roteador do site acha a tela) e
+    // abre também nele (recarregar depois disso).
+    const self = target.mode === "PRESERVE_JS" ? originalPath(result?.finalUrl) : null;
+    const atSelf = !!self && wantsPage(req) && routeKey(url.pathname) === routeKey(self);
+    if (!isRoot && !atSelf) return { html: null, assetMap };
     const html = (await getObject(out.htmlKey)).toString("utf8");
     return {
       html: renderPageHtml(html, {
@@ -310,6 +355,7 @@ async function resolve(
         pageHref: () => "#",
         runtimeTag: RUNTIME_TAG,
         productScriptTag: PRODUCT_SCRIPT_TAG,
+        routes: self ? { self, routes: {}, hosts: [] } : null,
       }),
       assetMap,
     };
@@ -317,16 +363,21 @@ async function resolve(
 
   const checkoutMatch = CHECKOUT_PATH_RE.exec(pathname);
   const checkoutOffer = checkoutMatch ? await offerIdOf(target) : null;
-  if (checkoutMatch && checkoutOffer && (await checkoutProductByKey(checkoutOffer, checkoutMatch[1]))) {
+  const checkoutProduct =
+    checkoutMatch && checkoutOffer ? await checkoutProductByKey(checkoutOffer, checkoutMatch[1]) : null;
+  if (checkoutMatch && checkoutOffer && checkoutProduct) {
     const offerId = checkoutOffer;
     const test = await testModeFor(req, url, offerId);
     if (test.kind === "invalid") return { html: TEST_EXPIRED_PAGE(), assetMap: {}, status: 410 };
     if (test.kind === "enter") return { html: null, assetMap: {}, cookies: test.cookies, redirect: test.redirect };
+    // Com a chave do gateway salva, a prévia cobra de verdade (para você testar); senão, simula.
+    const live = await hasGatewayKey(offerId, checkoutProduct.provider);
     // Prévia de uma página só: não há funil para ir à página de obrigado.
     const pageHref = target.kind === "offer" ? (id: string) => `/p/${id}` : () => "#";
     const html = await renderCheckoutPage(offerId, checkoutMatch[1], {
       endpoint: PREVIEW_PAYMENT_ENDPOINT,
-      simulation: true,
+      simulation: !live,
+      realTest: live,
       pageHref,
       scriptTag: CHECKOUT_SCRIPT_TAG,
       tracking: await trackingFor(offerId, null, test, pageHref),
@@ -359,12 +410,20 @@ async function resolve(
     if (test.kind === "invalid") return { html: TEST_EXPIRED_PAGE(), assetMap, status: 410 };
     if (test.kind === "enter") return { html: null, assetMap, cookies: test.cookies, redirect: test.redirect };
     const links = await loadRenderLinks(page.offerId, prisma, PREVIEW_LINKS);
+    // Com a chave da Kyvo salva, a janela de pagamento cobra de verdade na prévia; senão, simula.
+    const payLive = await hasGatewayKey(page.offerId, "KYVO");
     const html = renderPageHtml(doc.html ?? "", {
       links,
       wheel: await offerWheelRender(page.offerId, links),
       payments: await offerPaymentRender(
         page.offerId,
-        { endpoint: PREVIEW_PAYMENT_ENDPOINT, simulation: true, pageHref: () => "#", scriptTag: PAYMENT_SCRIPT_TAG },
+        {
+          endpoint: PREVIEW_PAYMENT_ENDPOINT,
+          simulation: !payLive,
+          realTest: payLive,
+          pageHref: () => "#",
+          scriptTag: PAYMENT_SCRIPT_TAG,
+        },
         prisma,
         true,
       ),
@@ -384,7 +443,14 @@ async function resolve(
   const device = url.searchParams.get("dispositivo");
   const mobile = device ? device === "celular" : isMobileUserAgent(req.headers["user-agent"]);
   const match = /^\/p\/([a-z0-9]{20,32})\/?$/.exec(pathname);
-  if (!isRoot && !match) {
+  let routes: OfferRoutes | null = null;
+  // Funil clonado "Com scripts": navegação ao caminho original de uma página ("/roleta") abre a página.
+  let original: string | null = null;
+  if (!isRoot && !match && wantsPage(req)) {
+    routes = await previewOfferRoutes(target.offerId);
+    original = routePageId(routes, url.pathname);
+  }
+  if (!isRoot && !match && !original) {
     // Arquivos de "Preservar JS" (caminhos originais) de qualquer página da oferta.
     const docs = await prisma.pageDocument.findMany({
       where: { variant: { page: { offerId: target.offerId, offer: { deletedAt: null } } } },
@@ -394,24 +460,33 @@ async function resolve(
     for (const d of docs) Object.assign(assetMap, (d.assetMap as Record<string, string> | null) ?? {});
     return { html: null, assetMap };
   }
-  const pageId = match ? match[1] : (target.pageId ?? null);
+  const chosen = match ? match[1] : original;
+  const pageId = chosen ?? target.pageId ?? null;
   // Prévia de uma versão A/B: um link do funil de volta para a mesma página continua nela
   // (como o divisor, que lembra a versão); as outras páginas abrem na de controle.
-  const variantId = match && match[1] !== target.pageId ? undefined : target.variantId;
+  const variantId = chosen && chosen !== target.pageId ? undefined : target.variantId;
   const doc = await offerPageDocument(target.offerId, pageId, variantId, mobile);
   if (!doc) return null;
   const assetMap = (doc.assetMap as Record<string, string> | null) ?? {};
   const test = await testModeFor(req, url, target.offerId);
   if (test.kind === "invalid") return { html: TEST_EXPIRED_PAGE(), assetMap, status: 410 };
   if (test.kind === "enter") return { html: null, assetMap, cookies: test.cookies, redirect: test.redirect };
-  const pageHref = (id: string) => `/p/${id}`;
+  const pageHref = (id: string) => `/${previewCopyPath(id)}`;
+  if (doc.cloneMode === "PRESERVE_JS") routes ??= await previewOfferRoutes(target.offerId);
+  // Com a chave da Kyvo salva, a janela de pagamento cobra de verdade na prévia (para você testar); senão, simula.
+  const payLive = await hasGatewayKey(target.offerId, "KYVO");
   const [links, offer, payments] = await Promise.all([
     loadRenderLinks(target.offerId, prisma, PREVIEW_LINKS),
     prisma.offer.findUnique({ where: { id: target.offerId }, select: { settings: true } }),
-    // Prévia: pagamento SEMPRE simulado (nada é cobrado a partir do app).
     offerPaymentRender(
       target.offerId,
-      { endpoint: PREVIEW_PAYMENT_ENDPOINT, simulation: true, pageHref, scriptTag: PAYMENT_SCRIPT_TAG },
+      {
+        endpoint: PREVIEW_PAYMENT_ENDPOINT,
+        simulation: !payLive,
+        realTest: payLive,
+        pageHref,
+        scriptTag: PAYMENT_SCRIPT_TAG,
+      },
       prisma,
       true,
     ),
@@ -429,6 +504,7 @@ async function resolve(
       company: parseOfferSettings(offer?.settings).company,
       currency: parseOfferSettings(offer?.settings).currency,
       seo: seoOf(offer?.settings, doc.seo),
+      routes: doc.cloneMode === "PRESERVE_JS" && routes ? pageRoutes(routes, doc.pageId, previewCopyPath) : null,
     }),
     assetMap,
     cookies: test.cookies,
@@ -541,10 +617,12 @@ function isSameOrigin(req: IncomingMessage, host: string) {
 }
 
 /**
- * POST /__os/pagamento: endpoint de pagamento da página na prévia — SEMPRE em
- * simulação (src/server/services/payments/simulation.ts), com o mesmo
- * contrato do pagamento.php do ZIP (src/lib/payments/contract.ts). Só da
- * própria página, JSON até PAYMENT_MAX_BODY.
+ * POST /__os/pagamento: endpoint de pagamento da página na prévia
+ * (handlePreviewPayment): simula quando a oferta não tem a chave do gateway
+ * salva; com a chave salva, cobra DE VERDADE para você testar
+ * (src/server/services/payments/live-preview.ts). Mesmo contrato do
+ * pagamento.php do ZIP (src/lib/payments/contract.ts). Só da própria página,
+ * JSON até PAYMENT_MAX_BODY.
  */
 async function handlePayment(req: IncomingMessage, res: ServerResponse, host: string, target: PreviewTarget) {
   const reply = (r: { status: number; body: unknown }) => sendJson(res, r.status, r.body);
@@ -563,7 +641,7 @@ async function handlePayment(req: IncomingMessage, res: ServerResponse, host: st
   } catch {
     return reply(paymentError("invalido"));
   }
-  reply(await handleSimulatedPayment(offerId, json));
+  reply(await handlePreviewPayment(offerId, json));
 }
 
 async function handle(req: IncomingMessage, res: ServerResponse) {

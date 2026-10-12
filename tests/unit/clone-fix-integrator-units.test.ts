@@ -18,6 +18,7 @@ vi.mock("@/server/actions/clone", () => ({
   retryCloneAction: vi.fn(),
   saveCloneAction: vi.fn(),
   startFunnelClonesAction: vi.fn(),
+  stopFunnelAction: vi.fn(),
   startHtmlCloneAction: vi.fn(),
   startUrlCloneAction: vi.fn(),
 }));

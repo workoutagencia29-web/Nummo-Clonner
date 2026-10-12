@@ -87,6 +87,58 @@ export interface FunnelSuggestion {
   reason: string;
 }
 
+/**
+ * Página do mesmo site que a página clonada leva (clonar o funil inteiro):
+ * vira uma clonagem filha quando ainda não foi clonada.
+ */
+export interface PageLinkFound {
+  /** Endereço absoluto, sem #hash e sem utm_* (cleanUrl). */
+  url: string;
+  /** Texto do botão/link ou nome do produto do cartão. */
+  label: string;
+  /**
+   * Como foi achado: link/botão no HTML (`link`), endereço no código da página
+   * (`code`) ou navegação depois de o robô clicar (`click`: quiz, roleta…).
+   */
+  via: "link" | "code" | "click";
+  /** Dentro do cabeçalho, menu ou rodapé (só é seguido a partir da página principal). */
+  nav?: boolean;
+  /** Cartão de produto (foto + preço): leva à página do produto. */
+  product?: boolean;
+  /** Upsell, downsell ou obrigado pela regra das sugestões. */
+  kind?: FunnelSuggestion["kind"];
+}
+
+/** Tipo da página clonada no funil (mapa da revisão, tipo e nome da página ao salvar). */
+export type FunnelPageKind =
+  | "QUIZ"
+  | "WHEEL"
+  | "STORE"
+  | "PRODUCT"
+  | "VSL"
+  | "SALES"
+  | "CAPTURE"
+  | "UPSELL"
+  | "DOWNSELL"
+  | "THANK_YOU"
+  | "OTHER";
+
+export interface FunnelPageInfo {
+  kind: FunnelPageKind;
+  /** Nome curto para a página ("Quiz", "Roleta", "Loja", nome do produto…); "" = usar o título. */
+  name: string;
+}
+
+/** O que o robô fez ao clicar pela página (quiz, roleta…). */
+export interface ExploreReport {
+  /** Cliques dados. */
+  clicks: number;
+  /** Telas diferentes vistas (etapas do quiz, roleta girada…). */
+  screens: number;
+  /** Por que parou. */
+  stop: "navigated" | "contact" | "stuck" | "time" | "limit" | "skipped";
+}
+
 // ─── Proteção anti-robô ──────────────────────────────────────────────────────
 
 export interface ProtectionReport {
@@ -133,6 +185,11 @@ export interface Capture {
   /** Print de página inteira (PNG). */
   screenshot?: Buffer;
   protection?: ProtectionReport | null;
+  /**
+   * Robô clicando pela página (clonar o funil inteiro): para onde ela levou
+   * (mesmo site ou outro, como o checkout) e o resumo. Só na captura que explorou.
+   */
+  explored?: ExploreReport & { navigations: { url: string; label: string; product?: boolean }[] };
 }
 
 // ─── Resultado guardado em CloneJob.result ───────────────────────────────────
@@ -165,6 +222,12 @@ export interface CloneResult {
   removed: RemovedTracker[];
   checkouts: CheckoutCandidate[];
   funnel: FunnelSuggestion[];
+  /** Páginas do mesmo site a que esta leva (clonar o funil inteiro). Clonagens antigas: ausente. */
+  links?: PageLinkFound[];
+  /** Tipo e nome da página no funil. Clonagens antigas: ausente. */
+  page?: FunnelPageInfo;
+  /** O robô clicou pela página (quiz, roleta…). */
+  explored?: ExploreReport;
   videos: VideoEmbed[];
   delay?: VslDelay | null;
   warnings: CloneWarning[];

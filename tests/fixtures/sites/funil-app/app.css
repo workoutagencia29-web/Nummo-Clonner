@@ -1,0 +1,14 @@
+body{margin:0;font-family:Arial,sans-serif;color:#222}
+.topo{display:flex;justify-content:space-between;align-items:center;padding:12px 20px;background:#111;color:#fff}
+.topo a{color:#fff}
+.quiz,.roleta,.loja,.produto{max-width:720px;margin:0 auto;padding:32px 20px}
+.cta{background:#e63946;color:#fff;border:0;border-radius:8px;padding:14px 28px;font-size:18px;cursor:pointer}
+.opcoes{display:grid;gap:10px}
+.opcao{border:2px solid #ddd;border-radius:8px;padding:14px;cursor:pointer}
+.cards{display:grid;grid-template-columns:repeat(2,1fr);gap:16px}
+.card{display:block;border:1px solid #eee;border-radius:8px;padding:12px;color:inherit;text-decoration:none;cursor:pointer}
+.card img{width:100%;height:auto}
+.preco{color:#0a7d2c;font-weight:bold}
+.modal{display:none;margin-top:20px;padding:20px;border:2px solid #e63946;border-radius:12px}
+.modal.aberto{display:block}
+.rodape{padding:20px;text-align:center;font-size:13px}

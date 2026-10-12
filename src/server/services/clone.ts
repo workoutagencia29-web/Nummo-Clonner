@@ -5,6 +5,7 @@
 import { randomUUID } from "node:crypto";
 import * as cheerio from "cheerio";
 import type { CloneStatus as CloneJobStatus, PageType, Prisma } from "@/generated/prisma/client";
+import { rewriteScriptPageUrls } from "@/lib/clone-routes";
 import { prisma } from "@/lib/db";
 import { restoreDoctype } from "@/lib/doctype";
 import { UserError } from "@/lib/errors";
@@ -18,15 +19,27 @@ import { isWorkerOnline, WORKER_SILENT_MS } from "@/server/services/export";
 import { rememberOfferCurrency } from "@/server/services/preferences";
 import { cleanUrl } from "@/worker/clone/funnel";
 import { isSyntheticOrigin } from "@/worker/clone/synthetic";
-import type { CloneModeValue, CloneResult, Device, FunnelSuggestion } from "@/worker/clone/types";
+import type {
+  CloneModeValue,
+  CloneResult,
+  Device,
+  FunnelPageInfo,
+  FunnelPageKind,
+  FunnelSuggestion,
+} from "@/worker/clone/types";
 
 export interface StartOptions {
   devices: ("desktop" | "mobile")[];
   maxVideoMb: number;
+  /** "Clonar o funil inteiro": as páginas a que esta leva entram na fila sozinhas (clone-funnel.ts). */
+  funnel?: boolean;
 }
 
-/** Limite de páginas do funil por oferta (além da página principal). */
-export const FUNNEL_PAGE_LIMIT = 15;
+/**
+ * Limite de páginas do funil por clonagem (além da página principal): quiz,
+ * roleta, loja e os produtos dela cabem com folga.
+ */
+export const FUNNEL_PAGE_LIMIT = 40;
 export const FUNNEL_LIMIT_MESSAGE = `Cada oferta pode ter no máximo ${FUNNEL_PAGE_LIMIT} páginas de funil.`;
 /** Mensagem quando os arquivos de uma clonagem já foram apagados (limpeza automática). */
 export const CLONE_FILES_GONE =
@@ -114,7 +127,12 @@ export function normalizeCloneUrl(raw: string) {
 export async function startUrlClone(rawUrl: string, options: StartOptions, parentJobId?: string) {
   const url = normalizeCloneUrl(rawUrl);
   return prisma.cloneJob.create({
-    data: { source: "URL", sourceUrl: url, options: { ...options }, parentJobId: parentJobId ?? null },
+    data: {
+      source: "URL",
+      sourceUrl: url,
+      options: { devices: options.devices, maxVideoMb: options.maxVideoMb, funnel: options.funnel === true },
+      parentJobId: parentJobId ?? null,
+    },
     select: { id: true },
   });
 }
@@ -166,7 +184,7 @@ export async function retryClone(jobId: string) {
   // Página do funil: entra de novo pela clonagem principal (mesmas regras de
   // repetição e de limite) e a tela volta para a revisão dela.
   if (job.parentJobId && job.sourceUrl) {
-    await startFunnelClones(job.parentJobId, [job.sourceUrl]);
+    await startFunnelClones(job.parentJobId, [job.sourceUrl], { from: job.id });
     return { id: job.parentJobId };
   }
   if (job.uploadKey && !objectExists(job.uploadKey)) {
@@ -188,8 +206,12 @@ export async function retryClone(jobId: string) {
   });
 }
 
-/** Clona páginas do funil (upsell, downsell, obrigado) ligadas a uma clonagem. */
-export async function startFunnelClones(parentJobId: string, urls: string[]) {
+/**
+ * Clona páginas do funil (upsell, downsell, obrigado, ou coladas) ligadas a
+ * uma clonagem. `retry.from`: nova tentativa de uma página do funil — a nova
+ * fica no mesmo lugar do mapa (de qual página veio, nível, botão).
+ */
+export async function startFunnelClones(parentJobId: string, urls: string[], retry?: { from: string }) {
   // Links inválidos aparecem antes de qualquer página entrar na fila.
   const wanted = urls.map((raw) => normalizeCloneUrl(raw));
   return prisma.$transaction(async (tx) => {
@@ -232,13 +254,30 @@ export async function startFunnelClones(parentJobId: string, urls: string[]) {
       );
     }
     const options = (parent.options ?? {}) as unknown as StartOptions;
+    // Nova tentativa: herda o lugar no funil da tentativa anterior.
+    const previous = retry
+      ? await tx.cloneJob.findFirst({ where: { id: retry.from, parentJobId }, select: { options: true } })
+      : null;
+    const inherited = (previous?.options as { step?: unknown } | null)?.step;
     const created: string[] = [];
     for (const url of toCreate) {
       const job = await tx.cloneJob.create({
         data: {
           source: "URL",
           sourceUrl: url,
-          options: { devices: options.devices ?? ["desktop", "mobile"], maxVideoMb: options.maxVideoMb ?? 200 },
+          options: {
+            devices: options.devices ?? ["desktop", "mobile"],
+            maxVideoMb: options.maxVideoMb ?? 200,
+            // Funil inteiro: a página colada também segue para as próximas.
+            ...(options.funnel ? { funnel: true } : {}),
+            step: (inherited ?? {
+              from: parentJobId,
+              depth: 1,
+              label: "",
+              via: "manual",
+              order: created.length,
+            }) as Prisma.InputJsonValue,
+          },
           parentJobId,
         },
         select: { id: true },
@@ -305,21 +344,10 @@ export async function getCloneStatus(jobId: string, afterLogId = 0, opts: { tail
       logs: opts.tail
         ? { orderBy: { id: "desc" }, take: LOG_PAGE }
         : { where: { id: { gt: afterLogId } }, orderBy: { id: "asc" }, take: LOG_PAGE },
-      children: {
-        orderBy: { createdAt: "asc" },
-        select: {
-          id: true,
-          status: true,
-          progress: true,
-          step: true,
-          sourceUrl: true,
-          errorMessage: true,
-          result: true,
-        },
-      },
     },
   });
   if (!job) return null;
+  const children = await funnelChildren(job.id);
   const logs = opts.tail ? [...job.logs].reverse() : job.logs;
   return {
     id: job.id,
@@ -330,23 +358,92 @@ export async function getCloneStatus(jobId: string, afterLogId = 0, opts: { tail
     offerId: job.offerId,
     ...(await queueInfo(job, opts.now ?? Date.now())),
     logs: logs.map((l) => ({ id: l.id, at: l.at.toISOString(), level: l.level, message: l.message, url: l.url })),
-    children: job.children.map((c) => {
-      const result = c.result as CloneResult | null;
-      return {
-        id: c.id,
-        status: c.status,
-        progress: c.progress,
-        step: c.step,
-        sourceUrl: c.sourceUrl,
-        errorMessage: c.errorMessage,
-        title: result?.title ?? null,
-        /** Versões que existem na cópia (a prévia abre uma delas). */
-        devices: (["desktop", "mobile"] as const).filter((d): d is Device => Boolean(result?.devices?.[d])),
-        /** Para reconhecer a sugestão de funil correspondente. */
-        matchKey: funnelMatchKey(c.sourceUrl),
-      };
-    }),
+    children,
   };
+}
+
+/** Linha das páginas do funil lida direto do JSON (o resultado inteiro tem a lista de arquivos: pesado a cada 2 s). */
+interface ChildRow {
+  id: string;
+  status: CloneJobStatus;
+  progress: number;
+  step: string | null;
+  sourceUrl: string | null;
+  errorMessage: string | null;
+  errorCode: string | null;
+  options: unknown;
+  title: string | null;
+  finalUrl: string | null;
+  page: FunnelPageInfo | null;
+  suggestedMode: CloneModeValue | null;
+  thumbnailKey: string | null;
+  desktop: boolean;
+  mobile: boolean;
+  checkouts: number;
+  checkoutPlatform: string | null;
+  exploreStop: string | null;
+}
+
+/** Páginas do funil de uma clonagem, para a tela (polling) e o mapa do funil. */
+async function funnelChildren(jobId: string) {
+  const rows = await prisma.$queryRaw<ChildRow[]>`
+    select id, status::text as status, progress, step, "sourceUrl", "errorMessage", "errorCode", options,
+      result->>'title' as title,
+      result->>'finalUrl' as "finalUrl",
+      result->'page' as page,
+      result->>'suggestedMode' as "suggestedMode",
+      result->>'thumbnailKey' as "thumbnailKey",
+      coalesce(result->'devices' ? 'desktop', false) as desktop,
+      coalesce(result->'devices' ? 'mobile', false) as mobile,
+      coalesce(jsonb_array_length(case when jsonb_typeof(result->'checkouts') = 'array' then result->'checkouts' end), 0)::int as checkouts,
+      result->'checkouts'->0->>'platform' as "checkoutPlatform",
+      result->'explored'->>'stop' as "exploreStop"
+    from "CloneJob" where "parentJobId" = ${jobId} order by "createdAt" asc, id asc`;
+  return rows.map((c) => {
+    type RawStep = {
+      from?: unknown;
+      depth?: unknown;
+      order?: unknown;
+      label?: unknown;
+      via?: unknown;
+      product?: unknown;
+    };
+    const step = (c.options as { step?: RawStep } | null)?.step;
+    return {
+      id: c.id,
+      status: c.status,
+      progress: c.progress,
+      step: c.step,
+      sourceUrl: c.sourceUrl,
+      errorMessage: c.errorMessage,
+      title: c.title,
+      /** Versões que existem na cópia (a prévia abre uma delas). */
+      devices: (["desktop", "mobile"] as const).filter((d): d is Device => (d === "desktop" ? c.desktop : c.mobile)),
+      /** Para reconhecer a sugestão de funil correspondente. */
+      matchKey: funnelMatchKey(c.sourceUrl),
+      /** Mapa do funil: de qual página veio, nível, texto do botão/link e como foi achada. */
+      from: typeof step?.from === "string" ? step.from : jobId,
+      depth: typeof step?.depth === "number" ? step.depth : 1,
+      order: typeof step?.order === "number" ? step.order : 0,
+      via: typeof step?.via === "string" ? step.via : "manual",
+      linkLabel: typeof step?.label === "string" ? step.label : "",
+      /** Veio de um cartão de produto da loja. */
+      product: step?.product === true,
+      /** Tipo e nome da página no funil (quiz, roleta, loja, produto…). */
+      kind: c.page?.kind ?? null,
+      name: c.page?.name ?? "",
+      finalKey: funnelMatchKey(c.finalUrl),
+      suggestedMode: c.suggestedMode,
+      thumbnailKey: c.thumbnailKey,
+      /** Abriu a mesma página de outra (redirecionamento): fora do mapa. */
+      duplicate: c.errorCode === "DUPLICATE",
+      /** Botões de checkout na página (o mapa mostra "→ Checkout"). */
+      checkouts: c.checkouts,
+      checkoutPlatform: c.checkoutPlatform,
+      /** Por que o robô parou de clicar ("contact": a etapa pede e-mail/telefone). */
+      exploreStop: c.exploreStop,
+    };
+  });
 }
 
 export type CloneStatus = NonNullable<Awaited<ReturnType<typeof getCloneStatus>>>;
@@ -362,6 +459,12 @@ export interface SaveCloneInput {
   keepRemoved: string[];
   /** Clonagens do funil (filhas) que entram como páginas. */
   childJobIds: string[];
+  /**
+   * Modo de cada página (id da clonagem → modo): no funil, quiz e roleta
+   * costumam ir "Com scripts" e a loja/produtos "Editável". Sem a página
+   * aqui, vale `mode`.
+   */
+  modes?: Record<string, CloneModeValue>;
   /**
    * Moeda em que a oferta vai rodar: fica nas configurações (vale para o que
    * for criado depois: as páginas clonadas ficam como vieram) e vem marcada na
@@ -380,6 +483,31 @@ function funnelType(kind: FunnelSuggestion["kind"] | undefined): PageType {
   if (kind === "DOWNSELL") return "DOWNSELL";
   if (kind === "THANK_YOU") return "THANK_YOU";
   return "OTHER";
+}
+
+/** Tipo da página na oferta pelo tipo no funil (roleta e loja: "Outra", como os modelos; produto: vendas). */
+const PAGE_TYPE_BY_KIND: Record<FunnelPageKind, PageType> = {
+  QUIZ: "QUIZ",
+  WHEEL: "OTHER",
+  STORE: "OTHER",
+  PRODUCT: "SALES",
+  VSL: "VSL",
+  SALES: "SALES",
+  CAPTURE: "CAPTURE",
+  UPSELL: "UPSELL",
+  DOWNSELL: "DOWNSELL",
+  THANK_YOU: "THANK_YOU",
+  OTHER: "OTHER",
+};
+
+/** Nível no funil, ordem em que foi achada e texto do botão que leva à página (clonar o funil inteiro). */
+function funnelStepOf(options: unknown): { depth: number; order: number; label: string } {
+  const step = (options as { step?: { depth?: unknown; order?: unknown; label?: unknown } } | null)?.step;
+  return {
+    depth: typeof step?.depth === "number" ? step.depth : 1,
+    order: typeof step?.order === "number" ? step.order : 0,
+    label: typeof step?.label === "string" ? step.label : "",
+  };
 }
 
 /**
@@ -500,15 +628,23 @@ export async function saveClone(input: SaveCloneInput) {
     if (key && !suggestionByKey.has(key)) suggestionByKey.set(key, f);
   }
   const suggestionFor = (url: string | null) => suggestionByKey.get(funnelMatchKey(url) ?? "");
-  // Ordem natural do funil: upsell → downsell → outras → obrigado.
+  // Ordem natural do funil: por nível (quiz → roleta → loja → produtos) e, no mesmo
+  // nível, upsell → downsell → outras → obrigado, na ordem em que foram achadas.
   const rank = (url: string | null) => {
     const kind = suggestionFor(url)?.kind;
     return kind === "UPSELL" ? 0 : kind === "DOWNSELL" ? 1 : kind === "THANK_YOU" ? 3 : 2;
   };
-  children.sort((a, b) => rank(a.sourceUrl) - rank(b.sourceUrl));
+  children.sort(
+    (a, b) =>
+      funnelStepOf(a.options).depth - funnelStepOf(b.options).depth ||
+      rank(a.sourceUrl) - rank(b.sourceUrl) ||
+      a.createdAt.getTime() - b.createdAt.getTime() ||
+      funnelStepOf(a.options).order - funnelStepOf(b.options).order,
+  );
   const jobs = [main, ...children];
   const results = new Map(jobs.map((j) => [j.id, j.result as unknown as CloneResult]));
   const mainResult = results.get(main.id) as CloneResult;
+  const modeOf = (jobId: string): CloneModeValue => input.modes?.[jobId] ?? input.mode;
   if (input.folderId) {
     const folder = await prisma.folder.count({ where: { id: input.folderId } });
     if (!folder) throw new UserError("A pasta escolhida não existe mais.", "folderId");
@@ -532,13 +668,14 @@ export async function saveClone(input: SaveCloneInput) {
           ["DESKTOP", "desktop"],
           ["MOBILE", "mobile"],
         ];
+    const mode = modeOf(job.id);
     for (const [docDevice, source] of devicesToSave) {
-      const out = r.devices?.[source]?.outputs[input.mode];
+      const out = r.devices?.[source]?.outputs[mode];
       if (!out) continue;
       // Arquivos apagados pela limpeza automática (clonagem antiga).
       if (!objectExists(out.htmlKey)) throw new UserError(CLONE_FILES_GONE);
       const html = (await getObject(out.htmlKey)).toString("utf8");
-      const editable = input.mode === "PRESERVE_JS" ? r.devices?.[source]?.outputs.EDITABLE : undefined;
+      const editable = mode === "PRESERVE_JS" ? r.devices?.[source]?.outputs.EDITABLE : undefined;
       const editableHtml =
         editable && objectExists(editable.htmlKey) ? (await getObject(editable.htmlKey)).toString("utf8") : null;
       entries.push({ device: docDevice, html, assetMap: "assetMap" in out ? out.assetMap : null, editableHtml });
@@ -556,7 +693,8 @@ export async function saveClone(input: SaveCloneInput) {
   for (const [index, job] of jobs.entries()) {
     const r = results.get(job.id) as CloneResult;
     const suggestion = index === 0 ? undefined : suggestionFor(job.sourceUrl);
-    const kind = suggestion?.kind === "UPSELL" ? "UPSELL" : suggestion?.kind === "DOWNSELL" ? "DOWNSELL" : "CHECKOUT";
+    const funnelKind = suggestion?.kind ?? (index === 0 ? undefined : r.page?.kind);
+    const kind = funnelKind === "UPSELL" ? "UPSELL" : funnelKind === "DOWNSELL" ? "DOWNSELL" : "CHECKOUT";
     for (const c of r.checkouts) {
       if (linkPlan.has(c.url)) continue;
       const base =
@@ -637,18 +775,34 @@ export async function saveClone(input: SaveCloneInput) {
         takenSlugs.push(slug);
         // Sem <title>, o clonador usa o domínio; o domínio interno não é um nome.
         const title = isVirtualTitle(r.title) ? "" : r.title;
+        // Funil inteiro: "Roleta", "Loja", o nome do produto… (num site-aplicativo
+        // todas as páginas têm o mesmo título; aí vale o texto do botão que leva a ela).
+        const mainTitle = isVirtualTitle(mainResult.title) ? "" : mainResult.title;
+        const ownTitle = title && title !== mainTitle ? title : "";
+        const name = isMain
+          ? title || "Página principal"
+          : r.page?.name ||
+            ownTitle ||
+            funnelStepOf(job.options).label ||
+            suggestion?.label ||
+            title ||
+            `Página ${index + 1}`;
+        const pageKind = r.page && r.page.kind !== "OTHER" ? PAGE_TYPE_BY_KIND[r.page.kind] : null;
         const page = await tx.page.create({
           data: {
             offerId: offer.id,
-            name: (isMain ? title || "Página principal" : title || suggestion?.label || `Página ${index + 1}`).slice(
-              0,
-              120,
-            ),
+            name: name.slice(0, 120),
             slug,
-            type: isMain ? guessMainType(r) : funnelType(suggestion?.kind),
+            type: isMain
+              ? r.page && !["OTHER", "SALES", "VSL"].includes(r.page.kind)
+                ? PAGE_TYPE_BY_KIND[r.page.kind]
+                : guessMainType(r)
+              : suggestion
+                ? funnelType(suggestion.kind)
+                : (pageKind ?? "OTHER"),
             position: index,
             isHome: isMain,
-            cloneMode: input.mode,
+            cloneMode: modeOf(job.id),
             sourceUrl: virtual ? (job.sourceUrl ?? null) : r.finalUrl,
           },
           select: { id: true },
@@ -672,11 +826,21 @@ export async function saveClone(input: SaveCloneInput) {
         const keptCode = keptPageCode(kept.filter((k) => keptNeedsConsent(k.item)).map(toSnippet));
         const keptHtml = kept.filter((k) => !keptNeedsConsent(k.item)).map(toSnippet);
         const ownTargets = new Map([...urlTargets].filter(([, id]) => id !== pageId));
-        const finish = (html: string, assetMap: Record<string, string> | null) =>
-          bindLinks(
+        const finish = (html: string, assetMap: Record<string, string> | null) => {
+          const out = bindLinks(
             linkFunnelPages(restoreSnippets(html, keptHtml), ownTargets, { pageUrl: r.finalUrl, assetMap }),
             r.checkouts.map((c) => c.url),
           );
+          // "Com scripts" (o HTML com assetMap; a cópia editável não): os endereços completos das
+          // páginas salvas juntas, nos scripts inline, viram o caminho original ("/roleta") — sem a
+          // API Navigation (Safari), location.href = "https://site.com/roleta" sairia da cópia.
+          if (!assetMap) return out;
+          const urls = jobs.flatMap((j) => [results.get(j.id)?.finalUrl, j.sourceUrl]);
+          return rewriteScriptPageUrls(
+            out,
+            urls.filter((u): u is string => !!u && !isVirtualCloneUrl(u)).map((url) => ({ url })),
+          );
+        };
         const docs = (htmlByJob.get(job.id) ?? []).map((d) => ({
           device: d.device,
           html: finish(d.html, d.assetMap),
@@ -752,6 +916,7 @@ export async function saveClone(input: SaveCloneInput) {
       }
       return offer;
     },
-    { timeout: 60_000 },
+    // Um funil inteiro (até 40 páginas, cada uma com computador e celular) grava bastante.
+    { timeout: 180_000 },
   );
 }

@@ -302,6 +302,8 @@ export const CHECKOUT_LIMITS = {
   /** Cronômetro (minutos). */
   timerMin: 1,
   timerMax: 120,
+  /** Quantidade máxima que o comprador pode escolher. */
+  quantityMax: 99,
   name: 80,
   description: 300,
   bumpTitle: 80,

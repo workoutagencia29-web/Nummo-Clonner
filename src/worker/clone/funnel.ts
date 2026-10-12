@@ -18,13 +18,13 @@ type Kind = FunnelSuggestion["kind"];
 /** Parâmetros de rastreamento removidos ao comparar URLs. */
 const TRACKING_PARAMS = /^(?:utm_\w+|fbclid|gclid|gbraid|wbraid|ttclid|msclkid|_ga|_gl)$/i;
 
-const ASSET_EXT =
+export const ASSET_EXT =
   /\.(?:jpe?g|png|gif|webp|avif|svg|ico|bmp|pdf|zip|rar|7z|mp4|webm|mov|m4v|mp3|wav|ogg|m3u8|css|js|mjs|json|xml|txt|woff2?|ttf|otf|eot|docx?|xlsx?|pptx?|epub|csv)$/i;
 
 /** Páginas institucionais/legais que não fazem parte do funil. */
-const EXCLUDED_PATH =
+export const EXCLUDED_PATH =
   /privac|politica|policy|termos|terms|contato|contact|login|log-in|signin|sign-in|(?:^|[/_.-])(?:blog|entrar|minha-conta|my-account|conta|account|cookies?|lgpd|reembolso|refund|disclaimer|aviso-legal|legal|faq|suporte|support|ajuda|help|sobre|sobre-nos|about|about-us|checkout|carrinho|cart|wp-admin|wp-login\.php|feed)(?=$|[/_.-])/i;
-const EXCLUDED_TEXT =
+export const EXCLUDED_TEXT =
   /politica|privacidade|privacy|termos|terms of|contato|fale conosco|contact us|\bblog\b|\blogin\b|^entrar$|minha conta|area de membros|cookies/i;
 
 // Sinais no endereço (caminho + subdomínio).
@@ -60,7 +60,7 @@ export function cleanUrl(raw: string, base?: string): string | null {
 }
 
 /** Caminho comparável: sem barra final e sem index.html. */
-function pagePath(url: URL): string {
+export function pagePath(url: URL): string {
   const path = decodeSafe(url.pathname)
     .replace(/\/index\.(?:html?|php)$/i, "/")
     .replace(/\/+$/, "");
@@ -75,16 +75,16 @@ function decodeSafe(value: string): string {
   }
 }
 
-function registrableDomain(hostname: string): string {
+export function registrableDomain(hostname: string): string {
   return getDomain(hostname, { allowPrivateDomains: true }) ?? hostname.toLowerCase();
 }
 
-function truncate(text: string, max = 80): string {
+export function truncate(text: string, max = 80): string {
   return text.length > max ? `${text.slice(0, max - 1).trimEnd()}…` : text;
 }
 
 /** Destino de um onclick simples (location.href = '…', window.open('…')). */
-function onclickTarget(code: string | undefined): string | undefined {
+export function onclickTarget(code: string | undefined): string | undefined {
   if (!code) return undefined;
   return (
     /location(?:\.href)?\s*=\s*["'`]([^"'`]+)["'`]/.exec(code)?.[1] ??
@@ -98,7 +98,7 @@ interface Classification {
 }
 
 /** Classifica o link; null quando não parece fazer parte do funil. */
-function classify(addr: string, label: string): Classification | null {
+export function classify(addr: string, label: string): Classification | null {
   const text = nameKey(label);
   const shown = truncate(label.trim() || addr, 40);
   const hit = (re: RegExp) => re.exec(addr)?.[0].replace(/^[^a-z]/i, "");
@@ -198,6 +198,6 @@ export function suggestFunnel($: CheerioAPI, pageUrl: string, checkoutUrls: Set<
   return out;
 }
 
-function normalizeLabel(text: string): string {
+export function normalizeLabel(text: string): string {
   return truncate(text.replace(/\s+/g, " ").trim());
 }

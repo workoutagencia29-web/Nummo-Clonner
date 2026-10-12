@@ -14,6 +14,7 @@
  * script de pixels vão para o começo do <head>.
  */
 import { withCheckoutVersion } from "@/lib/checkout/contract";
+import { injectRoutes, type RoutesScriptConfig } from "@/lib/clone-routes";
 import { afterLeadingDoctype } from "@/lib/doctype";
 import { scriptString } from "@/lib/export/head";
 import { INTERNAL_LINK_PREFIX } from "@/lib/internal-links";
@@ -96,6 +97,14 @@ export interface RenderOptions {
    * pagamento (`links` com pay) ganham data-os-pay mesmo sem ele.
    */
   payments?: PaymentRender | null;
+  /**
+   * Página "Com scripts" de um funil clonado (src/lib/clone-routes.ts): o
+   * script que põe o caminho original na barra (o roteador do site acha a
+   * tela) e mantém a navegação para as outras páginas clonadas dentro da
+   * cópia. Vai no começo do <head>, antes de qualquer script. Sem ele, a
+   * página sai como antes.
+   */
+  routes?: RoutesScriptConfig | null;
 }
 
 const PAGE_LINK_RE = new RegExp(`${INTERNAL_LINK_PREFIX}([a-z0-9]{20,32})`, "g");
@@ -218,6 +227,9 @@ export function renderPageHtml(html: string, opts: RenderOptions) {
   }
   // Por último: no começo do <head>, na frente do rastreamento e de qualquer script.
   out = injectOrderStrip(out, opts.payments);
+  // Na frente de tudo (também do ?pedido=): o caminho original vai para a barra antes de
+  // qualquer script ler o endereço — e o pedido fica guardado com o caminho que a página tem.
+  out = injectRoutes(out, opts.routes);
   return out;
 }
 

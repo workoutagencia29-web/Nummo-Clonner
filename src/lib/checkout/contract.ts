@@ -137,6 +137,8 @@ export interface CheckoutCreateRequest {
   /** CPF (só algarismos) no real; documento livre nas outras moedas. */
   documento?: string;
   endereco?: CheckoutAddress;
+  /** Quantidade do produto principal (1 a `maxQtd`; os bumps são sempre 1). Ausente = 1. */
+  quantidade?: number;
   /** Ids dos bumps marcados. */
   bumps: string[];
   /** Id do frete escolhido (null = sem endereço). */
@@ -238,6 +240,13 @@ export interface PublicCheckoutConfig {
   endpoint: string;
   /** Prévia do app: nada é cobrado (botões "Simular pagamento aprovado/recusado"). */
   simulacao: boolean;
+  /**
+   * Prévia do app com a chave do gateway salva: o pagamento é REAL (o PIX dá
+   * para pagar de verdade, com valor baixo, para testar). A página mostra um
+   * aviso em pt-BR, para você, e não os botões de simular. No ZIP (loja de
+   * verdade) nunca vem — lá é sempre real, sem aviso.
+   */
+  testeReal?: boolean;
   /** Chave do link (o "checkout" dos pedidos ao endpoint). */
   chave: string;
   nome: string;
@@ -256,6 +265,8 @@ export interface PublicCheckoutConfig {
   fretes: PublicShipping[];
   freteInicial: string | null;
   bumps: PublicBump[];
+  /** Quantidade máxima do produto (1 = sem seletor de quantidade). */
+  maxQtd: number;
   cor: string;
   bannerComputador: string | null;
   bannerCelular: string | null;
@@ -279,9 +290,14 @@ export interface CheckoutPrices {
   fretes: { id: string; valor: number }[];
   /** Pede endereço (e então o frete é obrigatório). */
   endereco: boolean;
+  /** Quantidade máxima do produto principal (1 = sem seletor; ausente = 1). */
+  maxQtd?: number;
 }
 
 export interface CheckoutTotal {
+  /** Quantidade do produto principal. */
+  quantidade: number;
+  /** Valor do produto principal × quantidade (a linha "Subtotal" é este + os bumps). */
   produto: number;
   bumps: string[];
   valorBumps: number;
@@ -299,7 +315,12 @@ export function checkoutTotal(
   prices: CheckoutPrices,
   bumpIds: readonly string[],
   freteId: string | null,
+  quantidade = 1,
 ): CheckoutTotal | null {
+  // Quantidade: inteiro de 1 até `maxQtd` (os bumps são sempre 1).
+  const maxQtd = prices.maxQtd && prices.maxQtd >= 1 ? Math.floor(prices.maxQtd) : 1;
+  const qtd = quantidade;
+  if (!Number.isInteger(qtd) || qtd < 1 || qtd > maxQtd) return null;
   const chosen: string[] = [];
   let valorBumps = 0;
   for (let i = 0; i < bumpIds.length; i++) {
@@ -323,13 +344,15 @@ export function checkoutTotal(
   } else if (freteId) {
     return null;
   }
+  const produto = prices.valor * qtd;
   return {
-    produto: prices.valor,
+    quantidade: qtd,
+    produto: produto,
     bumps: chosen,
     valorBumps: valorBumps,
     frete: frete,
     valorFrete: valorFrete,
-    total: prices.valor + valorBumps + valorFrete,
+    total: produto + valorBumps + valorFrete,
   };
 }
 
@@ -409,9 +432,15 @@ export function parseCheckoutRequest(raw: unknown): CheckoutRequest | null {
     metodo: metodo,
     nome: nome,
     email: email,
+    quantidade: 1,
     bumps: [],
     frete: null,
   };
+  if (o.quantidade !== undefined && o.quantidade !== null) {
+    const qtd = typeof o.quantidade === "number" ? o.quantidade : Number(str(o.quantidade));
+    if (!Number.isInteger(qtd) || qtd < 1 || qtd > 99) return null;
+    out.quantidade = qtd;
+  }
   const telefone = (str(o.telefone) || "").replace(/\D+/g, "");
   if (telefone) {
     if (telefone.length < 8 || telefone.length > 15) return null;

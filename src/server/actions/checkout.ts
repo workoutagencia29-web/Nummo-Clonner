@@ -21,6 +21,7 @@ const configDraft = z.object({
   imageSrc: image,
   fields: z.object({ name: z.boolean(), email: z.boolean(), phone: z.boolean(), document: z.boolean() }),
   address: z.boolean(),
+  maxQuantity: z.number().int().min(1).max(CHECKOUT_LIMITS.quantityMax).catch(10).default(10),
   shipping: z
     .array(z.object({ id: itemId, name: text(), eta: text(), price: text(40) }))
     .max(CHECKOUT_LIMITS.shipping + 5, "Opções de frete demais."),

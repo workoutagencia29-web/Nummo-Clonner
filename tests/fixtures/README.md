@@ -17,7 +17,7 @@ await srv.close();
 - Chromium: `chromium.launch({ args: fixtureChromiumArgs() })` (usa `--host-resolver-rules=MAP *.fixture.test 127.0.0.1`). Node/undici: `new Agent({ connect: { lookup: fixtureLookup } })`.
 - Nos arquivos de texto, `__ORIGIN__` vira a origem real (`http://vendas.fixture.test:<porta>`). Serve para simular URLs absolutas do próprio site (og:image, CSS do Elementor).
 - Arquivos e pastas que começam com `_` ou `.` nunca são servidos (`_site.json`, `_expected.json`). Só GET e HEAD, e não há suporte a Range.
-- `_site.json`: `charset` (Content-Type dos textos; o arquivo vai como está), `uaSplit` (User-Agent com iPhone, Android ou Mobile recebe `index.mobile.html`), `challenge` (sempre 403 com `cf-mitigated: challenge` e a página "Just a moment..."), `delayMs` (atraso em todas as respostas).
+- `_site.json`: `charset` (Content-Type dos textos; o arquivo vai como está), `uaSplit` (User-Agent com iPhone, Android ou Mobile recebe `index.mobile.html`), `challenge` (sempre 403 com `cf-mitigated: challenge` e a página "Just a moment..."), `delayMs` (atraso em todas as respostas), `spa` (site-aplicativo: caminho sem extensão que não existe serve o `index.html` da raiz).
 - Uso manual: `npx tsx tests/fixtures/server.ts [porta]`.
 - `sites/<nome>/_expected.json` traz o que cada site deveria produzir (checkouts, rastreadores, vídeos, atraso…), para os testes usarem como gabarito.
 
@@ -37,6 +37,12 @@ await srv.close();
 | `shadow` | `<oferta-card>` com shadow root aberto (texto, imagens e checkout só lá dentro) e CSS-in-JS via `insertRule` (o `<style>` fica vazio e a página só aparece se o CSSOM for serializado). |
 | `lento` | `delayMs: 400` em todas as respostas (página e CSS). |
 | `codificado` | Pixel e script de UTMs da UTMify no formato novo (codificado: `atob` + XOR, ID falso `a1b2c3d4e5f60718293a4b5c`) e outro pixel codificado dentro de `<script src="data:text/javascript;base64,…">` (JS inline adiado por plugin de cache, ID falso `f0e1d2c3b4a5968778695a4b`). Continuam: um carregador codificado do próprio site (carrega `js/widget.js`, que põe `data-widget` no `<html>`) e um `atob` comum. |
+| `funil` | Funil inteiro a partir de um link: quiz montado por `js/quiz.js` (3 perguntas, tela "Analisando…", "Ver meu resultado" → `/roleta` só no script) → roleta (`Girar a roleta` → prêmio → `location.assign` absoluto para `/loja/`) → loja com 4 cartões (3 links, um com endereço absoluto, e um só com `onclick`) → página de cada produto (checkout Hotmart, "Voltar para a loja", "Você também pode gostar"). Negativos: `/minha-conta`, `/carrinho`, política. |
+| `funil-app` | `spa`: o mesmo funil como site-aplicativo (rotas por `history.pushState`, tela escolhida por `location.pathname`): o resultado do quiz faz `pushState("/roleta")`, a loja tem cartões que só abrem por script (`/produto/<id>`). |
+| `popcep` | Pop-up de CEP que consulta uma API PÚBLICA (ViaCEP) por `fetch` absoluto: a cópia "Com scripts" deve continuar consultando (API de CEP nunca é removida). |
+| `popcep-own` | Pop-up de CEP que consulta o PRÓPRIO backend do site (`__ORIGIN__/api/cep/<cep>`): a cópia estática não tem esse backend — o atalho de CEP (cep.ts) atende pela API pública. |
+| `popcep-brasil` | Padrão real de pop-up de CEP: BrasilAPI v1 (`https://brasilapi.com.br/api/cep/v1/<cep>`, lê `data.city`/`data.state`), modal, `verificarBtn`/`confirmarBtn`. A clonagem recomenda "Com scripts" e o endereço aparece. |
+| `popcep-csp` | Pop-up de CEP com `<meta http-equiv="Content-Security-Policy" content="…connect-src 'self'…">`: a clonagem tira essa meta, senão ela bloquearia a consulta de CEP na cópia. |
 | `presto` | WordPress/Elementor com Presto Player: `<presto-player>` (web component com o CSS em `adoptedStyleSheets` do shadow root e ícones SVG sem tamanho) com vídeo do YouTube (`//www.youtube.com/embed/…`, canto de 18px em `--presto-player-border-radius`) e com mp4 relativo + capa; títulos `.elementor-invisible` que só aparecem com o script; `<selo-garantia>` com CSS só em `adoptedStyleSheets`; checkout Cakto. |
 
 ## ZIPs (`zips/`)
