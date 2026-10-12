@@ -14,7 +14,7 @@ import {
 } from "@/app/(painel)/clonar/[jobId]/funnel-map-logic";
 import type { CloneStatus } from "@/server/services/clone";
 import { sameStepPage } from "@/worker/clone/capture";
-import { cepShimScript, pageUsesCep } from "@/worker/clone/cep";
+import { cepShimScript, isCepScript, pageUsesCep } from "@/worker/clone/cep";
 import { classifyPage } from "@/worker/clone/classify";
 import { discoverPageLinks, pathsInCode } from "@/worker/clone/discover";
 
@@ -347,5 +347,18 @@ describe("atalho de CEP (cep.ts)", () => {
     // Alvo Safari 13: nada de arrow function nem let/const soltos no script da página.
     expect(script).not.toMatch(/=>/);
     expect(script).not.toMatch(/\b(?:let|const)\s/);
+  });
+
+  it("isCepScript mantém só scripts PEQUENOS de CEP — nunca um bundle grande que cita cep", () => {
+    // Script pequeno de consulta de CEP: mantido no Editável.
+    expect(isCepScript('function b(c){fetch("https://brasilapi.com.br/api/cep/v1/"+c)}')).toBe(true);
+    expect(isCepScript('var cep="";$.get("/busca?cep="+x)')).toBe(true);
+    // Bundle de loja/SPA (grande) que por acaso cita cep + fetch: NUNCA mantido (quebraria a página).
+    const bundle = `!function(){var e=${"a".repeat(60_000)};fetch("/graphql");var cep=1}();`;
+    expect(isCepScript(bundle)).toBe(false);
+    // Um "brasilapi" dentro de um bundle grande também não basta.
+    expect(isCepScript(`${"x".repeat(50_000)};brasilapi`)).toBe(false);
+    // Sem sinal de CEP: não mantém.
+    expect(isCepScript("console.log(1)")).toBe(false);
   });
 });

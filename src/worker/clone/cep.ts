@@ -30,11 +30,26 @@ const CEP_SERVICE_RE =
 const REQUEST_RE = /\bfetch\s*\(|xmlhttprequest|\.open\s*\(|\$\.(?:get|post|ajax|getjson)|\baxios\b/i;
 
 /**
- * Este trecho de código (um <script> inline) faz consulta de CEP? Serviço de
- * CEP conhecido, ou "cep" junto de uma requisição (fetch/XHR/ajax). Serve para
- * o modo Editável MANTER esse script (senão o pop-up de CEP para ao converter).
+ * Tamanho máximo de um script de CEP a MANTER no Editável. Um script de
+ * consulta de CEP de verdade é pequeno (algumas centenas de bytes a uns poucos
+ * KB). O bundle de uma loja/SPA (React, Vue, Next…) tem dezenas a centenas de
+ * KB e quase sempre cita "cep"/"brasilapi" + fetch em algum lugar — mas MANTER
+ * esse bundle no Editável é desastre: ele roda na prévia/publicado, tenta
+ * re-montar o app sem backend e quebra a página (o CSS some, SVG gigante,
+ * layout colapsado). Por isso, acima deste tamanho o script é removido (como
+ * todo o resto no Editável). Em loja/SPA pesada, o CEP funciona no modo "Com
+ * scripts".
+ */
+const CEP_SCRIPT_MAX = 4000;
+
+/**
+ * Este trecho de código (um <script> inline) é um script PEQUENO de consulta
+ * de CEP, que o modo Editável MANTÉM (senão o pop-up de CEP para ao converter)?
+ * Serviço de CEP conhecido, ou "cep" junto de uma requisição (fetch/XHR/ajax) —
+ * mas nunca um bundle grande (ver CEP_SCRIPT_MAX).
  */
 export function isCepScript(code: string): boolean {
+  if (code.length > CEP_SCRIPT_MAX) return false;
   if (CEP_SERVICE_RE.test(code)) return true;
   return /\bcep\b/i.test(code) && REQUEST_RE.test(code);
 }
