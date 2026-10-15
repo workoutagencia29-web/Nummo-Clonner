@@ -61,16 +61,25 @@ export default async function OfferPage({ params, searchParams }: PageProps<"/of
   const query = await searchParams;
   const [offer, tags, sidebar] = await Promise.all([getOfferDetail(offerId), listTags(), getSidebarData()]);
   if (!offer) notFound();
-  const [links, usage, funnel, [paymentAccount, ...checkoutAccounts], keySources, flevoSources, blackcatSources] =
-    await Promise.all([
-      listOfferLinks(offer.id),
-      linkUsageDetail(offer.id),
-      existingFunnel(offer.id),
-      offerPaymentAccounts(offer.id),
-      paymentKeySources(offer.id, "KYVO"),
-      paymentKeySources(offer.id, "FLEVOPAY"),
-      paymentKeySources(offer.id, "BLACKCAT"),
-    ]);
+  const [
+    links,
+    usage,
+    funnel,
+    [paymentAccount, ...checkoutAccounts],
+    keySources,
+    flevoSources,
+    blackcatSources,
+    clownpaySources,
+  ] = await Promise.all([
+    listOfferLinks(offer.id),
+    linkUsageDetail(offer.id),
+    existingFunnel(offer.id),
+    offerPaymentAccounts(offer.id),
+    paymentKeySources(offer.id, "KYVO"),
+    paymentKeySources(offer.id, "FLEVOPAY"),
+    paymentKeySources(offer.id, "BLACKCAT"),
+    paymentKeySources(offer.id, "CLOWNPAY"),
+  ]);
   const readiness = await getOfferReadiness({ id: offer.id, liveUrl: offer.liveUrl, links });
 
   const folders = sidebar.folders.map(({ id, name }) => ({ id, name }));
@@ -178,7 +187,7 @@ export default async function OfferPage({ params, searchParams }: PageProps<"/of
             paymentAccount={paymentAccount}
             paymentKeySources={keySources}
             checkoutAccounts={checkoutAccounts}
-            checkoutKeySources={{ FLEVOPAY: flevoSources, BLACKCAT: blackcatSources }}
+            checkoutKeySources={{ FLEVOPAY: flevoSources, BLACKCAT: blackcatSources, CLOWNPAY: clownpaySources }}
           />
         </TabsContent>
         <TabsContent value="rastreamento" keepMounted className="mt-4">

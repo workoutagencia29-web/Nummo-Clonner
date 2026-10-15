@@ -26,6 +26,7 @@ export const ACCOUNT_QUERY_VALUE: Record<PaymentProviderId, string> = {
   KYVO: PAYMENT_ACCOUNT_QUERY_VALUE,
   FLEVOPAY: "flevopay",
   BLACKCAT: "blackcat",
+  CLOWNPAY: "clownpay",
 };
 
 /** Gateway do ?conta= (null = nenhum). */

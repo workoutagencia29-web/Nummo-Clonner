@@ -601,6 +601,7 @@ export function OfferLinks({
     KYVO: gatewayKeyState(paymentAccount),
     FLEVOPAY: gatewayKeyState(accountOf("FLEVOPAY")),
     BLACKCAT: gatewayKeyState(accountOf("BLACKCAT")),
+    CLOWNPAY: gatewayKeyState(accountOf("CLOWNPAY")),
   };
   const payments: PaymentContext = {
     offerId,

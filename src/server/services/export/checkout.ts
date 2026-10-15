@@ -27,11 +27,11 @@ export async function loadCheckoutExport(offerId: string): Promise<CheckoutExpor
   return { offerId, check, issues: checkoutIssues(check), products };
 }
 
-/** Gateways usados pelos checkouts da oferta (na ordem: FlevoPay, BlackCat, Kyvo). */
+/** Gateways usados pelos checkouts da oferta (na ordem: FlevoPay, BlackCat, ClownPay, Kyvo). */
 export function checkoutGateways(checkout: CheckoutExport | null): CheckoutProviderId[] {
   if (!checkout) return [];
   const used = new Set(checkout.products.map((p) => p.provider));
-  return (["FLEVOPAY", "BLACKCAT", "KYVO"] as const).filter((p) => used.has(p));
+  return (["FLEVOPAY", "BLACKCAT", "CLOWNPAY", "KYVO"] as const).filter((p) => used.has(p));
 }
 
 /**

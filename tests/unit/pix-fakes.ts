@@ -21,7 +21,17 @@
  *   Erro de validação → 422.
  * - GET /sales/<id>/status e GET /sales/seller.
  *
- * Os dois: `setStatus(id, status)` muda o status (como o pagamento do
+ * ClownPay (startFakeClownpay, base "http://127.0.0.1:<porta>"):
+ * - "Authorization: Bearer": CLOWNPAY_KEY vale; CLOWNPAY_KEY_KYC → 403 (conta em
+ *   análise/KYC); CLOWNPAY_KEY_DOWN → 503; outra → 401.
+ * - POST /v1/payments (amount em centavos, payment_method "pix",
+ *   external_reference, buyer com os 4 campos; exige "Idempotency-Key") → 201
+ *   { id (uuid), external_reference, status: "pending", amount, pix: { emv } }
+ *   (só o copia-e-cola, sem imagem). Idempotency-Key repetida devolve a mesma
+ *   cobrança. Erro de validação → 422.
+ * - GET /v1/payments/<id> e GET /v1/payments?limit=1 (o "Testar conexão").
+ *
+ * Todos: `setStatus(id, status)` muda o status (como o pagamento do
  * comprador), `requests` guarda o que chegou e `failNext` força a próxima resposta.
  */
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
@@ -31,6 +41,9 @@ export const FLEVO_KEY_DOWN = "flevopay_sk_foraDoAr0123456789abcdef";
 export const BLACKCAT_KEY = "bc_live_testeFalsoDoOfferStudio0123456";
 export const BLACKCAT_KEY_UNAPPROVED = "bc_live_contaAindaEmAnalise0123456789";
 export const BLACKCAT_KEY_DOWN = "bc_live_blackcatForaDoAr0123456789ab";
+export const CLOWNPAY_KEY = "cp_live_testeFalsoDoOfferStudio0123456";
+export const CLOWNPAY_KEY_KYC = "cp_live_contaEmAnaliseKyc0123456789ab";
+export const CLOWNPAY_KEY_DOWN = "cp_live_clownpayForaDoAr0123456789ab";
 
 /** Código PIX de exemplo (formato EMV do "copia e cola"). */
 export const FAKE_PIX_CODE =
@@ -311,5 +324,97 @@ export function startFakeBlackcat(): Promise<FakePix> {
       });
     }
     return send(res, 404, { success: false, message: "Rota não encontrada", error: "NOT_FOUND" });
+  });
+}
+
+// ─── ClownPay ─────────────────────────────────────────────────────────────────
+
+/** Um id com cara de UUID (estável pelo número da sequência), como os da ClownPay. */
+function fakeUuid(n: number): string {
+  const h = n.toString(16).padStart(12, "0");
+  return `a1b2c3d4-e5f6-4000-8000-${h}`;
+}
+
+export function startFakeClownpay(): Promise<FakePix> {
+  // Idempotency-Key → id da cobrança (repetir devolve a mesma, como a ClownPay).
+  const idempo = new Map<string, string>();
+  return startFake("", (req, res, state) => {
+    const auth = req.headers.authorization;
+    const key = typeof auth === "string" && auth.startsWith("Bearer ") ? auth.slice(7) : "";
+    if (key === CLOWNPAY_KEY_DOWN) return send(res, 503, { error: "provider_result_unknown", message: "Indisponível" });
+    if (key === CLOWNPAY_KEY_KYC) return send(res, 403, { error: "kyc_required", message: "Conta em análise (KYC)" });
+    if (key !== CLOWNPAY_KEY) return send(res, 401, { error: "unauthorized", message: "Chave inválida" });
+
+    if (req.method === "GET" && req.path === "/v1/payments") {
+      // Listagem (o "Testar conexão"): payments:read.
+      return send(res, 200, {
+        data: [...state.transactions.values()].slice(0, 1).map((t) => ({ id: t.id })),
+        next_cursor: null,
+      });
+    }
+    if (req.method === "POST" && req.path === "/v1/payments") {
+      const b = obj(req.body);
+      const buyer = obj(b.buyer);
+      const invalid = (message: string) => send(res, 422, { error: "validation_error", message });
+      const idem = req.headers["idempotency-key"];
+      if (typeof idem !== "string" || !idem) return invalid("Idempotency-Key obrigatório");
+      if (idempo.has(idem)) {
+        const tx = state.transactions.get(idempo.get(idem) as string);
+        if (tx)
+          return send(res, 200, {
+            id: tx.id,
+            external_reference: tx.reference,
+            status: tx.status,
+            amount: tx.amount,
+            payment_method: "pix",
+            pix: { emv: FAKE_PIX_CODE },
+            created_at: tx.createdAt,
+          });
+      }
+      if (b.payment_method !== "pix") return invalid("payment_method");
+      const amount = b.amount;
+      if (typeof amount !== "number" || !Number.isInteger(amount) || amount <= 0) return invalid("amount");
+      if (typeof b.external_reference !== "string" || !b.external_reference) return invalid("external_reference");
+      const doc = digits(buyer.document);
+      if (!buyer.name || !buyer.email || !(doc.length === 11 || doc.length === 14) || digits(buyer.phone).length < 10) {
+        return invalid("buyer");
+      }
+      const id = fakeUuid(state.next());
+      const now = new Date();
+      state.transactions.set(id, {
+        id,
+        reference: b.external_reference,
+        status: "pending",
+        amount,
+        createdAt: now.toISOString(),
+        paidAt: null,
+        body: b,
+      });
+      idempo.set(idem, id);
+      return send(res, 201, {
+        id,
+        external_reference: b.external_reference,
+        status: "pending",
+        amount,
+        payment_method: "pix",
+        pix: { emv: FAKE_PIX_CODE },
+        created_at: now.toISOString(),
+      });
+    }
+    const one = /^\/v1\/payments\/([^/]+)$/.exec(req.path);
+    if (req.method === "GET" && one) {
+      const tx = state.transactions.get(decodeURIComponent(one[1]));
+      if (!tx) return send(res, 404, { error: "not_found", message: "Cobrança não encontrada" });
+      return send(res, 200, {
+        id: tx.id,
+        external_reference: tx.reference,
+        status: tx.status,
+        amount: tx.amount,
+        payment_method: "pix",
+        created_at: tx.createdAt,
+        paid_at: tx.paidAt,
+      });
+    }
+    return send(res, 404, { error: "not_found", message: "Rota não encontrada" });
   });
 }

@@ -1311,7 +1311,7 @@ export function CheckoutProductForm({
           <legend id={f("provider")} tabIndex={-1} className="mb-1 font-medium text-sm outline-none">
             Gateway
           </legend>
-          <div className="grid gap-2 sm:grid-cols-3">
+          <div className="grid gap-2 sm:grid-cols-2">
             {CHECKOUT_PROVIDERS.map((p) => {
               const allowed = providerAllows(p, currency);
               const checked = draft.provider === p;

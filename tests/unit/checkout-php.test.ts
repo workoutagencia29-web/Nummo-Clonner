@@ -25,6 +25,7 @@ import { CHECKOUT_ORDER_RE } from "@/lib/checkout/contract";
 import { isValidCpf } from "@/lib/checkout/fields";
 import {
   PAGAMENTO_BLACKCAT_API,
+  PAGAMENTO_CLOWNPAY_API,
   PAGAMENTO_FLEVOPAY_API,
   PAGAMENTO_ORDER_KEEP_DAYS,
   PAGAMENTO_UNPAID_KEEP_DAYS,
@@ -41,17 +42,20 @@ import {
 } from "@/lib/export/payment-php";
 import { orderProductCode } from "@/lib/payments/orders";
 import { BLACKCAT_API_BASE } from "@/server/services/payments/blackcat";
+import { CLOWNPAY_API_BASE } from "@/server/services/payments/clownpay";
 import { FLEVOPAY_API_BASE } from "@/server/services/payments/flevopay";
 import { type FakeKyvo, KYVO_KEY, startFakeKyvo } from "./kyvo-fake";
 import { findPhp, instrumentCheckout, startPhp, TEST_REMOTE_ROUTER } from "./php-server";
 import {
   BLACKCAT_KEY,
+  CLOWNPAY_KEY,
   FAKE_PIX_CODE,
   FAKE_QR_BASE64,
   type FakePix,
   FLEVO_KEY,
   FLEVO_KEY_DOWN,
   startFakeBlackcat,
+  startFakeClownpay,
   startFakeFlevopay,
 } from "./pix-fakes";
 
@@ -111,6 +115,26 @@ const blackcat = pagamentoCheckoutOf(
   { code: orderProductCode("kit-fisico", "link-blackcat"), thankYou: null },
 );
 
+const clown = pagamentoCheckoutOf(
+  {
+    key: "ebook",
+    provider: "CLOWNPAY",
+    name: "E-book de Marketing",
+    amountCents: 2990,
+    currency: "BRL",
+    methods: ["PIX"],
+    locale: "PT",
+    accessUrl: ACCESS,
+    config: {
+      fields: { name: true, email: true, phone: true, document: true },
+      address: false,
+      shipping: [],
+      bumps: [{ id: "planilha", title: "Planilha", priceCents: 990, accessUrl: BUMP_ACCESS }],
+    },
+  },
+  { code: orderProductCode("ebook", "link-clown"), thankYou: "obrigado/" },
+);
+
 const kyvo = pagamentoCheckoutOf(
   {
     key: "mexico",
@@ -136,7 +160,7 @@ const kyvo = pagamentoCheckoutOf(
 /** Gateway que não cobra na moeda (só por config.php antigo): nunca cobra. */
 const wrongCurrency: PagamentoCheckout = { ...flevo, key: "errado", code: "errado-abc", gateway: "" };
 
-const CHECKOUTS = [flevo, blackcat, kyvo, wrongCurrency];
+const CHECKOUTS = [flevo, blackcat, clown, kyvo, wrongCurrency];
 
 describe("checkout no pagamento.php (sem PHP)", () => {
   it("pagamentoCheckoutOf resolve as regras do servidor no config.php", () => {
@@ -158,6 +182,14 @@ describe("checkout no pagamento.php (sem PHP)", () => {
       shipping: [],
       locale: "es",
     });
+    // ClownPay: PIX em real, os 4 campos exigidos, faixa do PIX.
+    expect(clown).toMatchObject({
+      gateway: "clownpay",
+      methods: ["pix"],
+      ranges: { pix: { min: 100, max: 10_000_000 } },
+      fields: ["name", "email", "phone", "document"],
+      locale: "pt",
+    });
     // PIX numa moeda que não é real: o gateway fica vazio (o PHP responde "configuracao").
     const pixMx = pagamentoCheckoutOf({ ...SOURCE_OF(flevo), currency: "MXN" }, { code: "x", thankYou: null });
     expect(pixMx.gateway).toBe("");
@@ -170,8 +202,10 @@ describe("checkout no pagamento.php (sem PHP)", () => {
     expect(code).not.toContain("${");
     expect(PAGAMENTO_FLEVOPAY_API).toBe(FLEVOPAY_API_BASE);
     expect(PAGAMENTO_BLACKCAT_API).toBe(BLACKCAT_API_BASE);
+    expect(PAGAMENTO_CLOWNPAY_API).toBe(CLOWNPAY_API_BASE);
     expect(code).toContain(`const OS_FLEVOPAY_API = '${FLEVOPAY_API_BASE}';`);
     expect(code).toContain(`const OS_BLACKCAT_API = '${BLACKCAT_API_BASE}';`);
+    expect(code).toContain(`const OS_CLOWNPAY_API = '${CLOWNPAY_API_BASE}';`);
     expect(code).toContain("const OS_WEBHOOK_PARAM = 'webhook';");
     expect(code).not.toMatch(/\b(eval|exec|shell_exec|system|passthru|proc_open)\s*\(/);
   });
@@ -216,26 +250,33 @@ function SOURCE_OF(c: PagamentoCheckout) {
 describe.skipIf(!PHP)("checkout no pagamento.php com PHP de verdade (gateways falsos)", () => {
   let flevoFake: FakePix;
   let blackcatFake: FakePix;
+  let clownFake: FakePix;
   let kyvoFake: FakeKyvo;
   let dir: string;
   let server: ChildProcess | null = null;
   let origin = "";
   const responses: string[] = [];
 
-  const config = (keys = { flevopay: FLEVO_KEY, blackcat: BLACKCAT_KEY }) =>
-    pagamentoConfigPhp({ apiKey: KYVO_KEY, products: [], keys, checkouts: CHECKOUTS });
+  const config = (
+    keys: { flevopay: string; blackcat: string; clownpay?: string } = {
+      flevopay: FLEVO_KEY,
+      blackcat: BLACKCAT_KEY,
+      clownpay: CLOWNPAY_KEY,
+    },
+  ) => pagamentoConfigPhp({ apiKey: KYVO_KEY, products: [], keys, checkouts: CHECKOUTS });
 
   beforeAll(async () => {
-    [flevoFake, blackcatFake, kyvoFake] = await Promise.all([
+    [flevoFake, blackcatFake, clownFake, kyvoFake] = await Promise.all([
       startFakeFlevopay(),
       startFakeBlackcat(),
+      startFakeClownpay(),
       startFakeKyvo(),
     ]);
     dir = await mkdtemp(path.join(os.tmpdir(), "os-checkout-php-"));
     await mkdir(path.join(dir, PAGAMENTO_CONFIG_DIR), { recursive: true });
     const code = instrumentCheckout(
       pagamentoPhp(),
-      { kyvo: kyvoFake.base, flevopay: flevoFake.base, blackcat: blackcatFake.base },
+      { kyvo: kyvoFake.base, flevopay: flevoFake.base, blackcat: blackcatFake.base, clownpay: clownFake.base },
       { OS_CREATE_LIMIT: 30 },
     );
     await writeFile(path.join(dir, "pagamento.php"), code);
@@ -247,7 +288,7 @@ describe.skipIf(!PHP)("checkout no pagamento.php com PHP de verdade (gateways fa
 
   afterAll(async () => {
     server?.kill();
-    await Promise.all([flevoFake?.close(), blackcatFake?.close(), kyvoFake?.close()]);
+    await Promise.all([flevoFake?.close(), blackcatFake?.close(), clownFake?.close(), kyvoFake?.close()]);
     if (dir) await rm(dir, { recursive: true, force: true });
   });
 
@@ -313,6 +354,7 @@ describe.skipIf(!PHP)("checkout no pagamento.php com PHP de verdade (gateways fa
     const text = await (await fetch(`${origin}/pagamento.php`)).text();
     expect(text).toContain("Chave da FlevoPay: cadastrada");
     expect(text).toContain("Chave da BlackCat: cadastrada");
+    expect(text).toContain("Chave da ClownPay: cadastrada");
     expect(text).toContain("Chave da Kyvo: cadastrada");
     expect(text).toContain(`Checkouts: ${CHECKOUTS.length}`);
     expect(text).toContain("Pedidos do checkout: gravando em pagamento-dados/pedidos");
@@ -722,6 +764,69 @@ describe.skipIf(!PHP)("checkout no pagamento.php com PHP de verdade (gateways fa
     expect(h.status).toBe(200);
     const s2 = await post({ acao: "checkout_status", pedido: r2.json.pedido, checkout: "kit-fisico" });
     expect(s2.json).toMatchObject({ status: "canceled", pago: false });
+  });
+
+  it("ClownPay: PIX com Bearer e Idempotency-Key, só o copia-e-cola, status na API e acesso com o bump", async () => {
+    const r = await post({
+      acao: "checkout_criar",
+      checkout: "ebook",
+      metodo: "pix",
+      ...buyer,
+      bumps: ["planilha"],
+      metadata: { utm_source: "facebook", utm_campaign: "lancamento", src: "s1", fbp: "fb.1.2", os_versao: "B" },
+    });
+    expect(r.status).toBe(201);
+    expect(r.json).toMatchObject({ ok: true, status: "pending", metodo: "pix", moeda: "BRL", valor: 2990 + 990 });
+    expect(r.json.pedido).toMatch(/^ck_[a-z0-9]{24}$/);
+    // Só o "copia e cola": a ClownPay não manda imagem do QR (a página gera).
+    expect(r.json.pix).toMatchObject({ codigo: FAKE_PIX_CODE, imagem: null });
+    const tx = [...clownFake.transactions.values()].at(-1);
+    const req = clownFake.requests.filter((q) => q.method === "POST").at(-1);
+    expect(req?.headers.authorization).toBe(`Bearer ${CLOWNPAY_KEY}`);
+    expect(req?.headers["idempotency-key"]).toBe(r.json.pedidoExterno);
+    const sent = tx?.body as Record<string, unknown>;
+    expect(sent).toMatchObject({
+      amount: 3980,
+      payment_method: "pix",
+      external_reference: r.json.pedidoExterno,
+      buyer: { name: "Ana Souza", email: "ana@exemplo.com.br", document: "52998224725", phone: "11987654321" },
+      products: [
+        { id: "item-1", name: "E-book de Marketing", quantity: 1, price_in_cents: 2990 },
+        { id: "item-2", name: "Planilha", quantity: 1, price_in_cents: 990 },
+      ],
+      tracking: { utm_source: "facebook", utm_campaign: "lancamento", src: "s1" },
+    });
+    // A ClownPay recebe o webhook pelo painel dela, não pela API: sem postback no corpo.
+    expect(sent.postback_url).toBeUndefined();
+    expect(sent.postbackUrl).toBeUndefined();
+    expect(JSON.stringify(sent)).not.toContain("fbp");
+    expect(String(tx?.id)).not.toBe(r.json.pedido);
+
+    const pedido = String(r.json.pedido);
+    expect((await post({ acao: "checkout_status", pedido, checkout: "ebook" })).json.status).toBe("pending");
+    clownFake.setStatus(String(tx?.id), "paid");
+    expect((await post({ acao: "checkout_status", pedido, checkout: "ebook" })).json).toMatchObject({
+      status: "paid",
+      pago: true,
+      valor: 3980,
+    });
+    const a = await post({ acao: "acesso", pedido });
+    expect(a.json).toMatchObject({
+      acesso: ACCESS,
+      produto: "ebook",
+      extras: [{ titulo: "Planilha", acesso: BUMP_ACCESS }],
+      idioma: "pt",
+    });
+    // Webhook da ClownPay (o corpo só aponta a cobrança pelo id; o status vem da API).
+    const r2 = await post({ acao: "checkout_criar", checkout: "ebook", metodo: "pix", ...buyer });
+    const tx2 = [...clownFake.transactions.values()].at(-1);
+    clownFake.setStatus(String(tx2?.id), "paid");
+    const h = await post(
+      { event: "payment.updated", data: { id: tx2?.id, status: "paid" } },
+      { query: "?webhook=clownpay", noOrigin: true },
+    );
+    expect(h.status).toBe(200);
+    expect((await post({ acao: "checkout_status", pedido: r2.json.pedido, checkout: "ebook" })).json.pago).toBe(true);
   });
 
   it("Kyvo (peso mexicano): SPEI com o total do config.php, pedido público próprio e acesso com o bump", async () => {

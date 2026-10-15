@@ -57,6 +57,8 @@ import { phpString } from "./php";
 export const PAGAMENTO_FLEVOPAY_API = "https://pagamento-processador.org.ua";
 /** API da BlackCat usada pelo pagamento.php (a mesma de BLACKCAT_API_BASE). */
 export const PAGAMENTO_BLACKCAT_API = "https://api.blackcatoficial.com/api";
+/** API da ClownPay usada pelo pagamento.php (a mesma de CLOWNPAY_API_BASE). */
+export const PAGAMENTO_CLOWNPAY_API = "https://api.clownpay.com.br";
 /** Pasta dos pedidos do checkout dentro de pagamento-dados/. */
 export const PAGAMENTO_ORDERS_DIR = "pedidos";
 /** Dias que um pedido PAGO do checkout fica guardado (o ?pedido= da página de obrigado vale esse tempo). */
@@ -77,7 +79,7 @@ export const PAGAMENTO_WEBHOOK_MAX_BODY = 64 * 1024;
 export const PAGAMENTO_WEBHOOK_LIMIT = 600;
 
 /** Gateway como o pagamento.php o chama ("" = o gateway não cobra na moeda do produto). */
-export type PagamentoGateway = "flevopay" | "blackcat" | "kyvo";
+export type PagamentoGateway = "flevopay" | "blackcat" | "clownpay" | "kyvo";
 
 /** Checkout como o pagamento.php conhece (só no config.php). */
 export interface PagamentoCheckout {
@@ -176,7 +178,7 @@ export function pagamentoCheckoutOf(
 
 /** O gateway exige nome com sobrenome (os de PIX)? */
 export function pagamentoNeedsFullName(gateway: PagamentoGateway | ""): boolean {
-  return gateway === "flevopay" || gateway === "blackcat";
+  return gateway === "flevopay" || gateway === "blackcat" || gateway === "clownpay";
 }
 
 const cents = (n: number) => (Number.isSafeInteger(n) && n >= 0 ? n : 0);
@@ -239,6 +241,7 @@ export function checkoutPhpFunctions(): string {
 
 const OS_FLEVOPAY_API = '${PAGAMENTO_FLEVOPAY_API}';
 const OS_BLACKCAT_API = '${PAGAMENTO_BLACKCAT_API}';
+const OS_CLOWNPAY_API = '${PAGAMENTO_CLOWNPAY_API}';
 const OS_ORDERS_DIR = '${PAGAMENTO_ORDERS_DIR}';
 const OS_ORDER_KEEP = ${PAGAMENTO_ORDER_KEEP_DAYS * 86400};
 const OS_UNPAID_KEEP = ${PAGAMENTO_UNPAID_KEEP_DAYS * 86400};
@@ -478,7 +481,7 @@ function os_checkout_ok($c)
     return is_array($c)
         && isset($c['codigo'], $c['gateway'], $c['valor'], $c['moeda'], $c['metodos'], $c['faixas'], $c['campos'], $c['fretes'], $c['bumps'])
         && is_string($c['codigo']) && preg_match('/^[a-z0-9-]{1,32}$/', $c['codigo'])
-        && in_array($c['gateway'], array('flevopay', 'blackcat', 'kyvo'), true)
+        && in_array($c['gateway'], array('flevopay', 'blackcat', 'clownpay', 'kyvo'), true)
         && is_int($c['valor']) && $c['valor'] > 0
         && is_string($c['moeda']) && is_array($c['metodos']) && is_array($c['faixas'])
         && is_array($c['campos']) && is_array($c['fretes']) && is_array($c['bumps']);
@@ -711,11 +714,27 @@ function os_new_checkout_order()
 
 // ── Gateways de PIX ──────────────────────────────────────────────────────────
 
-/** Pedido à API da FlevoPay ou da BlackCat. $retry: tenta mais uma vez quando o gateway está fora (só consultas). */
-function os_pix_api($gateway, $method, $path, $apiKey, $body, $retry)
+/**
+ * Pedido à API da FlevoPay, da BlackCat ou da ClownPay. A FlevoPay e a BlackCat
+ * autenticam por X-API-Key; a ClownPay por "Authorization: Bearer" e, no POST,
+ * uma "Idempotency-Key" ($idempotency = pedidoExterno: repetir nunca cria outra
+ * cobrança). $retry: tenta mais uma vez quando o gateway está fora (só consultas).
+ */
+function os_pix_api($gateway, $method, $path, $apiKey, $body, $retry, $idempotency = null)
 {
-    $base = $gateway === 'flevopay' ? OS_FLEVOPAY_API : OS_BLACKCAT_API;
-    $headers = array('X-API-Key: ' . $apiKey, 'Accept: application/json');
+    if ($gateway === 'flevopay') {
+        $base = OS_FLEVOPAY_API;
+        $headers = array('X-API-Key: ' . $apiKey, 'Accept: application/json');
+    } elseif ($gateway === 'clownpay') {
+        $base = OS_CLOWNPAY_API;
+        $headers = array('Authorization: Bearer ' . $apiKey, 'Accept: application/json');
+        if ($idempotency !== null && $idempotency !== '') {
+            $headers[] = 'Idempotency-Key: ' . $idempotency;
+        }
+    } else {
+        $base = OS_BLACKCAT_API;
+        $headers = array('X-API-Key: ' . $apiKey, 'Accept: application/json');
+    }
     $payload = null;
     if ($body !== null) {
         $payload = json_encode($body, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
@@ -814,6 +833,19 @@ function os_blackcat_status($value)
         'REFUNDED' => 'refunded', 'CHARGEBACK' => 'disputed',
     );
     $key = strtoupper((string) os_text($value));
+    return isset($map[$key]) ? $map[$key] : null;
+}
+
+/** Status da ClownPay → status do Offer Studio (null = desconhecido). */
+function os_clownpay_status($value)
+{
+    $map = array(
+        'pending' => 'pending', 'processing' => 'pending',
+        'paid' => 'paid', 'failed' => 'failed',
+        'canceled' => 'canceled', 'cancelled' => 'canceled',
+        'refunded' => 'refunded', 'chargeback' => 'disputed',
+    );
+    $key = strtolower((string) os_text($value));
     return isset($map[$key]) ? $map[$key] : null;
 }
 
@@ -920,6 +952,50 @@ function os_pix_create($gateway, $apiKey, $c, $buyer, $total, $external, $metada
             return 'indisponivel';
         }
         return array($id, $code, os_qr_image(os_field($json, 'qr_code_base64')), os_iso_date(os_field($json, 'expires_at')));
+    }
+    if ($gateway === 'clownpay') {
+        // ClownPay: Bearer + Idempotency-Key (= pedidoExterno); só o "copia e cola" (sem imagem do QR).
+        $products = array(array('id' => 'item-1', 'name' => os_cut((string) $c['nome'], 160), 'quantity' => $total['quantidade'], 'price_in_cents' => $c['valor']));
+        $n = 2;
+        foreach ($total['bumps'] as $id) {
+            $products[] = array('id' => 'item-' . $n, 'name' => os_cut((string) $c['bumps'][$id]['titulo'], 160), 'quantity' => 1, 'price_in_cents' => $c['bumps'][$id]['valor']);
+            $n++;
+        }
+        if ($total['valorFrete'] > 0) {
+            $products[] = array('id' => 'item-' . $n, 'name' => os_cut('Frete ' . $c['fretes'][$total['frete']]['nome'], 160), 'quantity' => 1, 'price_in_cents' => $total['valorFrete']);
+        }
+        $body = array(
+            'amount' => $total['total'],
+            'payment_method' => 'pix',
+            'external_reference' => $external,
+            'buyer' => array(
+                'name' => $buyer['nome'],
+                'document' => $buyer['documento'],
+                'phone' => $buyer['telefone'],
+                'email' => $buyer['email'],
+            ),
+            'products' => $products,
+        );
+        $tracking = os_pick($metadata, array('utm_source', 'utm_medium', 'utm_campaign', 'utm_content', 'utm_term', 'src', 'sck'));
+        if (count($tracking)) {
+            $body['tracking'] = $tracking;
+        }
+        // A ClownPay não recebe o webhook pela API: ele é cadastrado no painel dela (a página confere pela API).
+        $res = os_pix_api('clownpay', 'POST', '/v1/payments', $apiKey, $body, false, $external);
+        if ($res[0] < 200 || $res[0] >= 300) {
+            return os_pix_error($res[0]);
+        }
+        $json = json_decode($res[1], true);
+        if (!is_array($json)) {
+            return 'indisponivel';
+        }
+        $pix = os_field($json, 'pix');
+        $id = os_gateway_id(os_field($json, 'id'));
+        $code = os_pix_code(is_array($pix) ? os_field($pix, 'emv') : os_field($json, 'emv'));
+        if ($id === null || $code === null) {
+            return 'indisponivel';
+        }
+        return array($id, $code, null, os_iso_date(os_field($json, 'expires_at')));
     }
     // BlackCat: produto, bumps e frete como itens (o amount é a soma deles).
     $tangible = $address !== null;
@@ -1029,6 +1105,19 @@ function os_gateway_status($config, $order)
         // A consulta é pelo id da cobrança: a resposta precisa ser dela (pelo id ou pela reference).
         if (os_gateway_id(os_field($tx, 'id')) !== $gid && $external !== $order['externo']) {
             return array('erro' => 'outra_cobranca');
+        }
+    } elseif ($gateway === 'clownpay') {
+        $res = os_pix_api('clownpay', 'GET', '/v1/payments/' . rawurlencode($gid), $apiKey, null, true);
+        if ($res[0] < 200 || $res[0] >= 300) {
+            return array('erro' => $res[0] === 404 ? 'sem_cobranca' : os_pix_error($res[0]));
+        }
+        $json = json_decode($res[1], true);
+        $tx = is_array(os_field($json, 'data')) ? $json['data'] : $json;
+        $status = os_clownpay_status(os_field($tx, 'status'));
+        $external = os_text(os_field($tx, 'external_reference'));
+        $amount = os_cents_of(os_field($tx, 'amount'));
+        if (!is_array($tx) || $status === null || os_gateway_id(os_field($tx, 'id')) !== $gid) {
+            return array('erro' => 'indisponivel');
         }
     } else {
         $res = os_pix_api('blackcat', 'GET', '/sales/' . rawurlencode($gid) . '/status', $apiKey, null, true);
@@ -1291,7 +1380,7 @@ function os_checkout_access($config, $checkouts, $req, $order)
 }
 
 /**
- * Webhook da FlevoPay ou da BlackCat (POST pagamento.php?webhook=<gateway>).
+ * Webhook da FlevoPay, da BlackCat ou da ClownPay (POST pagamento.php?webhook=<gateway>).
  * O corpo só aponta a cobrança (sem assinatura documentada, ele nunca vale
  * sozinho): o pedido muda só com o status consultado na API com a chave.
  * Cobrança desconhecida → 200 (nada a fazer); gateway fora do ar ou sem
@@ -1300,7 +1389,7 @@ function os_checkout_access($config, $checkouts, $req, $order)
 function os_webhook($config, $trustProxy)
 {
     $gateway = is_string($_GET[OS_WEBHOOK_PARAM]) ? $_GET[OS_WEBHOOK_PARAM] : '';
-    if ($gateway !== 'flevopay' && $gateway !== 'blackcat') {
+    if ($gateway !== 'flevopay' && $gateway !== 'blackcat' && $gateway !== 'clownpay') {
         os_fail('invalido');
     }
     if (!os_rate_ok('webhook', os_rate_key(os_client_ip($trustProxy), 64), OS_WEBHOOK_LIMIT)) {
@@ -1314,7 +1403,7 @@ function os_webhook($config, $trustProxy)
         os_fail('invalido');
     }
     $json = json_decode($raw, true);
-    $field = $gateway === 'flevopay' ? 'transaction_id' : 'transactionId';
+    $field = $gateway === 'flevopay' ? 'transaction_id' : ($gateway === 'clownpay' ? 'id' : 'transactionId');
     $gid = os_gateway_id(os_field($json, $field));
     if ($gid === null) {
         $gid = os_gateway_id(os_field(os_field($json, 'data'), $field));

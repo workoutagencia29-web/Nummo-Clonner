@@ -96,8 +96,8 @@ export interface PagamentoConfig {
   /** Chave da API da Kyvo ("" = não cadastrada: o pagamento.php responde "configuracao"). */
   apiKey: string;
   products: PagamentoProduct[];
-  /** Chaves da FlevoPay e da BlackCat (checkout do Offer Studio em real; "" = não cadastrada). */
-  keys?: { flevopay?: string; blackcat?: string };
+  /** Chaves da FlevoPay, da BlackCat e da ClownPay (checkout do Offer Studio em real; "" = não cadastrada). */
+  keys?: { flevopay?: string; blackcat?: string; clownpay?: string };
   /** Checkouts do Offer Studio (páginas checkout/<chave>/). */
   checkouts?: PagamentoCheckout[];
 }
@@ -124,7 +124,7 @@ export function pagamentoConfigPhp(config: PagamentoConfig): string {
   const products = config.products.length ? `array(\n${config.products.map(productEntry).join("\n")}\n  )` : "array()";
   const checkouts = config.checkouts ?? [];
   return `<?php
-// Offer Studio — chaves das APIs (Kyvo${checkouts.length ? ", FlevoPay, BlackCat" : ""}) e produtos do pagamento.
+// Offer Studio — chaves das APIs (Kyvo${checkouts.length ? ", FlevoPay, BlackCat, ClownPay" : ""}) e produtos do pagamento.
 // Usado pelo pagamento.php. NÃO compartilhe este arquivo: com a chave,
 // qualquer pessoa consegue criar cobranças e ver as suas vendas no gateway.
 // Só funciona em hospedagem com PHP (veja o LEIA-ME.txt).
@@ -140,6 +140,7 @@ return array(
   'chaves' => array(
     'flevopay' => ${phpString(config.keys?.flevopay ?? "")},
     'blackcat' => ${phpString(config.keys?.blackcat ?? "")},
+    'clownpay' => ${phpString(config.keys?.clownpay ?? "")},
   ),
   'produtos' => ${products},
   // Checkouts do Offer Studio (páginas checkout/<chave>/): valores em centavos.
@@ -764,7 +765,7 @@ if ($method === 'GET' || $method === 'HEAD') {
     if (count($products) || isset($used['kyvo']) || !count($checkouts)) {
         echo 'Chave da Kyvo: ' . ($apiKey !== '' ? 'cadastrada' : $missing) . "\n";
     }
-    foreach (array('flevopay' => 'FlevoPay', 'blackcat' => 'BlackCat') as $gateway => $label) {
+    foreach (array('flevopay' => 'FlevoPay', 'blackcat' => 'BlackCat', 'clownpay' => 'ClownPay') as $gateway => $label) {
         if (isset($used[$gateway])) {
             echo 'Chave da ' . $label . ': ' . (os_gateway_key($config, $gateway) !== '' ? 'cadastrada' : $missing) . "\n";
         }
@@ -783,8 +784,8 @@ if ($method !== 'POST') {
     os_fail('invalido');
 }
 
-// Webhook da FlevoPay/BlackCat (servidor do gateway: sem Origin). O corpo só
-// diz qual cobrança olhar; o status vem da API, consultada com a chave.
+// Webhook da FlevoPay/BlackCat/ClownPay (servidor do gateway: sem Origin). O
+// corpo só diz qual cobrança olhar; o status vem da API, consultada com a chave.
 if (isset($_GET[OS_WEBHOOK_PARAM])) {
     os_webhook($config, $trustProxy);
 }

@@ -28,11 +28,16 @@ import {
 } from "../payments/rules";
 
 /** Gateways do checkout, na ordem do painel (os de PIX primeiro: a maioria vende no Brasil). */
-export const CHECKOUT_PROVIDERS = ["FLEVOPAY", "BLACKCAT", "KYVO"] as const satisfies readonly PaymentProviderId[];
+export const CHECKOUT_PROVIDERS = [
+  "FLEVOPAY",
+  "BLACKCAT",
+  "CLOWNPAY",
+  "KYVO",
+] as const satisfies readonly PaymentProviderId[];
 export type CheckoutProviderId = (typeof CHECKOUT_PROVIDERS)[number];
 
 /** Gateways de PIX (só real). */
-export const PIX_PROVIDERS = ["FLEVOPAY", "BLACKCAT"] as const satisfies readonly CheckoutProviderId[];
+export const PIX_PROVIDERS = ["FLEVOPAY", "BLACKCAT", "CLOWNPAY"] as const satisfies readonly CheckoutProviderId[];
 
 /** Moedas do checkout = as moedas da oferta (Offer.settings.currency). */
 export const CHECKOUT_CURRENCIES = ["BRL", "MXN", "EUR", "USD"] as const satisfies readonly StoreCurrency[];
@@ -48,6 +53,7 @@ export const CHECKOUT_METHOD_LABEL: Record<CheckoutMethodId, string> = { PIX: "P
 export const PROVIDER_CURRENCIES: Record<CheckoutProviderId, readonly CheckoutCurrencyId[]> = {
   FLEVOPAY: ["BRL"],
   BLACKCAT: ["BRL"],
+  CLOWNPAY: ["BRL"],
   KYVO: ["MXN", "EUR", "USD"],
 };
 
@@ -55,6 +61,7 @@ export const PROVIDER_CURRENCIES: Record<CheckoutProviderId, readonly CheckoutCu
 export const CHECKOUT_PROVIDER_HINT: Record<CheckoutProviderId, string> = {
   FLEVOPAY: "PIX no Brasil, em real.",
   BLACKCAT: "PIX no Brasil, em real.",
+  CLOWNPAY: "PIX no Brasil, em real.",
   KYVO: "Peso mexicano (SPEI e cartão), euro (cartão, Bizum e MB WAY) e dólar (cartão).",
 };
 
@@ -258,6 +265,7 @@ export function buyerFieldLabel(field: BuyerField, currency: CheckoutCurrencyId)
 export const PROVIDER_REQUIRED_FIELDS: Record<CheckoutProviderId, readonly BuyerField[]> = {
   FLEVOPAY: ["name", "email", "phone", "document"],
   BLACKCAT: ["name", "email", "phone", "document"],
+  CLOWNPAY: ["name", "email", "phone", "document"],
   KYVO: ["name", "email"],
 };
 

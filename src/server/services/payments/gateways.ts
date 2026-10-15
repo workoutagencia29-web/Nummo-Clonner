@@ -27,6 +27,7 @@ import {
   PROVIDER_LABEL,
 } from "@/lib/payments/rules";
 import { blackcatGateway } from "./blackcat";
+import { clownpayGateway } from "./clownpay";
 import { flevopayGateway } from "./flevopay";
 import { kyvoGateway } from "./kyvo";
 
@@ -34,6 +35,7 @@ const ADAPTERS: Record<PaymentProviderId, PaymentGatewayAdapter> = {
   KYVO: kyvoGateway,
   FLEVOPAY: flevopayGateway,
   BLACKCAT: blackcatGateway,
+  CLOWNPAY: clownpayGateway,
 };
 
 export function gatewayAdapter(provider: PaymentProviderId): PaymentGatewayAdapter {
@@ -129,10 +131,10 @@ export async function paymentKeySources(
 
 /**
  * Confere a chave colada (sem rede). Kyvo: kyvo_live_… (ou kyvo_test_…).
- * FlevoPay e BlackCat: o formato não é documentado de um jeito que dê para
- * conferir aqui (o "Testar conexão" confere de verdade); só a chave de outro
- * gateway com prefixo conhecido (kyvo_, flevopay_) colada no cartão errado é
- * recusada.
+ * ClownPay: cp_live_… (ou cp_test_…). FlevoPay e BlackCat: o formato não é
+ * documentado de um jeito que dê para conferir aqui (o "Testar conexão" confere
+ * de verdade); só a chave de outro gateway com prefixo conhecido (kyvo_,
+ * flevopay_, cp_) colada no cartão errado é recusada.
  */
 export function cleanApiKey(provider: PaymentProviderId, raw: string): string {
   const key = raw
@@ -145,8 +147,14 @@ export function cleanApiKey(provider: PaymentProviderId, raw: string): string {
   if (!/^[\x21-\x7e]+$/.test(key)) {
     throw new UserError("A chave tem caracteres inválidos. Copie de novo, direto do painel do gateway.", "apiKey");
   }
-  // Chave de outro gateway colada no cartão errado (os prefixos conhecidos: kyvo_ e flevopay_).
-  const other = /^kyvo_/i.test(key) ? "KYVO" : /^flevopay_/i.test(key) ? "FLEVOPAY" : null;
+  // Chave de outro gateway colada no cartão errado (prefixos conhecidos: kyvo_, flevopay_, cp_).
+  const other = /^kyvo_/i.test(key)
+    ? "KYVO"
+    : /^flevopay_/i.test(key)
+      ? "FLEVOPAY"
+      : /^cp_/i.test(key)
+        ? "CLOWNPAY"
+        : null;
   if (other && other !== provider) {
     throw new UserError(
       `Essa é uma chave da ${PROVIDER_LABEL[other]}. Cole aqui a chave da API da ${PROVIDER_LABEL[provider]} (no painel da ${PROVIDER_LABEL[provider]}).`,
@@ -161,8 +169,19 @@ export function cleanApiKey(provider: PaymentProviderId, raw: string): string {
       throw new UserError("A chave tem caracteres inválidos. Copie de novo, direto do painel da Kyvo.", "apiKey");
     }
   }
-  // Kyvo: kyvo_live_ + o segredo; nos outros, o formato não é documentado (só um mínimo que pega a chave cortada).
-  if (key.length < (provider === "KYVO" ? 20 : 12) || key.length > 500) {
+  if (provider === "CLOWNPAY") {
+    if (!/^cp_/i.test(key)) {
+      throw new UserError(
+        "A chave da ClownPay começa com “cp_live_”. Confira se copiou a chave da API certa.",
+        "apiKey",
+      );
+    }
+    if (!/^cp_[A-Za-z0-9_-]+$/.test(key)) {
+      throw new UserError("A chave tem caracteres inválidos. Copie de novo, direto do painel da ClownPay.", "apiKey");
+    }
+  }
+  // Kyvo/ClownPay: prefixo + o segredo; nos outros, o formato não é documentado (só um mínimo que pega a chave cortada).
+  if (key.length < (provider === "KYVO" || provider === "CLOWNPAY" ? 20 : 12) || key.length > 500) {
     throw new UserError("Essa chave parece incompleta. Copie de novo a chave inteira.", "apiKey");
   }
   return key;

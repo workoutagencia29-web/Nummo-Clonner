@@ -96,6 +96,17 @@ describe("chave do gateway da oferta (aba Links e checkouts)", () => {
     );
     await expectUserError(savePaymentGatewayKey(id, "KYVO", "kyvo_live_abc def"), /espaços/, "apiKey");
     await expectUserError(savePaymentGatewayKey(id, "KYVO", "kyvo_live_1"), /incompleta/, "apiKey");
+    // ClownPay: chave começa com cp_live_; a de outro gateway no cartão errado é recusada.
+    await expectUserError(
+      savePaymentGatewayKey(id, "CLOWNPAY", "sk_live_123456789012345678"),
+      /começa com “cp_live_”/,
+      "apiKey",
+    );
+    await expectUserError(
+      savePaymentGatewayKey(id, "CLOWNPAY", "kyvo_live_abcdefghij1234567890"),
+      "Essa é uma chave da Kyvo. Cole aqui a chave da API da ClownPay (no painel da ClownPay).",
+      "apiKey",
+    );
     await expectUserError(savePaymentGatewayKey("nao-existe", "KYVO", KYVO_KEY), "Oferta não encontrada.");
     expect(await prisma.paymentGateway.count()).toBe(0);
   });
@@ -104,11 +115,12 @@ describe("chave do gateway da oferta (aba Links e checkouts)", () => {
     const a = await createOffer({ name: "Oferta A" });
     const b = await createOffer({ name: "Oferta B" });
     const empty = { configured: false, keyHint: null, keyUnreadable: false, checkedAt: null, checkStatus: null };
-    // Uma conta por gateway (a Kyvo primeiro; FlevoPay e BlackCat são do checkout do Offer Studio).
+    // Uma conta por gateway (a Kyvo primeiro; FlevoPay, BlackCat e ClownPay são do checkout do Offer Studio).
     expect(await offerPaymentAccounts(a.id)).toEqual([
       { provider: "KYVO", label: "Kyvo", ...empty },
       { provider: "FLEVOPAY", label: "FlevoPay", ...empty },
       { provider: "BLACKCAT", label: "BlackCat", ...empty },
+      { provider: "CLOWNPAY", label: "ClownPay", ...empty },
     ]);
     await savePaymentGatewayKey(a.id, "KYVO", ` Bearer ${KYVO_KEY} `);
     const row = await prisma.paymentGateway.findUniqueOrThrow({
@@ -120,6 +132,11 @@ describe("chave do gateway da oferta (aba Links e checkouts)", () => {
     expect(view).toMatchObject({ configured: true, keyHint: `••••••${KYVO_KEY.slice(-4)}`, keyUnreadable: false });
     expect(JSON.stringify(await offerPaymentAccounts(a.id))).not.toContain(KYVO_KEY.slice(0, 20));
     expect(await paymentGatewayKey(a.id, "KYVO")).toBe(KYVO_KEY);
+    // ClownPay (PIX): a chave cp_live_ é guardada e lida de volta (o enum do banco aceita CLOWNPAY).
+    const cpKey = "cp_live_contaDaClownPay00000000000000";
+    await savePaymentGatewayKey(a.id, "CLOWNPAY", cpKey);
+    expect(await paymentGatewayKey(a.id, "CLOWNPAY")).toBe(cpKey);
+    expect(await paymentKeyState(a.id, "CLOWNPAY")).toBe("ok"); // chave salva e legível conta como "ok"
     // A outra oferta continua sem chave (nada global).
     expect((await offerPaymentAccounts(b.id))[0].configured).toBe(false);
     expect(await paymentGatewayKey(b.id, "KYVO")).toBeNull();

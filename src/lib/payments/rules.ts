@@ -22,7 +22,7 @@ export type PaymentLocaleId = (typeof PAYMENT_LOCALES)[number];
  * a Kyvo (pagamento na página e checkout em peso, euro e dólar) e os de PIX do
  * checkout do Offer Studio (FlevoPay e BlackCat, em real).
  */
-export const PAYMENT_PROVIDERS = ["KYVO", "FLEVOPAY", "BLACKCAT"] as const;
+export const PAYMENT_PROVIDERS = ["KYVO", "FLEVOPAY", "BLACKCAT", "CLOWNPAY"] as const;
 export type PaymentProviderId = (typeof PAYMENT_PROVIDERS)[number];
 
 /** Moeda da Kyvo? (no banco, a moeda também pode ser o real do checkout com PIX). */
@@ -87,6 +87,7 @@ export const PROVIDER_LABEL: Record<PaymentProviderId, string> = {
   KYVO: "Kyvo",
   FLEVOPAY: "FlevoPay",
   BLACKCAT: "BlackCat",
+  CLOWNPAY: "ClownPay",
 };
 
 /** O método aceita a moeda? */
@@ -373,6 +374,7 @@ const CONNECTION_MESSAGES: Record<PaymentProviderId, Record<ConnectionCode, stri
   KYVO: CONNECTION_MESSAGE,
   FLEVOPAY: pixConnectionMessages("FlevoPay", "no painel da FlevoPay"),
   BLACKCAT: pixConnectionMessages("BlackCat", "no painel da BlackCat"),
+  CLOWNPAY: pixConnectionMessages("ClownPay", "no painel da ClownPay"),
 };
 
 /** Resultado do "Testar conexão" explicado no painel, para o gateway. */

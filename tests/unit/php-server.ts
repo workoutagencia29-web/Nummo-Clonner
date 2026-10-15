@@ -63,20 +63,23 @@ export function instrumentPagamento(code: string, apiBase: string, limits: Recor
 }
 
 /**
- * pagamento.php apontando para os gateways falsos do checkout (FlevoPay e
- * BlackCat de tests/unit/pix-fakes.ts e a Kyvo de kyvo-fake.ts), com outros
- * limites se pedido.
+ * pagamento.php apontando para os gateways falsos do checkout (FlevoPay,
+ * BlackCat e ClownPay de tests/unit/pix-fakes.ts e a Kyvo de kyvo-fake.ts), com
+ * outros limites se pedido. O endereço da ClownPay só é trocado quando `clownpay`
+ * é passado (o resto dos testes não a usa).
  */
 export function instrumentCheckout(
   code: string,
-  bases: { kyvo: string; flevopay: string; blackcat: string },
+  bases: { kyvo: string; flevopay: string; blackcat: string; clownpay?: string },
   limits: Record<string, number> = {},
 ): string {
   let out = instrumentPagamento(code, bases.kyvo, limits);
-  for (const [name, base] of [
+  const rewrites: [string, string][] = [
     ["OS_FLEVOPAY_API", bases.flevopay],
     ["OS_BLACKCAT_API", bases.blackcat],
-  ] as const) {
+  ];
+  if (bases.clownpay !== undefined) rewrites.push(["OS_CLOWNPAY_API", bases.clownpay]);
+  for (const [name, base] of rewrites) {
     const next = out.replace(new RegExp(`const ${name} = '[^']*';`), `const ${name} = '${base}';`);
     if (next === out) throw new Error(`${name} não encontrado no pagamento.php`);
     out = next;

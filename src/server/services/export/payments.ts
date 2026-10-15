@@ -102,7 +102,11 @@ export async function zipPaymentConfig(
   return {
     apiKey,
     keys: checkout
-      ? { flevopay: await zipCheckoutKey(checkout, "FLEVOPAY"), blackcat: await zipCheckoutKey(checkout, "BLACKCAT") }
+      ? {
+          flevopay: await zipCheckoutKey(checkout, "FLEVOPAY"),
+          blackcat: await zipCheckoutKey(checkout, "BLACKCAT"),
+          clownpay: await zipCheckoutKey(checkout, "CLOWNPAY"),
+        }
       : {},
     checkouts: checkout ? zipCheckouts(checkout, pageDirs) : [],
     products: (payment?.products ?? []).map((p) => ({

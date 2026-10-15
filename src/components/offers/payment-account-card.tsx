@@ -33,6 +33,7 @@ export const ACCOUNT_CARD_ID: Record<PaymentProviderId, string> = {
   KYVO: PAYMENT_ACCOUNT_ID,
   FLEVOPAY: "conta-flevopay",
   BLACKCAT: "conta-blackcat",
+  CLOWNPAY: "conta-clownpay",
 };
 
 /** O que cada gateway cobra, onde a chave é usada e onde achá-la (texto curto para o painel). */
@@ -65,6 +66,15 @@ const GATEWAY_INFO: Record<
     methods: "PIX no Brasil, em real (cartão não: só PIX pelo Offer Studio).",
     keyHelp: "No painel da BlackCat, abra a parte de chaves da API, copie a chave e cole aqui.",
     placeholder: "Chave da API da BlackCat",
+  },
+  CLOWNPAY: {
+    title: "Checkout do Offer Studio — conta da ClownPay desta oferta",
+    usedBy:
+      "Os checkouts do Offer Studio desta oferta que usam a ClownPay cobram nesta conta. Cada oferta pode usar uma conta diferente.",
+    methods: "PIX no Brasil, em real.",
+    keyHelp:
+      "No painel da ClownPay, abra a parte de chaves da API (Integrações → API) e copie a chave secreta. Ela começa com cp_live_.",
+    placeholder: "cp_live_…",
   },
 };
 

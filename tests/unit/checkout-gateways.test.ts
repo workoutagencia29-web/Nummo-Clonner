@@ -14,6 +14,13 @@ import {
   blackcatStatus,
 } from "@/server/services/payments/blackcat";
 import {
+  CLOWNPAY_API_BASE,
+  CLOWNPAY_BASE_ENV,
+  clownpayApiBase,
+  clownpayGateway,
+  clownpayStatus,
+} from "@/server/services/payments/clownpay";
+import {
   FLEVOPAY_API_BASE,
   FLEVOPAY_BASE_ENV,
   flevopayApiBase,
@@ -28,31 +35,39 @@ import {
   BLACKCAT_KEY,
   BLACKCAT_KEY_DOWN,
   BLACKCAT_KEY_UNAPPROVED,
+  CLOWNPAY_KEY,
+  CLOWNPAY_KEY_DOWN,
+  CLOWNPAY_KEY_KYC,
   FAKE_PIX_CODE,
   FAKE_QR_BASE64,
   type FakePix,
   FLEVO_KEY,
   FLEVO_KEY_DOWN,
   startFakeBlackcat,
+  startFakeClownpay,
   startFakeFlevopay,
 } from "./pix-fakes";
 
 let flevo: FakePix;
 let blackcat: FakePix;
+let clown: FakePix;
 
 beforeAll(async () => {
-  [flevo, blackcat] = await Promise.all([startFakeFlevopay(), startFakeBlackcat()]);
+  [flevo, blackcat, clown] = await Promise.all([startFakeFlevopay(), startFakeBlackcat(), startFakeClownpay()]);
   process.env[FLEVOPAY_BASE_ENV] = flevo.base;
   process.env[BLACKCAT_BASE_ENV] = blackcat.base;
+  process.env[CLOWNPAY_BASE_ENV] = clown.base;
   // Garantia: nada vai para os gateways de verdade.
   expect(flevopayApiBase()).toBe(flevo.base);
   expect(blackcatApiBase()).toBe(blackcat.base);
+  expect(clownpayApiBase()).toBe(clown.base);
 });
 
 afterAll(async () => {
   delete process.env[FLEVOPAY_BASE_ENV];
   delete process.env[BLACKCAT_BASE_ENV];
-  await Promise.all([flevo.close(), blackcat.close()]);
+  delete process.env[CLOWNPAY_BASE_ENV];
+  await Promise.all([flevo.close(), blackcat.close(), clown.close()]);
 });
 
 async function gatewayCode(promise: Promise<unknown>): Promise<GatewayErrorCode> {
@@ -345,6 +360,113 @@ describe("BlackCat", () => {
     expect(blackcatStatus("REFUNDED")).toBe("refunded");
     expect(blackcatStatus("FAILED")).toBe("failed");
     expect(() => blackcatStatus("")).toThrow(PaymentGatewayError);
+  });
+});
+
+describe("ClownPay", () => {
+  it("cria o PIX: Bearer, Idempotency-Key = pedido, buyer com os 4 dados, products somam o valor", async () => {
+    const input = pixInput({
+      amountCents: 9_700 + 2_700,
+      items: [
+        { title: "Curso de Confeitaria", unitPriceCents: 9_700, quantity: 1, tangible: false },
+        { title: "Apostila de recheios", unitPriceCents: 2_700, quantity: 1, tangible: false },
+      ],
+    });
+    const charge = await clownpayGateway.createCharge(CLOWNPAY_KEY, input);
+    expect(charge).toMatchObject({ status: "pending", amountCents: 12_400, currency: "BRL" });
+    // A ClownPay devolve só o "copia e cola" (sem imagem do QR): a página gera o QR.
+    expect(charge.instructions).toEqual({ kind: "pix", copyPaste: FAKE_PIX_CODE, qrImage: null, expiresAt: null });
+    const req = clown.requests.at(-1);
+    expect(req?.headers.authorization).toBe(`Bearer ${CLOWNPAY_KEY}`);
+    expect(req?.headers["idempotency-key"]).toBe(input.externalOrderId);
+    expect(req?.body).toMatchObject({
+      amount: 12_400,
+      payment_method: "pix",
+      external_reference: input.externalOrderId,
+      buyer: { name: buyer.name, email: buyer.email, document: "52998224725", phone: "11987654321" },
+      products: [
+        { id: "item-1", name: "Curso de Confeitaria", quantity: 1, price_in_cents: 9_700 },
+        { id: "item-2", name: "Apostila de recheios", quantity: 1, price_in_cents: 2_700 },
+      ],
+      // Só os campos de rastreamento que a ClownPay conhece (o ip não vai).
+      tracking: { utm_source: "facebook", utm_campaign: "lancamento", src: "anuncio1" },
+    });
+  });
+
+  it("status consultado pela API (pago, depois cancelado); Idempotency-Key repetida devolve a mesma cobrança", async () => {
+    const input = pixInput();
+    const charge = await clownpayGateway.createCharge(CLOWNPAY_KEY, input);
+    expect(await clownpayGateway.getTransaction(CLOWNPAY_KEY, charge.id)).toMatchObject({
+      id: charge.id,
+      status: "pending",
+      amountCents: 9_700,
+      method: "pix",
+      externalOrderId: input.externalOrderId,
+      paidAt: null,
+    });
+    clown.setStatus(charge.id, "paid");
+    const paid = await clownpayGateway.getTransaction(CLOWNPAY_KEY, charge.id);
+    expect(paid.status).toBe("paid");
+    expect(paid.paidAt).not.toBeNull();
+    // Mesma Idempotency-Key (mesmo pedido): a ClownPay devolve a cobrança já criada, sem criar outra.
+    const before = clown.transactions.size;
+    const again = await clownpayGateway.createCharge(CLOWNPAY_KEY, input);
+    expect(again.id).toBe(charge.id);
+    expect(clown.transactions.size).toBe(before);
+    clown.setStatus(charge.id, "canceled");
+    expect((await clownpayGateway.getTransaction(CLOWNPAY_KEY, charge.id)).status).toBe("canceled");
+  });
+
+  it("recusa o que não é PIX em real e quem compra sem os 4 dados (sem chamar a ClownPay)", async () => {
+    const before = clown.requests.length;
+    expect(await gatewayCode(clownpayGateway.createCharge(CLOWNPAY_KEY, pixInput({ currency: "MXN" })))).toBe(
+      "invalid_request",
+    );
+    expect(await gatewayCode(clownpayGateway.createCharge(CLOWNPAY_KEY, pixInput({ method: "card" })))).toBe(
+      "invalid_request",
+    );
+    expect(
+      await gatewayCode(
+        clownpayGateway.createCharge(CLOWNPAY_KEY, pixInput({ customer: { name: "Maria", email: "m@x.com" } })),
+      ),
+    ).toBe("invalid_request");
+    expect(clown.requests.length).toBe(before);
+  });
+
+  it("erros e “Testar conexão”: chave recusada, conta em análise (403), fora do ar (503)", async () => {
+    expect(await gatewayCode(clownpayGateway.createCharge("cp_live_errada0000000000", pixInput()))).toBe("invalid_key");
+    expect(await gatewayCode(clownpayGateway.createCharge(CLOWNPAY_KEY_KYC, pixInput()))).toBe("missing_scope");
+    expect(await gatewayCode(clownpayGateway.createCharge(CLOWNPAY_KEY_DOWN, pixInput()))).toBe("unavailable");
+    expect(await gatewayCode(clownpayGateway.getTransaction(CLOWNPAY_KEY, "nao-existe-uuid"))).toBe("not_found");
+    const before = clown.transactions.size;
+    expect(await clownpayGateway.testConnection(CLOWNPAY_KEY)).toBe("ok");
+    expect(clown.requests.at(-1)).toMatchObject({ method: "GET", path: "/v1/payments" });
+    expect(await clownpayGateway.testConnection("cp_live_errada0000000000")).toBe("invalid_key");
+    expect(await clownpayGateway.testConnection(CLOWNPAY_KEY_KYC)).toBe("missing_scope");
+    expect(await clownpayGateway.testConnection(CLOWNPAY_KEY_DOWN)).toBe("unavailable");
+    expect(clown.transactions.size).toBe(before);
+  });
+
+  it("status da ClownPay", () => {
+    expect(["pending", "processing"].map(clownpayStatus)).toEqual(["pending", "pending"]);
+    expect(clownpayStatus("paid")).toBe("paid");
+    expect(clownpayStatus("failed")).toBe("failed");
+    expect(clownpayStatus("canceled")).toBe("canceled");
+    expect(clownpayStatus("refunded")).toBe("refunded");
+    expect(clownpayStatus("chargeback")).toBe("disputed");
+    expect(() => clownpayStatus("estranho")).toThrow(PaymentGatewayError);
+  });
+
+  it("endereço da API só troca por um endereço deste Mac", () => {
+    const saved = process.env[CLOWNPAY_BASE_ENV];
+    try {
+      process.env[CLOWNPAY_BASE_ENV] = "https://evil.example.com";
+      expect(clownpayApiBase()).toBe(CLOWNPAY_API_BASE);
+      process.env[CLOWNPAY_BASE_ENV] = "http://127.0.0.1:9997/";
+      expect(clownpayApiBase()).toBe("http://127.0.0.1:9997");
+    } finally {
+      process.env[CLOWNPAY_BASE_ENV] = saved;
+    }
   });
 });
 
