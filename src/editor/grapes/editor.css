@@ -1071,6 +1071,108 @@
   cursor: default;
 }
 
+/* Carrossel de banners (campos os-banner-images / os-banner-timing, src/editor/widgets/banner.ts). */
+.os-panel .os-bnp,
+.os-panel .os-bnp-timing {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.os-panel .os-bnp-count {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.os-panel .os-bnp-count-label {
+  flex: 1;
+  font-weight: 600;
+  font-size: 12.5px;
+}
+.os-panel .os-bnp-count select {
+  flex: none;
+  width: 56px;
+}
+.os-panel .os-bnp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.os-panel .os-bnp-item {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--os-field-radius);
+  background: var(--os-soft);
+}
+.os-panel .os-bnp-head {
+  font-weight: 600;
+  font-size: 12px;
+  color: var(--muted-foreground);
+}
+.os-panel .os-bnp-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.os-panel .os-bnp-thumb {
+  flex: none;
+  width: 72px;
+  height: 40px;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  object-fit: cover;
+  background: #fff;
+}
+.os-panel .os-bnp-pick {
+  flex: 1;
+  height: 28px;
+  border: 1px dashed var(--border);
+  border-radius: calc(var(--os-field-radius) - 2px);
+  background: var(--background);
+  color: var(--foreground);
+  font: 500 12.5px var(--font-sans);
+  cursor: pointer;
+}
+.os-panel .os-bnp-pick:hover {
+  background: var(--os-hover);
+}
+.os-panel .os-bnp-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.os-panel .os-bnp-field-label {
+  color: var(--muted-foreground);
+  font-size: 11.5px;
+}
+.os-panel .os-bnp input,
+.os-panel .os-bnp select,
+.os-panel .os-bnp-timing input,
+.os-panel .os-bnp-timing select {
+  min-width: 0;
+  height: 28px;
+  padding: 0 7px;
+  border: 1px solid var(--input);
+  border-radius: calc(var(--os-field-radius) - 2px);
+  background: var(--background);
+  color: var(--foreground);
+  font: inherit;
+  font-size: 12.5px;
+}
+.os-panel .os-bnp input:focus-visible,
+.os-panel .os-bnp select:focus-visible,
+.os-panel .os-bnp button:focus-visible,
+.os-panel .os-bnp-timing input:focus-visible,
+.os-panel .os-bnp-timing select:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 1px;
+}
+.os-panel .os-bnp-secs {
+  width: 90px;
+}
+
 /* ─── Imagens (janela do GrapesJS) ─────────────────────────────────────────── */
 
 .os-editor .gjs-mdl-container {

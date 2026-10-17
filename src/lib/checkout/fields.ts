@@ -97,6 +97,22 @@ export function formatCep(value: string): string {
   return d.length <= 5 ? d : `${d.slice(0, 5)}-${d.slice(5)}`;
 }
 
+/**
+ * Código postal de fora do Brasil (Kyvo): 2 a 16 caracteres (letras, números,
+ * espaço, hífen ou ponto) — cobre o CP de 5 dígitos do México e os de outros
+ * países. Não há busca automática fora do Brasil: a pessoa digita.
+ */
+export function isValidIntlPostal(value: string): boolean {
+  const s = String(value || "").trim();
+  return s.length >= 2 && s.length <= 16 && /^[A-Za-z0-9][A-Za-z0-9 .-]*$/.test(s);
+}
+
+/** Estado/província (texto livre, fora do Brasil): 1 a 60 caracteres. */
+export function isValidRegion(value: string): boolean {
+  const s = String(value || "").trim();
+  return s.length >= 1 && s.length <= 60;
+}
+
 /** E-mail simples (o gateway confere de verdade). O mesmo do pagamento na página. */
 export const CHECKOUT_EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@.]{2,63}$/;
 

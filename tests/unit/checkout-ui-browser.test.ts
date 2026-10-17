@@ -388,10 +388,10 @@ describe("checkout do Offer Studio na aba de links", () => {
     await doc.check();
     await form.getByText("A Kyvo exige nome e e-mail de quem compra.").waitFor();
     expect(await form.getByText("Sempre pedido: a Kyvo exige.").count()).toBe(2);
-    // Endereço e frete só no real: aqui, só a explicação (sem o liga/desliga).
+    // Endereço e frete valem em qualquer moeda: o liga/desliga aparece, com a nota do endereço internacional.
     await form.getByRole("button", { name: /Endereço e frete/ }).click();
-    await form.getByText(/só existem no checkout em real: em peso mexicano, o checkout não pede endereço/).waitFor();
-    expect(await form.getByRole("checkbox", { name: /Pedir o endereço de entrega/ }).count()).toBe(0);
+    expect(await form.getByRole("checkbox", { name: /Pedir o endereço de entrega/ }).count()).toBe(1);
+    await form.getByText(/sem busca automática do CEP fora do Brasil/).waitFor();
     // O cartão da Kyvo aparece com o nome do uso nesta oferta (o checkout, não o pagamento na página).
     await page.getByRole("region", { name: "Checkout do Offer Studio — conta da Kyvo desta oferta" }).waitFor();
     await shot(page, "checkout-peso-mexicano.png");

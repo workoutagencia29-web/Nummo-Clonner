@@ -109,8 +109,6 @@ export interface CurrencyPlanCheckout {
   problem: string | null;
   /** Idioma dos textos do checkout que muda ("Português" → "Español"); null = fica o mesmo. */
   locale: { from: string; to: string } | null;
-  /** O endereço de entrega (e o frete) é desligado: só existe no checkout em real. */
-  addressOff: boolean;
   /** Textos trocados no painel que ficam como estão, escritos para o idioma ou o pagamento de antes. */
   textsToReview: boolean;
 }
@@ -158,8 +156,6 @@ export interface CurrencySwitchResult {
   checkouts: number;
   /** Checkouts que trocaram de gateway (nome do link + o gateway novo). */
   checkoutGateways: { linkId: string; label: string; gateway: string }[];
-  /** Checkouts que deixaram de pedir o endereço (só existe no checkout em real). Opcional: resultados montados à mão. */
-  checkoutAddressOff?: { linkId: string; label: string }[];
   /** Checkouts com textos trocados escritos para o idioma ou o pagamento de antes (revisar). */
   checkoutTexts?: { linkId: string; label: string }[];
   /** A moeda do "Valor da oferta" dos pixels mudou (e a oferta tem pixel ligado ou valor salvo). */

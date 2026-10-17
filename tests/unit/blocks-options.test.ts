@@ -284,6 +284,7 @@ describe("biblioteca de blocos", () => {
       access: "os-access",
       products: "os-products",
       "store-header": "os-store-header",
+      banner: "os-banner",
       "product-gallery": "os-product-gallery",
       "product-buy": "os-product-buy",
     });
@@ -311,8 +312,9 @@ describe("script das páginas", () => {
       'import { initWheels } from "./src/runtime/widgets/wheel";',
       'import { initPrize } from "./src/runtime/widgets/prize";',
       'import { initStore } from "./src/runtime/widgets/store";',
+      'import { initBanners } from "./src/runtime/widgets/banner";',
       "addCss();",
-      "for (const f of [initPrize, initCountdowns, initScarcity, initSalesNotifications, initExitPopups, initLeadForms, initVturb, initQuizzes, initWheels, initStore]) f();",
+      "for (const f of [initPrize, initCountdowns, initScarcity, initSalesNotifications, initExitPopups, initLeadForms, initVturb, initQuizzes, initWheels, initStore, initBanners]) f();",
     ].join("\n");
     const widgets = buildSync({
       stdin: { contents: entry, resolveDir: process.cwd(), loader: "ts" },
@@ -349,7 +351,9 @@ describe("script das páginas", () => {
     // limite (prefers-reduced-motion num lugar só, reducedMotion em ./util, e a mesma
     // regra de chave para os links de pagamento e de checkout no mapa de prêmios):
     // hoje ~39,4 KB.
-    expect(Buffer.byteLength(widgets, "utf8")).toBeLessThan(39_500);
+    // Carrossel de banners da loja (passa sozinho na horizontal, bolinhas, setas e
+    // toque; respeita "menos movimento"): +~1,6 KB (hoje ~41 KB).
+    expect(Buffer.byteLength(widgets, "utf8")).toBeLessThan(41_200);
     // O script inteiro (widgets + botões com data-os-href + delay de VSL) compila.
     expect(runtimeScript()).toContain("os-widgets-css");
   });

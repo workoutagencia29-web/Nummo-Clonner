@@ -256,12 +256,6 @@ function PlanBody({ plan }: { plan: CurrencySwitchPlan }) {
                     {toName}.
                   </p>
                 )}
-                {c.addressOff && (
-                  <p className="text-muted-foreground text-xs">
-                    O endereço de entrega e o frete deixam de ser pedidos: só existem no checkout em real (o CEP é do
-                    Brasil). As opções de frete ficam guardadas.
-                  </p>
-                )}
                 {c.textsToReview && (
                   <p className="font-medium text-xs">
                     Os textos que você trocou em “Aparência → Textos” ficam como estão, escritos para o checkout de

@@ -6,7 +6,6 @@
  * banco: o servidor junta os dados (src/server/services/readiness.ts).
  */
 import {
-  ADDRESS_ISSUE_TEXT,
   type CheckoutCheck,
   checkoutIssues,
   checkoutProductMissing,
@@ -763,12 +762,10 @@ function checkoutOwnItem(input: ReadinessInput): ReadinessItem | null {
       ...base,
       title: issue.currency
         ? `Trocar o gateway de “${issue.label}”`
-        : issue.address
-          ? `Desligar o endereço de “${issue.label}”`
-          : lack
-            ? `Completar o checkout de “${issue.label}”`
-            : `Ajustar o valor de “${issue.label}”`,
-      detail: [issue.currency ?? "", issue.address ? ADDRESS_ISSUE_TEXT : "", lack, amount].filter(Boolean).join(" "),
+        : lack
+          ? `Completar o checkout de “${issue.label}”`
+          : `Ajustar o valor de “${issue.label}”`,
+      detail: [issue.currency ?? "", lack, amount].filter(Boolean).join(" "),
       done: false,
       cta: "Abrir o link",
       target: { link: issue.linkId },

@@ -356,20 +356,23 @@ describe("configuração da página", () => {
     });
   });
 
-  it("endereço e frete só no real (o CEP do contrato é do Brasil)", () => {
+  it("endereço e frete valem em qualquer moeda; fora do real o contrato aceita o endereço genérico", () => {
     const withAddress = draft({
       address: true,
       shipping: [{ id: "frete001", name: "DHL", eta: "", price: "99,00" }],
     });
-    expect(checkoutConfigFromDraft(withAddress, "BRL", 9_700).errors).toEqual({});
-    for (const currency of ["MXN", "EUR", "USD"] as const) {
-      expect(checkoutConfigFromDraft(withAddress, currency, 9_700).errors).toEqual({
-        address: expect.stringContaining("só existem no checkout em real"),
-      });
+    // O endereço é opção do vendedor em QUALQUER moeda (como no real).
+    for (const currency of ["BRL", "MXN", "EUR", "USD"] as const) {
+      expect(checkoutConfigFromDraft(withAddress, currency, 9_700).errors).toEqual({});
     }
+    // Endereço ligado sem nenhuma opção de frete continua sendo erro (em qualquer moeda).
+    expect(checkoutConfigFromDraft({ ...withAddress, shipping: [] }, "MXN", 9_700).errors).toEqual({
+      shipping: expect.stringContaining("pelo menos uma opção de frete"),
+    });
     // Desligado, o frete guardado não atrapalha.
     expect(checkoutConfigFromDraft({ ...withAddress, address: false }, "MXN", 9_700).errors).toEqual({});
-    // O contrato recusa endereço de fora do Brasil (por isso a regra acima).
+    // O contrato só confere o FORMATO (a regra por moeda — CEP+UF do Brasil × genérico — fica no
+    // servidor, checkCheckoutOrder): aceita o CP de 5 dígitos do México e o estado texto livre.
     const order = (endereco: Record<string, string>) =>
       parseCheckoutRequest({
         acao: "checkout_criar",
@@ -383,8 +386,10 @@ describe("configuração da página", () => {
       });
     const street = { rua: "Reforma", numero: "1", bairro: "Centro", cidade: "Cidade" };
     expect(order({ ...street, cep: "01310-100", uf: "SP" })).not.toBeNull();
-    expect(order({ ...street, cep: "06600", uf: "CMX" })).toBeNull();
-    expect(order({ ...street, cep: "1000-001", uf: "LX" })).toBeNull();
+    expect(order({ ...street, cep: "06600", uf: "CMX" })).not.toBeNull();
+    expect(order({ ...street, cep: "1000-001", uf: "Lisboa" })).not.toBeNull();
+    // Formato inválido mesmo assim é recusado (código postal vazio).
+    expect(order({ ...street, cep: "", uf: "CMX" })).toBeNull();
   });
 
   it("textos trocados escritos para outro idioma ou pagamento", () => {
@@ -511,14 +516,16 @@ describe("contrato do endpoint", () => {
       quantidade: 1,
       bumps: ["bump0001"],
       frete: "frete001",
+      // O contrato só confere o FORMATO e mantém o endereço cru (a normalização do CEP/UF do
+      // Brasil — dígitos e maiúsculas — fica no servidor, checkCheckoutOrder, que conhece a moeda).
       endereco: {
-        cep: "01310100",
+        cep: "01310-100",
         rua: "Av. Paulista",
         numero: "1000",
         complemento: "",
         bairro: "Bela Vista",
         cidade: "São Paulo",
-        uf: "SP",
+        uf: "sp",
       },
       metadata: { utm_source: "facebook" },
     });
@@ -621,7 +628,6 @@ describe("o que falta configurar", () => {
         access: false,
         bumpsAccess: [],
         amount: null,
-        address: false,
       },
       // O "Upsell" tem link de acesso e a página de obrigado está sem o bloco → aviso do bloco.
       { kind: "accessBlock", pageName: "Obrigado", documentId: "doc1", labels: ["Upsell"] },
@@ -664,21 +670,23 @@ describe("o que falta configurar", () => {
     ]);
   });
 
-  it("endereço ligado fora do real é problema; o frete guardado fora do real não; textos de outro idioma são aviso", () => {
+  it("endereço ligado em peso não é problema; frete pago com endereço desligado é aviso; textos de outro idioma são aviso", () => {
     const kyvo = { provider: "KYVO" as const, currency: "MXN" as const, methods: ["CARD" as const] };
     const issues = checkoutIssues(
       check({
         offerCurrency: "MXN",
         keys: { KYVO: "ok" },
         products: [
+          // Endereço ligado em peso agora vale (produto físico vendido no México): sem problema.
           product({ ...kyvo, address: true, paidShippingCents: 9_900, maxTotalCents: 19_600 }),
+          // Endereço desligado, mas com frete pago guardado: aviso (o frete não aparece nem é cobrado).
           product({ ...kyvo, linkId: "l2", label: "Sem endereço", paidShippingCents: 9_900 }),
           product({ ...kyvo, linkId: "l3", label: "Textos", staleTexts: true }),
         ],
       }),
     );
     expect(issues).toEqual([
-      expect.objectContaining({ kind: "product", linkId: "l1", address: true, currency: null }),
+      expect.objectContaining({ kind: "shipping", linkId: "l2", label: "Sem endereço", priceCents: 9_900 }),
       { kind: "texts", linkId: "l3", label: "Textos" },
     ]);
   });

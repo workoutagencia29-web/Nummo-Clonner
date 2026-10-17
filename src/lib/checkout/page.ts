@@ -521,7 +521,6 @@ export function renderCheckoutDocument(cfg: PublicCheckoutConfig, opts: Checkout
   // ── 2. Entrega ──
   let delivery = "";
   if (cfg.endereco) {
-    const ufOptions = [`<option value="">—</option>`, ...BR_STATES.map((uf) => `<option value="${uf}">${uf}</option>`)];
     const shipping = cfg.fretes
       .map((s) => {
         const checked = s.id === cfg.freteInicial ? " checked" : "";
@@ -529,13 +528,24 @@ export function renderCheckoutDocument(cfg: PublicCheckoutConfig, opts: Checkout
         return `<label class="osc-opt${checked ? " osc-on" : ""}"><input type="radio" name="frete" value="${esc(s.id)}"${checked}><span class="osc-opt-t"><b>${esc(s.nome)}</b>${s.prazo ? `<small>${esc(s.prazo)}</small>` : ""}</span><span class="osc-opt-p">${price}</span></label>`;
       })
       .join("");
+    // Estado: no Brasil, a lista de UF; fora do real, texto livre.
+    const stateField = brl
+      ? `<div class="osc-f"><label for="osc-uf">${esc(fx.state)}</label><select id="osc-uf" name="uf" autocomplete="address-level1" required><option value="">—</option>${BR_STATES.map((uf) => `<option value="${uf}">${uf}</option>`).join("")}</select><small class="osc-err" id="osc-uf-e" hidden></small></div>`
+      : field("uf", fx.state, { auto: "address-level1", max: 60 });
+    // Código postal: no Brasil, numérico com a máscara e a busca automática (o
+    // endereço vem depois); fora do real, texto livre, sem busca.
+    const cepField = brl
+      ? `<div class="osc-row osc-row-cep">${field("cep", fx.cep, { auto: "postal-code", mode: "numeric", max: 12, placeholder: "00000-000" })}<p class="osc-note" data-osc-cep-status aria-live="polite" style="align-self:end;padding-bottom:14px"></p></div>`
+      : `<div class="osc-row osc-row-cep">${field("cep", fx.cep, { auto: "postal-code", max: 16 })}</div>`;
+    // No Brasil o endereço começa escondido (a busca do CEP revela); fora, já aparece.
+    const addrAttr = brl ? " hidden" : "";
     delivery = `<section class="osc-card" aria-labelledby="osc-h-entrega">${heading("osc-h-entrega", tx.deliveryTitle)}<div class="osc-row">
-<div class="osc-row osc-row-cep">${field("cep", fx.cep, { auto: "postal-code", mode: "numeric", max: 12, placeholder: "00000-000" })}<p class="osc-note" data-osc-cep-status aria-live="polite" style="align-self:end;padding-bottom:14px"></p></div>
-<div class="osc-row" data-osc-addr hidden>
+${cepField}
+<div class="osc-row" data-osc-addr${addrAttr}>
 ${field("rua", fx.street, { auto: "address-line1", max: 120 })}
 <div class="osc-row osc-row-num">${field("numero", fx.number, { auto: "off", max: 20 })}${field("complemento", fx.complement, { auto: "address-line2", max: 120, optional: fx.optional })}</div>
 ${field("bairro", fx.neighborhood, { auto: "off", max: 120 })}
-<div class="osc-row osc-row-city">${field("cidade", fx.city, { auto: "address-level2", max: 120 })}<div class="osc-f"><label for="osc-uf">${esc(fx.state)}</label><select id="osc-uf" name="uf" autocomplete="address-level1" required>${ufOptions.join("")}</select><small class="osc-err" id="osc-uf-e" hidden></small></div></div>
+<div class="osc-row osc-row-city">${field("cidade", fx.city, { auto: "address-level2", max: 120 })}${stateField}</div>
 </div>
 </div>${
       shipping

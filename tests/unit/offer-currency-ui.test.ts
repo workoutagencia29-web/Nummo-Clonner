@@ -749,7 +749,8 @@ describe("aba “Moeda, empresa e SEO”: trocar a moeda troca tudo (ação e ba
     const text = (await dialog.innerText()).replace(/\s+/g, " ");
     // O português do real continua no euro (que aceita português): o idioma não muda.
     expect(text).toMatch(/Depois: Kyvo · € 97,00(?! · textos)/);
-    expect(text).toContain("O endereço de entrega e o frete deixam de ser pedidos: só existem no checkout em real");
+    // O endereço e o frete valem em euro: a troca não os desliga (nada sobre "deixam de ser pedidos").
+    expect(text).not.toContain("deixam de ser pedidos");
     expect(text).toContain("Os textos que você trocou em “Aparência → Textos” ficam como estão");
     await dialog.getByRole("button", { name: "Trocar a moeda de tudo" }).click();
     await waitFor(
@@ -758,9 +759,7 @@ describe("aba “Moeda, empresa e SEO”: trocar a moeda troca tudo (ação e ba
       "o aviso da troca",
     );
     const message = (await toasts(s)).at(-1)?.message ?? "";
-    expect(message).toContain(
-      "o frete de “Checkout principal”: o endereço foi desligado (só existe no checkout em real)",
-    );
+    expect(message).not.toContain("o endereço foi desligado");
     expect(s.errors).toEqual([]);
     await s.page.close();
   });

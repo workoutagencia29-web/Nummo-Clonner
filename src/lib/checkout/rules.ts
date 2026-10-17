@@ -209,18 +209,26 @@ export function switchCheckoutCurrency(
 // ─── Endereço e frete ───────────────────────────────────────────────────────
 
 /**
- * O endereço de entrega (CEP com a busca da BrasilAPI, UF) e o frete só
- * existem no checkout em real: o contrato da página só aceita endereço do
- * Brasil (readAddress em ./contract.ts).
+ * O endereço de entrega e o frete valem em QUALQUER moeda (ligar/desligar é
+ * opção do vendedor, como no real). Fora do Brasil o endereço é genérico
+ * (código postal digitado, estado/província texto livre, sem a busca da
+ * BrasilAPI nem a lista de UF): `addressIsBrazil` escolhe o estilo.
  */
-export function addressAllowed(currency: CheckoutCurrencyId): boolean {
+export function addressAllowed(_currency: CheckoutCurrencyId): boolean {
+  return true;
+}
+
+/**
+ * Endereço no estilo do Brasil (CEP de 8 dígitos com a busca da BrasilAPI e a
+ * lista de UF)? Fora do real é o endereço internacional genérico.
+ */
+export function addressIsBrazil(currency: CheckoutCurrencyId): boolean {
   return currency === "BRL";
 }
 
-/** Por que o endereço não pode ficar ligado nesta moeda (erro do campo "address"). */
-export function addressCurrencyProblem(currency: CheckoutCurrencyId): string | null {
-  if (addressAllowed(currency)) return null;
-  return `O endereço de entrega e o frete só existem no checkout em real (o CEP é do Brasil). Em ${CURRENCY_NAME[currency]}, desligue “Pedir o endereço de entrega”.`;
+/** Não há mais bloqueio por moeda: o endereço vale em qualquer moeda (mantido por compatibilidade). */
+export function addressCurrencyProblem(_currency: CheckoutCurrencyId): string | null {
+  return null;
 }
 
 // ─── Página de checkout: prévia e ZIP ───────────────────────────────────────

@@ -430,6 +430,8 @@ describe("duplicateOffer", () => {
     const src = await richOffer();
     const copy = await duplicateOffer(src.offerId);
     expect(copy.id).not.toBe(src.offerId);
+    // Sem conta de gateway na origem, não há chave de pagamento para avisar.
+    expect(copy.droppedPaymentKey).toBe(false);
 
     const offer = await loadOffer(copy.id);
     expect(offer).toMatchObject({

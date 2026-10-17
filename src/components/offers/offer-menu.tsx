@@ -173,7 +173,11 @@ export function OfferMenu({
               void duplicate.run(
                 { id: offer.id },
                 {
-                  success: "Oferta duplicada.",
+                  // A chave do gateway de pagamento não vem na cópia: avisa para cadastrar de novo.
+                  success: (copy) =>
+                    copy.droppedPaymentKey
+                      ? "Oferta duplicada. Cadastre a chave de pagamento na cópia."
+                      : "Oferta duplicada.",
                   onSuccess: (copy) => router.push(`/ofertas/${copy.id}?${RENAME_QUERY_PARAM}=1`),
                 },
               )

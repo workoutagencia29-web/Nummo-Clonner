@@ -18,11 +18,12 @@ import {
   isValidCpf,
   isValidFullName,
   isValidIntlPhone,
+  isValidIntlPostal,
+  isValidRegion,
   isValidUf,
   onlyDigits,
 } from "./fields";
 import {
-  addressAllowed,
   askedBuyerFields,
   type CheckoutCurrencyId,
   type CheckoutMethodId,
@@ -86,11 +87,15 @@ export function checkCheckoutOrder(req: CheckoutCreateRequest, p: CheckoutOrderP
     if (!doc || (brl && !isValidCpf(doc))) return { ok: false, erro: "invalido" };
     buyer.documento = brl ? onlyDigits(doc) : doc;
   }
-  const address = p.config.address && addressAllowed(p.currency);
+  const address = p.config.address;
   if (address) {
     const a = req.endereco;
-    if (!a || !isValidCep(a.cep) || !isValidUf(a.uf)) return { ok: false, erro: "invalido" };
-    buyer.endereco = a;
+    if (!a) return { ok: false, erro: "invalido" };
+    // No Brasil, CEP de 8 dígitos + UF da lista; fora, código postal e estado texto livre.
+    const bad = brl ? !isValidCep(a.cep) || !isValidUf(a.uf) : !isValidIntlPostal(a.cep) || !isValidRegion(a.uf);
+    if (bad) return { ok: false, erro: "invalido" };
+    // No Brasil, grava o CEP só com dígitos e a UF em maiúsculas (o gateway espera assim).
+    buyer.endereco = brl ? { ...a, cep: onlyDigits(a.cep), uf: a.uf.toUpperCase() } : a;
   }
   const total = checkoutTotal(
     {

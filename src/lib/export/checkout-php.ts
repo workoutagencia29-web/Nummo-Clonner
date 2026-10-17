@@ -97,7 +97,7 @@ export interface PagamentoCheckout {
   ranges: Partial<Record<CheckoutPayMethod, { min: number; max: number }>>;
   /** Campos pedidos de quem compra (os ligados + os que o gateway exige). */
   fields: BuyerField[];
-  /** Pede o endereço (só no real). */
+  /** Pede o endereço de entrega (vale em qualquer moeda). */
   address: boolean;
   shipping: { id: string; name: string; priceCents: number }[];
   bumps: { id: string; title: string; priceCents: number; accessUrl: string }[];
@@ -144,7 +144,7 @@ export interface PagamentoCheckoutSource {
 /**
  * Produto do checkout → o que vai no config.php, com as regras de
  * checkCheckoutOrder já resolvidas (gateway × moeda, formas que valem, campos
- * pedidos, endereço só no real, faixa de cada forma).
+ * pedidos, endereço e frete, faixa de cada forma).
  */
 export function pagamentoCheckoutOf(
   p: PagamentoCheckoutSource,
@@ -332,8 +332,10 @@ function os_read_address($raw)
     if (!is_array($raw)) {
         return null;
     }
-    $cep = os_digits((string) os_text(os_field($raw, 'cep')));
-    $uf = strtoupper(trim((string) os_text(os_field($raw, 'uf'))));
+    // Formato cru (a regra por moeda — CEP+UF do Brasil x genérico — fica em
+    // os_checkout_buyer). Fora do real o CEP pode ter letras e o estado é texto livre.
+    $cep = substr(trim((string) os_text(os_field($raw, 'cep'))), 0, 16);
+    $uf = substr(trim((string) os_text(os_field($raw, 'uf'))), 0, 60);
     $out = array(
         'cep' => $cep,
         'rua' => os_clean(os_field($raw, 'rua'), 120),
@@ -343,7 +345,7 @@ function os_read_address($raw)
         'cidade' => os_clean(os_field($raw, 'cidade'), 120),
         'uf' => $uf,
     );
-    if (strlen($cep) !== 8 || !preg_match('/^[A-Z]{2}$/', $uf)) {
+    if (strlen($cep) < 2 || strlen($uf) < 1) {
         return null;
     }
     if ($out['rua'] === '' || $out['numero'] === '' || $out['bairro'] === '' || $out['cidade'] === '') {
@@ -514,12 +516,63 @@ function os_checkout_buyer($req, $c)
     }
     if (!empty($c['endereco'])) {
         $a = $req['endereco'];
-        if (!is_array($a) || os_digits($a['cep']) === '00000000' || !in_array($a['uf'], OS_UFS, true)) {
+        if (!is_array($a)) {
             return null;
+        }
+        // No Brasil, CEP de 8 dígitos (não todos zero) + UF da lista; fora, código
+        // postal (2 a 16, letras/números) e estado texto livre (1 a 60).
+        if ($brl) {
+            $cepDigits = os_digits($a['cep']);
+            $bad = strlen($cepDigits) !== 8 || $cepDigits === '00000000' || !in_array(strtoupper($a['uf']), OS_UFS, true);
+        } else {
+            $cep = trim($a['cep']);
+            $uf = trim($a['uf']);
+            $bad = strlen($cep) < 2 || strlen($cep) > 16 || !preg_match('/^[A-Za-z0-9][A-Za-z0-9 .-]*$/', $cep)
+                || strlen($uf) < 1 || strlen($uf) > 60;
+        }
+        if ($bad) {
+            return null;
+        }
+        // No Brasil, grava o CEP só com dígitos e a UF em maiúsculas (o gateway espera assim).
+        if ($brl) {
+            $a['cep'] = os_digits($a['cep']);
+            $a['uf'] = strtoupper($a['uf']);
         }
         $buyer['endereco'] = $a;
     }
     return $buyer;
+}
+
+/**
+ * Endereço de entrega em chaves planas para a metadata da Kyvo (ela não tem
+ * campo de endereço — o lojista lê no painel). Espelho de checkoutAddressMeta.
+ */
+function os_address_meta($a)
+{
+    $m = array();
+    $rua = $a['rua'];
+    if ($a['numero'] !== '') {
+        $rua = $rua === '' ? $a['numero'] : $rua . ', ' . $a['numero'];
+    }
+    if ($rua !== '') {
+        $m['entrega_endereco'] = $rua;
+    }
+    if ($a['complemento'] !== '') {
+        $m['entrega_complemento'] = $a['complemento'];
+    }
+    if ($a['bairro'] !== '') {
+        $m['entrega_bairro'] = $a['bairro'];
+    }
+    if ($a['cidade'] !== '') {
+        $m['entrega_cidade'] = $a['cidade'];
+    }
+    if ($a['uf'] !== '') {
+        $m['entrega_estado'] = $a['uf'];
+    }
+    if ($a['cep'] !== '') {
+        $m['entrega_cep'] = $a['cep'];
+    }
+    return $m;
 }
 
 /**
@@ -1272,7 +1325,12 @@ function os_checkout_request($config, $checkouts, $req, $trustProxy, $host)
         if ($buyer['documento'] !== '') {
             $customer['document'] = $buyer['documento'];
         }
-        $charge = os_kyvo_create($apiKey, $req['metodo'], $total['total'], $c['moeda'], $customer, $external, os_kyvo_metadata($req['metadata'], $ip), $host);
+        // A Kyvo não tem campo de endereço: o endereço de entrega vai como metadata.
+        $meta = os_kyvo_metadata($req['metadata'], $ip);
+        if (!empty($buyer['endereco'])) {
+            $meta = array_merge($meta, os_address_meta($buyer['endereco']));
+        }
+        $charge = os_kyvo_create($apiKey, $req['metodo'], $total['total'], $c['moeda'], $customer, $external, $meta, $host);
         if (is_string($charge)) {
             os_fail($charge);
         }

@@ -373,15 +373,9 @@ export async function duplicateOffer(offerId: string) {
           });
         }
       }
-      if (source.paymentGateways.length) {
-        // Conta do gateway da oferta: a mesma chave (criptografada) e o último teste (é a mesma chave).
-        await tx.paymentGateway.createMany({
-          data: source.paymentGateways.map(({ offerId: _o, createdAt: _c, updatedAt: _u, ...rest }) => ({
-            ...rest,
-            offerId: copy.id,
-          })),
-        });
-      }
+      // A chave do gateway de pagamento (PaymentGateway) NÃO é copiada de propósito: a cópia costuma
+      // ser outra oferta (outra conta/credencial), então o dono cadastra a chave de novo na cópia. Os
+      // produtos de pagamento/checkout vêm junto (acima); só falta a chave — o "Próximos passos" pede.
       if (source.assets.length) {
         // Os arquivos são endereçados por hash: basta referenciar a mesma chave.
         await tx.asset.createMany({
@@ -392,7 +386,8 @@ export async function duplicateOffer(offerId: string) {
           skipDuplicates: true,
         });
       }
-      return copy;
+      // A cópia nasce sem a chave do gateway: a tela avisa para cadastrar de novo.
+      return { ...copy, droppedPaymentKey: source.paymentGateways.length > 0 };
     },
     { timeout: 60_000 },
   );

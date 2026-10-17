@@ -9,7 +9,6 @@
 import type { PaymentKeyState } from "../payments/checks";
 import { formatAmount, type PaymentLocaleId, PROVIDER_LABEL } from "../payments/rules";
 import {
-  addressAllowed,
   type CheckoutCurrencyId,
   type CheckoutMethodId,
   type CheckoutProviderId,
@@ -81,8 +80,6 @@ export type CheckoutIssue =
       bumpsAccess: string[];
       /** Valor (ou o maior total) fora da faixa do gateway (texto pronto), ou null. */
       amount: string | null;
-      /** Endereço ligado fora do real (o CEP é do Brasil): ninguém consegue comprar. */
-      address: boolean;
     }
   /** Endereço desligado com frete pago cadastrado: o frete não é cobrado. Não impede a venda. */
   | { kind: "shipping"; linkId: string; label: string; priceCents: number; currency: CheckoutCurrencyId }
@@ -135,13 +132,11 @@ export function checkoutIssues(check: CheckoutCheck): CheckoutIssue[] {
           : null);
     }
     if (!currency && !methodsOk) amount = "Nenhuma forma de pagamento serve para o gateway e a moeda.";
-    // Veio de um backup ou de uma gravação de antes da regra: em peso, euro ou dólar não há endereço.
-    const address = p.address && (!addressAllowed(check.offerCurrency) || !addressAllowed(p.currency));
     // O link de acesso (do produto e dos bumps) é OPCIONAL: muita venda high-ticket não tem
     // entregável por link (mentoria, agência, assessoria — a entrega é por fora: call, reunião,
     // outro sistema). Não falta nada para vender; o bloco "Acesso ao produto", se usado, continua
     // para quem tem link (o aviso de "adicione o bloco" abaixo só vale aí).
-    if (currency || amount || address || !p.thankYou) {
+    if (currency || amount || !p.thankYou) {
       out.push({
         kind: "product",
         linkId: p.linkId,
@@ -151,7 +146,6 @@ export function checkoutIssues(check: CheckoutCheck): CheckoutIssue[] {
         access: false,
         bumpsAccess: [],
         amount,
-        address,
       });
     }
   }
@@ -185,8 +179,8 @@ export function checkoutIssues(check: CheckoutCheck): CheckoutIssue[] {
   }
   for (const issue of langs.values()) out.push(issue);
   for (const p of check.products) {
-    // Fora do real não há endereço: o frete guardado só volta a valer se a oferta voltar ao real.
-    if (!p.address && p.paidShippingCents > 0 && addressAllowed(check.offerCurrency)) {
+    // Frete pago cadastrado com o endereço desligado: o frete não aparece nem é cobrado (qualquer moeda).
+    if (!p.address && p.paidShippingCents > 0) {
       out.push({
         kind: "shipping",
         linkId: p.linkId,
@@ -204,10 +198,6 @@ export function checkoutIssues(check: CheckoutCheck): CheckoutIssue[] {
   }
   return out;
 }
-
-/** Endereço ligado fora do real (texto pronto). */
-export const ADDRESS_ISSUE_TEXT =
-  "O endereço de entrega está ligado, mas ele só existe no checkout em real (o CEP é do Brasil): ninguém consegue comprar. Desligue o endereço em “Endereço e frete”.";
 
 /** Frase dos textos trocados de outro idioma ou pagamento. */
 export function textsIssueText(issue: Extract<CheckoutIssue, { kind: "texts" }>): string {

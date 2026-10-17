@@ -528,23 +528,22 @@ describe("excluir e duplicar", () => {
     expect(await prisma.paymentProduct.count()).toBe(0);
   });
 
-  it("duplicar a oferta copia o produto, com a página de obrigado da cópia, e a chave da Kyvo", async () => {
+  it("duplicar a oferta copia o produto (com a página de obrigado da cópia), mas NÃO a chave da Kyvo", async () => {
     const o = await offerWithPayment();
     await savePaymentProduct(o.linkId, { ...PRODUCT, thankYouPageId: o.thanksId });
     await savePaymentGatewayKey(o.offerId, "KYVO", KYVO_KEY);
     await testPaymentGateway(o.offerId, "KYVO");
     const copy = await duplicateOffer(o.offerId);
-    // A mesma chave (criptografada) e o último teste (é a mesma chave).
-    const [src, dup] = await Promise.all(
-      [o.offerId, copy.id].map((offerId) =>
-        prisma.paymentGateway.findUniqueOrThrow({ where: { offerId_provider: { offerId, provider: "KYVO" } } }),
-      ),
-    );
-    expect(dup.apiKeyEnc).toBe(src.apiKeyEnc);
-    expect(dup).toMatchObject({ checkStatus: "ok", checkedAt: src.checkedAt });
-    expect(await paymentKeyState(copy.id, "KYVO")).toBe("ok");
-    // Trocar a chave da cópia não mexe na original.
+    // A chave do gateway NÃO vem na cópia: costuma ser outra conta, então o dono cadastra de novo.
+    expect(copy.droppedPaymentKey).toBe(true);
+    expect(
+      await prisma.paymentGateway.findUnique({ where: { offerId_provider: { offerId: copy.id, provider: "KYVO" } } }),
+    ).toBeNull();
+    expect(await paymentKeyState(copy.id, "KYVO")).toBe("missing");
+    // A original fica intacta; cadastrar a chave na cópia é independente.
+    expect(await paymentGatewayKey(o.offerId, "KYVO")).toBe(KYVO_KEY);
     await savePaymentGatewayKey(copy.id, "KYVO", KYVO_KEY_NO_READ);
+    expect(await paymentGatewayKey(copy.id, "KYVO")).toBe(KYVO_KEY_NO_READ);
     expect(await paymentGatewayKey(o.offerId, "KYVO")).toBe(KYVO_KEY);
     const [link] = await listOfferLinks(copy.id);
     const copyThanks = await prisma.page.findFirstOrThrow({ where: { offerId: copy.id, type: "THANK_YOU" } });

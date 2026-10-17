@@ -22,10 +22,10 @@
  *   moeda é a da oferta; o gateway passa a ser um que cobra nela (no real, o de
  *   PIX com chave salva, senão a FlevoPay; nas outras, a Kyvo), com as formas
  *   de pagamento e o idioma dela (switchCheckoutCurrency). Valores (produto,
- *   bumps, frete) com os mesmos números. Fora do real, o endereço de entrega é
- *   desligado (o CEP é do Brasil; as opções de frete ficam guardadas). Textos
- *   trocados no painel ficam: com o idioma ou o gateway diferente, o plano e o
- *   aviso pedem para revisar (staleCheckoutTexts);
+ *   bumps, frete) com os mesmos números. O endereço de entrega e o frete valem
+ *   em qualquer moeda: a troca não mexe neles. Textos trocados no painel ficam:
+ *   com o idioma ou o gateway diferente, o plano e o aviso pedem para revisar
+ *   (staleCheckoutTexts);
  * - a moeda do "Valor da oferta" dos pixels (Offer.tracking.value.currency).
  *
  * Preço escrito como texto nas páginas não muda: o plano (currencySwitchPlan,
@@ -39,7 +39,6 @@
 import type { Prisma } from "@/generated/prisma/client";
 import { parseCheckoutConfig, staleCheckoutTexts } from "@/lib/checkout/config";
 import {
-  addressAllowed,
   CHECKOUT_METHODS,
   type CheckoutMethodId,
   type CheckoutProviderId,
@@ -265,22 +264,19 @@ function checkoutPlan(
   const next = switchCheckoutCurrency(before, to, withKey, row.amountCents);
   if (next.currency === before.currency && next.provider === before.provider) return null;
   const config = parseCheckoutConfig(row.config);
-  // Endereço e frete só no real: fora dele, o endereço é desligado (as opções de frete ficam guardadas).
-  const addressOff = config.address && !addressAllowed(next.currency);
-  const address = config.address && !addressOff;
+  // O endereço e o frete valem em qualquer moeda: a troca de moeda não mexe neles.
   // Textos trocados guardados antes de existir o `textsFor`: valem para o idioma e o gateway de antes.
   const textsFor =
     config.textsFor ??
     (Object.keys(config.texts).length ? { locale: before.locale, pix: isPixProvider(before.provider) } : null);
   const textsToReview = staleCheckoutTexts({ texts: config.texts, textsFor }, next.locale, next.provider);
   const configChanges = {
-    ...(addressOff ? { address: false as const } : {}),
     ...(textsFor && !config.textsFor ? { textsFor } : {}),
   };
   const total =
     row.amountCents +
     config.bumps.reduce((n, b) => n + b.priceCents, 0) +
-    (address ? Math.max(0, ...config.shipping.map((x) => x.priceCents)) : 0);
+    (config.address ? Math.max(0, ...config.shipping.map((x) => x.priceCents)) : 0);
   const problem =
     checkoutAmountProblem(row.amountCents, next.provider, to, next.methods) ??
     (total !== row.amountCents ? checkoutAmountProblem(total, next.provider, to, next.methods) : null);
@@ -294,7 +290,6 @@ function checkoutPlan(
     gatewayChanged: next.provider !== before.provider,
     problem,
     locale: next.locale !== before.locale ? { from: LOCALE_LABEL[before.locale], to: LOCALE_LABEL[next.locale] } : null,
-    addressOff,
     textsToReview,
     next,
     config: Object.keys(configChanges).length ? configChanges : null,
@@ -514,7 +509,6 @@ export async function switchOfferCurrency(
       ]);
       let checkouts = 0;
       const checkoutGateways: CurrencySwitchResult["checkoutGateways"] = [];
-      const checkoutAddressOff: NonNullable<CurrencySwitchResult["checkoutAddressOff"]> = [];
       const checkoutTexts: NonNullable<CurrencySwitchResult["checkoutTexts"]> = [];
       for (const row of checkoutRows) {
         const plan = checkoutPlan(row, to, withKey);
@@ -533,7 +527,6 @@ export async function switchOfferCurrency(
         checkouts++;
         const who = { linkId: row.linkId, label: row.link.label };
         if (plan.gatewayChanged) checkoutGateways.push({ ...who, gateway: plan.after.gateway });
-        if (plan.addressOff) checkoutAddressOff.push(who);
         if (plan.textsToReview) checkoutTexts.push(who);
       }
 
@@ -569,7 +562,6 @@ export async function switchOfferCurrency(
         paymentProblems,
         checkouts,
         checkoutGateways,
-        checkoutAddressOff,
         checkoutTexts,
         pixel,
         textPricePages: textPrices.length,

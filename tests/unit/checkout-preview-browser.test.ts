@@ -210,6 +210,33 @@ async function mxnOffer() {
   return { key: link.key, thanksId: thanks.id, base: `http://${token}.localhost:${port}` };
 }
 
+/** Oferta em peso com produto FÍSICO: endereço de entrega genérico + frete (como no real). */
+async function mxnAddressOffer() {
+  const offer = await createOffer({ name: "Repostería", currency: "MXN" });
+  const thanks = await createPage({ offerId: offer.id, name: "Gracias", type: "THANK_YOU" });
+  const thanksHtml = `<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Gracias</title><style>${ACCESS_CSS}</style></head><body>${defToHtml(accessDef("es"))}</body></html>`;
+  await prisma.pageDocument.updateMany({ where: { variant: { pageId: thanks.id } }, data: { html: thanksHtml } });
+  const link = await createOfferLink(offer.id, { label: "Checkout", url: "", kind: "CHECKOUT" });
+  await saveCheckoutProduct(link.id, {
+    name: "Molde de Silicón",
+    amount: "497,00",
+    provider: "KYVO",
+    methods: ["SPEI", "CARD"],
+    locale: "ES",
+    thankYouPageId: thanks.id,
+    accessUrl: PRODUCT_ACCESS,
+    config: {
+      ...checkoutConfigDraft(parseCheckoutConfig({})),
+      fields: { name: true, email: true, phone: false, document: false },
+      address: true,
+      shipping: [{ id: "envio0001", name: "Envío estándar", eta: "3 a 5 días", price: "99,00" }],
+      shippingDefault: "envio0001",
+    },
+  });
+  const token = await createPreviewToken({ kind: "offer", offerId: offer.id });
+  return { key: link.key, thanksId: thanks.id, base: `http://${token}.localhost:${port}` };
+}
+
 interface Session {
   page: Page;
   outside: string[];
@@ -588,6 +615,61 @@ describe("página de checkout na prévia (Kyvo)", () => {
     ]);
     expect(events[4]).toMatchObject({ value: 497, currency: "MXN" });
     expect(s.outside).toEqual([]);
+    expect(s.errors).toEqual([]);
+    await s.close();
+  }, 60_000);
+
+  it("peso mexicano com produto físico: endereço genérico (sem busca de CEP) e frete depois do código postal", async () => {
+    const o = await mxnAddressOffer();
+    const s = await open(`${o.base}/checkout/${o.key}`, true);
+    const { page } = s;
+    const sent: Record<string, unknown>[] = [];
+    page.on("request", (r) => {
+      if (r.method() === "POST" && r.url().endsWith("/__os/pagamento")) sent.push(r.postDataJSON());
+    });
+    await expect.poll(() => page.locator("[data-osc-form]").isVisible(), { timeout: 20_000 }).toBe(true);
+    // O estado é texto livre (não a lista de UF do Brasil) e os campos de endereço já aparecem.
+    expect(await page.locator("#osc-uf").evaluate((el) => el.tagName)).toBe("INPUT");
+    expect(await page.locator("[data-osc-addr]").isVisible()).toBe(true);
+    // Sem o código postal, o frete fica escondido (o aviso "preencha o código postal" aparece).
+    expect(await page.locator("[data-osc-ship-empty]").isVisible()).toBe(true);
+    expect(await page.locator("[data-osc-ship]").isVisible()).toBe(false);
+    // Código postal de 5 dígitos do México revela o frete (sem chamar a BrasilAPI).
+    await page.locator("#osc-cep").fill("06600");
+    await page.locator("#osc-cep").dispatchEvent("input");
+    await expect.poll(() => page.locator("[data-osc-ship]").isVisible()).toBe(true);
+    expect(await page.locator("[data-osc-ship-empty]").isVisible()).toBe(false);
+    // Produto + frete no total ($497.00 + $99.00 na página em peso).
+    await expect.poll(() => text(page, "[data-osc-total]")).toBe("$596.00");
+    await page.locator("#osc-nome").fill("María López");
+    await page.locator("#osc-email").fill("maria@ejemplo.mx");
+    await page.locator("#osc-rua").fill("Av. Reforma");
+    await page.locator("#osc-numero").fill("222");
+    await page.locator("#osc-bairro").fill("Juárez");
+    await page.locator("#osc-cidade").fill("Ciudad de México");
+    await page.locator("#osc-uf").fill("CDMX");
+    await page.locator(".osc-method", { hasText: "SPEI" }).click();
+    await shot(page, "celular-kyvo-endereco");
+    await page.locator("[data-osc-pay]").click();
+    await expect.poll(() => page.locator(".osc-rows").isVisible(), { timeout: 20_000 }).toBe(true);
+    // A página manda o endereço genérico e o frete (o total é calculado no servidor).
+    const create = sent.find((b) => b.acao === "checkout_criar") as Record<string, unknown>;
+    expect(create).toMatchObject({
+      checkout: o.key,
+      metodo: "spei",
+      nome: "María López",
+      frete: "envio0001",
+      endereco: {
+        cep: "06600",
+        rua: "Av. Reforma",
+        numero: "222",
+        bairro: "Juárez",
+        cidade: "Ciudad de México",
+        uf: "CDMX",
+      },
+    });
+    // Nenhuma busca de CEP fora do Brasil.
+    expect(s.cepCalls).toEqual([]);
     expect(s.errors).toEqual([]);
     await s.close();
   }, 60_000);

@@ -5,13 +5,7 @@
  * Os avisos são gravados como texto no ZIP (ExportJob.warnings), então a tela
  * reconhece pelo texto qual ação oferecer (exportWarningFix).
  */
-import {
-  ADDRESS_ISSUE_TEXT,
-  type CheckoutIssue,
-  checkoutProductMissing,
-  shippingIssueText,
-  textsIssueText,
-} from "@/lib/checkout/checks";
+import { type CheckoutIssue, checkoutProductMissing, shippingIssueText, textsIssueText } from "@/lib/checkout/checks";
 import type { PaymentIssue } from "@/lib/payments/checks";
 import { LOCALE_LABEL, type PaymentProviderId, PROVIDER_LABEL } from "@/lib/payments/rules";
 
@@ -453,7 +447,6 @@ export function checkoutIssueWarning(issue: CheckoutIssue): string {
   if (issue.kind === "product") {
     const parts: string[] = [];
     if (issue.currency) parts.push(issue.currency);
-    if (issue.address) parts.push(ADDRESS_ISSUE_TEXT);
     const missing = checkoutProductMissing(issue);
     if (missing.length) parts.push(`Falta ${joinPt(missing)}: quem pagar não recebe tudo o que comprou.`);
     if (issue.amount) parts.push(`${issue.amount} No site publicado, o comprador vê “pagamento indisponível”.`);

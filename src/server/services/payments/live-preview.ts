@@ -35,11 +35,14 @@ import {
   type CheckoutExtraAccess,
   type CheckoutPayMethod,
   type CheckoutStatusResponse,
+  checkoutAddressMeta,
   isCheckoutOrderId,
   type PixInstructions,
   parseCheckoutRequest,
 } from "@/lib/checkout/contract";
+import { onlyDigits } from "@/lib/checkout/fields";
 import { checkCheckoutOrder } from "@/lib/checkout/orders";
+import { isPixProvider } from "@/lib/checkout/rules";
 import { checkoutLang } from "@/lib/checkout/texts";
 import {
   type CardInstructions,
@@ -199,7 +202,8 @@ function checkoutChargeInput(
   }
   const address = buyer.endereco
     ? {
-        zipCode: buyer.endereco.cep,
+        // Gateway de PIX (Brasil) quer o CEP só com dígitos; a Kyvo ignora o endereço aqui.
+        zipCode: isPixProvider(product.provider) ? onlyDigits(buyer.endereco.cep) : buyer.endereco.cep,
         street: buyer.endereco.rua,
         number: buyer.endereco.numero,
         complement: buyer.endereco.complemento,
@@ -242,6 +246,11 @@ async function liveCheckoutCreate(offerId: string, raw: unknown, now: number): P
   if (!key) return fail("configuracao");
   const input = checkoutChargeInput(product, check, req.metodo);
   input.metadata = cleanMeta(req.metadata);
+  // A Kyvo não tem campo de endereço: o endereço de entrega vai como metadata
+  // (os gateways de PIX já o recebem no campo próprio — ver checkoutChargeInput).
+  if (product.provider === "KYVO" && check.buyer.endereco) {
+    input.metadata = { ...(input.metadata ?? {}), ...checkoutAddressMeta(check.buyer.endereco) };
+  }
   let charge: Charge;
   try {
     charge = await gatewayAdapter(product.provider).createCharge(key, input);

@@ -96,7 +96,11 @@ export type CheckoutPayMethod = "pix" | PayMethod;
 export const CHECKOUT_PAY_METHODS: readonly CheckoutPayMethod[] = ["pix", "spei", "card", "bizum", "mb_way"];
 export type CheckoutCurrency = "BRL" | PayCurrency;
 
-/** Endereço de entrega (Brasil). Só os algarismos no CEP; UF com 2 letras. */
+/**
+ * Endereço de entrega. No Brasil, `cep` são 8 algarismos e `uf` a sigla de 2
+ * letras; fora do real, `cep` é o código postal cru (pode ter letras) e `uf` é
+ * o estado/província texto livre.
+ */
 export interface CheckoutAddress {
   cep: string;
   rua: string;
@@ -105,6 +109,24 @@ export interface CheckoutAddress {
   bairro: string;
   cidade: string;
   uf: string;
+}
+
+/**
+ * Endereço de entrega em chaves planas, para mandar junto da cobrança como
+ * metadata (a API da Kyvo não tem campo de endereço: o lojista lê o endereço
+ * de entrega no painel dela). Os gateways de PIX recebem o endereço no campo
+ * próprio e NÃO precisam disto. Espelhado no pagamento.php (os_address_meta).
+ */
+export function checkoutAddressMeta(a: CheckoutAddress): Record<string, string> {
+  const m: Record<string, string> = {};
+  const rua = [a.rua, a.numero].filter(Boolean).join(", ");
+  if (rua) m.entrega_endereco = rua;
+  if (a.complemento) m.entrega_complemento = a.complemento;
+  if (a.bairro) m.entrega_bairro = a.bairro;
+  if (a.cidade) m.entrega_cidade = a.cidade;
+  if (a.uf) m.entrega_estado = a.uf;
+  if (a.cep) m.entrega_cep = a.cep;
+  return m;
 }
 
 /** Campos da metadata que a página pode mandar (os mesmos do pagamento na página). */
@@ -384,11 +406,19 @@ function clean(v: unknown, max: number): string {
   return (str(v) || "").trim().replace(/\s+/g, " ").slice(0, max);
 }
 
+/**
+ * Formato (sem moeda) de um endereço de entrega. Aceita tanto o do Brasil (CEP
+ * de 8 dígitos, UF de 2 letras) quanto o internacional (código postal e estado
+ * texto livre): o código postal e o estado ficam CRUS (não vira só dígitos nem
+ * maiúsculas — código postal estrangeiro tem letras). A regra estrita por moeda
+ * (CEP+UF do Brasil × genérico) fica em checkCheckoutOrder/os_checkout_buyer,
+ * que conhecem a moeda do produto.
+ */
 function readAddress(raw: unknown): CheckoutAddress | null {
   if (!raw || typeof raw !== "object" || Array.isArray(raw)) return null;
   const o = raw as Record<string, unknown>;
-  const cep = (str(o.cep) || "").replace(/\D+/g, "");
-  const uf = (str(o.uf) || "").trim().toUpperCase();
+  const cep = (str(o.cep) || "").trim().slice(0, 16);
+  const uf = (str(o.uf) || "").trim().slice(0, 60);
   const out: CheckoutAddress = {
     cep: cep,
     rua: clean(o.rua, ADDRESS_MAX),
@@ -398,7 +428,7 @@ function readAddress(raw: unknown): CheckoutAddress | null {
     cidade: clean(o.cidade, ADDRESS_MAX),
     uf: uf,
   };
-  if (cep.length !== 8 || !/^[A-Z]{2}$/.test(uf)) return null;
+  if (cep.length < 2 || uf.length < 1) return null;
   if (!out.rua || !out.numero || !out.bairro || !out.cidade) return null;
   return out;
 }

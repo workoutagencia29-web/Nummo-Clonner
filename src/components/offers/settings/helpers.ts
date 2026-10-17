@@ -161,9 +161,6 @@ export function currencySwitchToast(r: CurrencySwitchResult, label: string): { m
     r.checkoutTexts?.length
       ? `os textos trocados ${listPt(r.checkoutTexts.map((c) => `de “${c.label}”`))} (escritos para o idioma ou o pagamento de antes)`
       : "",
-    r.checkoutAddressOff?.length
-      ? `o frete ${listPt(r.checkoutAddressOff.map((c) => `de “${c.label}”`))}: o endereço foi desligado (só existe no checkout em real)`
-      : "",
   ].filter(Boolean);
   const head = r.from === r.to ? `Tudo passou para ${label}.` : `Moeda da oferta trocada para ${label}.`;
   const body = changed.length

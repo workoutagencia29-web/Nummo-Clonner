@@ -56,7 +56,7 @@ export const PART_ATTR = "data-os-pd-part";
  * todas" sem destino tem o aviso da vitrine (src/lib/store-pages.ts) e o
  * "Voltar" volta à página anterior (src/runtime/product).
  */
-export const STORE_NAV_CLASSES = ["os-sh-logo", "os-sh-cat", "os-pd-more", "os-pd-back"] as const;
+export const STORE_NAV_CLASSES = ["os-sh-logo", "os-sh-cat", "os-pd-more", "os-pd-back", "os-bn-slide"] as const;
 
 /** Maior preço aceito (99.999.999,99). */
 export const STORE_MAX_CENTS = 9_999_999_999;

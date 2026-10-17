@@ -19,6 +19,8 @@ import {
   isValidEmail,
   isValidFullName,
   isValidIntlPhone,
+  isValidIntlPostal,
+  isValidRegion,
   isValidUf,
   onlyDigits,
 } from "@/lib/checkout/fields";
@@ -261,8 +263,8 @@ export function setupForm(
     if (name === "email") return isValidEmail(v) ? "" : fx.invalidEmail;
     if (name === "telefone") return (brl ? isValidBrPhone(v) : isValidIntlPhone(v)) ? "" : fx.invalidPhone;
     if (name === "documento") return (brl ? isValidCpf(v) : /^[A-Za-z0-9./-]{4,40}$/.test(v)) ? "" : fx.invalidCpf;
-    if (name === "cep") return isValidCep(v) ? "" : fx.invalidCep;
-    if (name === "uf") return isValidUf(v) ? "" : fx.required;
+    if (name === "cep") return (brl ? isValidCep(v) : isValidIntlPostal(v)) ? "" : fx.invalidCep;
+    if (name === "uf") return (brl ? isValidUf(v) : isValidRegion(v)) ? "" : fx.required;
     return "";
   }
 
@@ -310,109 +312,123 @@ export function setupForm(
   if (brl) {
     masked("telefone", formatBrPhone);
     masked("documento", formatCpf);
+    // A máscara 00000-000 é só do CEP do Brasil (código postal estrangeiro tem letras).
+    masked("cep", formatCep);
   }
-  masked("cep", formatCep);
 
   // ── Autocomplete de e-mail ───────────────────────────────────────────────
   const emailEl = byName(form, "email");
   if (emailEl && emailEl.tagName === "INPUT") setupEmailSuggest(emailEl as HTMLInputElement);
 
-  // ── CEP (BrasilAPI) ────────────────────────────────────────────────────
+  // ── CEP / código postal ─────────────────────────────────────────────────
   const cep = byName(form, "cep") as HTMLInputElement | null;
-  let lastCep = "";
-  let cepTurn = 0;
-  const AUTO_FIELDS = ["rua", "bairro", "cidade", "uf"];
-  /**
-   * Preenche com o que a busca achou ("" = a busca não achou: apaga). Só mexe
-   * em campo vazio ou que uma busca anterior preencheu — o que a pessoa
-   * digitou (ou corrigiu) fica: ao editar, o campo perde a marca da busca.
-   */
-  const fillAuto = (name: string, value: string) => {
-    const el = byName(form, name);
-    if (!el) return;
-    const auto = el.getAttribute("data-osc-auto") === "1";
-    if (el.value.trim() && !auto) return;
-    if (!value) {
-      // CEP novo que a busca não achou: o endereço do CEP anterior não pode ficar.
-      if (auto) el.value = "";
-      el.removeAttribute("data-osc-auto");
-      markValid(el);
-      return;
-    }
-    el.value = value;
-    el.setAttribute("data-osc-auto", "1");
-    setError(el, "");
-    markValid(el);
-  };
-  for (const name of AUTO_FIELDS) {
-    const el = byName(form, name);
-    if (!el) continue;
-    // Digitado pela pessoa (o valor posto pela busca não dispara estes eventos): a busca não troca mais.
-    const mine = () => el.removeAttribute("data-osc-auto");
-    el.addEventListener("input", mine);
-    el.addEventListener("change", mine);
-  }
-  function lookupCep(digits: string) {
-    const my = ++cepTurn;
-    if (cepStatus) cepStatus.textContent = fx.cepSearching;
-    const ctrl = typeof AbortController === "function" ? new AbortController() : null;
-    const timer = setTimeout(() => {
-      if (ctrl) ctrl.abort();
-    }, CEP_TIMEOUT_MS);
-    const done = (found: Record<string, unknown> | null) => {
-      clearTimeout(timer);
-      if (my !== cepTurn) return;
-      if (!found) {
-        // Não achou (ou a BrasilAPI falhou): apaga o que veio do CEP anterior e a pessoa digita.
-        for (const name of AUTO_FIELDS) fillAuto(name, "");
-        if (cepStatus) cepStatus.textContent = fx.cepNotFound;
-        announce(fx.cepNotFound);
-        const street = byName(form, "rua");
-        if (street && document.activeElement === cep && !street.value.trim()) street.focus();
+  if (brl) {
+    // No Brasil, a BrasilAPI preenche o endereço e o endereço/frete aparecem
+    // depois de um CEP de 8 dígitos.
+    let lastCep = "";
+    let cepTurn = 0;
+    const AUTO_FIELDS = ["rua", "bairro", "cidade", "uf"];
+    /**
+     * Preenche com o que a busca achou ("" = a busca não achou: apaga). Só mexe
+     * em campo vazio ou que uma busca anterior preencheu — o que a pessoa
+     * digitou (ou corrigiu) fica: ao editar, o campo perde a marca da busca.
+     */
+    const fillAuto = (name: string, value: string) => {
+      const el = byName(form, name);
+      if (!el) return;
+      const auto = el.getAttribute("data-osc-auto") === "1";
+      if (el.value.trim() && !auto) return;
+      if (!value) {
+        // CEP novo que a busca não achou: o endereço do CEP anterior não pode ficar.
+        if (auto) el.value = "";
+        el.removeAttribute("data-osc-auto");
+        markValid(el);
         return;
       }
-      if (cepStatus) cepStatus.textContent = "";
-      const text = (k: string) => (typeof found[k] === "string" ? (found[k] as string).trim() : "");
-      fillAuto("rua", text("street"));
-      fillAuto("bairro", text("neighborhood"));
-      fillAuto("cidade", text("city"));
-      fillAuto("uf", text("state").toUpperCase());
-      const next = byName(form, text("street") ? "numero" : "rua");
-      if (next && document.activeElement === cep) next.focus();
+      el.value = value;
+      el.setAttribute("data-osc-auto", "1");
+      setError(el, "");
+      markValid(el);
     };
-    fetch(BRASIL_API_CEP + digits, {
-      signal: ctrl ? ctrl.signal : undefined,
-      // Nada da página vai para a BrasilAPI (nem o endereço do checkout).
-      referrerPolicy: "no-referrer",
-      credentials: "omit",
-    })
-      .then((r) => (r.ok ? r.json() : null))
-      .then(
-        (j) => done(j && typeof j === "object" ? (j as Record<string, unknown>) : null),
-        () => done(null),
-      );
-  }
-  if (cep) {
-    cep.addEventListener("input", () => {
-      const d = onlyDigits(cep.value);
-      if (d.length === 8 && isValidCep(d)) {
-        // Com o CEP preenchido, mostra o endereço e as opções de frete (a BrasilAPI preenche o resto).
+    for (const name of AUTO_FIELDS) {
+      const el = byName(form, name);
+      if (!el) continue;
+      // Digitado pela pessoa (o valor posto pela busca não dispara estes eventos): a busca não troca mais.
+      const mine = () => el.removeAttribute("data-osc-auto");
+      el.addEventListener("input", mine);
+      el.addEventListener("change", mine);
+    }
+    const lookupCep = (digits: string) => {
+      const my = ++cepTurn;
+      if (cepStatus) cepStatus.textContent = fx.cepSearching;
+      const ctrl = typeof AbortController === "function" ? new AbortController() : null;
+      const timer = setTimeout(() => {
+        if (ctrl) ctrl.abort();
+      }, CEP_TIMEOUT_MS);
+      const done = (found: Record<string, unknown> | null) => {
+        clearTimeout(timer);
+        if (my !== cepTurn) return;
+        if (!found) {
+          // Não achou (ou a BrasilAPI falhou): apaga o que veio do CEP anterior e a pessoa digita.
+          for (const name of AUTO_FIELDS) fillAuto(name, "");
+          if (cepStatus) cepStatus.textContent = fx.cepNotFound;
+          announce(fx.cepNotFound);
+          const street = byName(form, "rua");
+          if (street && document.activeElement === cep && !street.value.trim()) street.focus();
+          return;
+        }
+        if (cepStatus) cepStatus.textContent = "";
+        const text = (k: string) => (typeof found[k] === "string" ? (found[k] as string).trim() : "");
+        fillAuto("rua", text("street"));
+        fillAuto("bairro", text("neighborhood"));
+        fillAuto("cidade", text("city"));
+        fillAuto("uf", text("state").toUpperCase());
+        const next = byName(form, text("street") ? "numero" : "rua");
+        if (next && document.activeElement === cep) next.focus();
+      };
+      fetch(BRASIL_API_CEP + digits, {
+        signal: ctrl ? ctrl.signal : undefined,
+        // Nada da página vai para a BrasilAPI (nem o endereço do checkout).
+        referrerPolicy: "no-referrer",
+        credentials: "omit",
+      })
+        .then((r) => (r.ok ? r.json() : null))
+        .then(
+          (j) => done(j && typeof j === "object" ? (j as Record<string, unknown>) : null),
+          () => done(null),
+        );
+    };
+    if (cep) {
+      cep.addEventListener("input", () => {
+        const d = onlyDigits(cep.value);
+        if (d.length === 8 && isValidCep(d)) {
+          // Com o CEP preenchido, mostra o endereço e as opções de frete (a BrasilAPI preenche o resto).
+          revealAddress();
+          revealShipping();
+          if (d !== lastCep) {
+            lastCep = d;
+            lookupCep(d);
+          }
+        } else if (d.length < 8 && cepStatus) {
+          cepStatus.textContent = "";
+          lastCep = "";
+        }
+      });
+      // CEP já preenchido ao abrir (preenchimento do navegador): mostra o endereço na hora.
+      if (isValidCep(onlyDigits(cep.value))) {
         revealAddress();
         revealShipping();
-        if (d !== lastCep) {
-          lastCep = d;
-          lookupCep(d);
-        }
-      } else if (d.length < 8 && cepStatus) {
-        cepStatus.textContent = "";
-        lastCep = "";
       }
-    });
-    // CEP já preenchido ao abrir (preenchimento do navegador): mostra o endereço na hora.
-    if (isValidCep(onlyDigits(cep.value))) {
-      revealAddress();
-      revealShipping();
     }
+  } else if (cep) {
+    // Fora do real: sem busca automática. Os campos de endereço já aparecem (o
+    // HTML não os esconde) e as opções de frete surgem quando a pessoa preenche
+    // o código postal.
+    const revealIfPostal = () => {
+      if (isValidIntlPostal(cep.value.trim())) revealShipping();
+    };
+    cep.addEventListener("input", revealIfPostal);
+    revealIfPostal();
   }
 
   // ── Frete, bumps, forma de pagamento e total ───────────────────────────
@@ -576,14 +592,16 @@ export function setupForm(
     if (byName(form, "telefone")) out.telefone = onlyDigits(value("telefone"));
     if (byName(form, "documento")) out.documento = brl ? onlyDigits(value("documento")) : value("documento");
     if (cfg.endereco && byName(form, "cep")) {
+      // No Brasil, CEP só com algarismos e UF em maiúsculas; fora, o código
+      // postal e o estado vão como foram digitados (código postal pode ter letras).
       out.endereco = {
-        cep: onlyDigits(value("cep")),
+        cep: brl ? onlyDigits(value("cep")) : value("cep"),
         rua: value("rua"),
         numero: value("numero"),
         complemento: value("complemento"),
         bairro: value("bairro"),
         cidade: value("cidade"),
-        uf: value("uf").toUpperCase(),
+        uf: brl ? value("uf").toUpperCase() : value("uf"),
       };
     }
     return out;

@@ -17,6 +17,7 @@
  * (PROP_OFFER_CURRENCY; src/lib/offer-currency.ts).
  */
 
+import { bannerDef, DEFAULT_BANNER } from "@/editor/widgets/banner-content";
 import { EXAMPLE_BUY, galleryDef, galleryPlaceholders, productBuyDef } from "@/editor/widgets/product-page-content";
 import {
   EXAMPLE_PRODUCTS,
@@ -150,6 +151,17 @@ export const storeBlocks: OsBlock[] = [
       '<rect x="2" y="4" width="20" height="16" rx="2"/><path d="M2 9.5h20M2 14h20"/><rect x="5" y="6" width="3" height="1.6" rx=".5"/><rect x="9.5" y="5.9" width="7.5" height="1.9" rx=".9"/><path d="M18.5 6.2h1.6l.4 1.6M5 11.8h2.5M9.5 11.8h2.5M14 11.8h2.5"/>',
     ),
     content: storeHeaderDef(),
+    select: true,
+  },
+  {
+    id: "carrossel-banners",
+    label: "Carrossel de banners",
+    category: "loja",
+    hint: "Banners que passam sozinhos na horizontal (1, 2, 3…). Troque a imagem e ponha um link em cada um.",
+    media: icon(
+      '<rect x="2" y="5" width="20" height="14" rx="2"/><path d="M6.5 15.5l3.2-3.2 2.3 2.1 1.6-1.5 3 3"/><circle cx="8.5" cy="9.5" r="1.3"/><path d="M2.5 12l-1 0M22.5 12l-1 0"/><circle cx="10" cy="21.5" r=".6"/><circle cx="12" cy="21.5" r=".6"/><circle cx="14" cy="21.5" r=".6"/>',
+    ),
+    content: bannerDef(DEFAULT_BANNER),
     select: true,
   },
   {

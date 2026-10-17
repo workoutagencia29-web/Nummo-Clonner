@@ -147,7 +147,7 @@ const kyvo = pagamentoCheckoutOf(
     accessUrl: "https://miembros.ejemplo.mx/curso",
     config: {
       fields: { name: true, email: true, phone: false, document: false },
-      address: true, // fora do real não vale: sai desligado
+      address: true, // em peso agora vale (produto físico no México): o endereço vai junto da cobrança
       shipping: [{ id: "envio001", name: "Envío", priceCents: 9900 }],
       bumps: [
         { id: "recetario", title: "Recetario", priceCents: 9900, accessUrl: "https://miembros.ejemplo.mx/recetas" },
@@ -178,8 +178,9 @@ describe("checkout no pagamento.php (sem PHP)", () => {
       methods: ["spei", "card"],
       ranges: { spei: { min: 100, max: 2_500_000 }, card: { min: 100, max: 10_000_000 } },
       fields: ["name", "email"],
-      address: false,
-      shipping: [],
+      // Endereço e frete valem em peso agora (produto físico): o config.php os guarda.
+      address: true,
+      shipping: [{ id: "envio001", name: "Envío", priceCents: 9900 }],
       locale: "es",
     });
     // ClownPay: PIX em real, os 4 campos exigidos, faixa do PIX.
@@ -829,7 +830,7 @@ describe.skipIf(!PHP)("checkout no pagamento.php com PHP de verdade (gateways fa
     expect((await post({ acao: "checkout_status", pedido: r2.json.pedido, checkout: "ebook" })).json.pago).toBe(true);
   });
 
-  it("Kyvo (peso mexicano): SPEI com o total do config.php, pedido público próprio e acesso com o bump", async () => {
+  it("Kyvo (peso mexicano): SPEI com endereço e frete, endereço na metadata da cobrança e acesso com o bump", async () => {
     const r = await post({
       acao: "checkout_criar",
       checkout: "mexico",
@@ -837,20 +838,46 @@ describe.skipIf(!PHP)("checkout no pagamento.php com PHP de verdade (gateways fa
       nome: "Ana Pérez",
       email: "ana@ejemplo.mx",
       bumps: ["recetario"],
-      // Fora do real não há frete: mandado, é ignorado (o endereço está desligado).
+      // Produto físico no México: o endereço é genérico (CP de 5 dígitos, estado texto livre) e o frete é cobrado.
       frete: "envio001",
+      endereco: {
+        cep: "06600",
+        rua: "Av. Reforma",
+        numero: "222",
+        complemento: "",
+        bairro: "Juárez",
+        cidade: "Ciudad de México",
+        uf: "CDMX",
+      },
       metadata: { utm_source: "facebook", os_versao: "B" },
     });
     expect(r.status).toBe(201);
-    expect(r.json).toMatchObject({ ok: true, metodo: "spei", moeda: "MXN", valor: 49700 + 9900, status: "pending" });
+    // Produto + bump + frete, todos do config.php.
+    expect(r.json).toMatchObject({
+      ok: true,
+      metodo: "spei",
+      moeda: "MXN",
+      valor: 49700 + 9900 + 9900,
+      status: "pending",
+    });
     expect(r.json.pedido).toMatch(/^ck_[a-z0-9]{24}$/);
     expect(r.json.spei).toMatchObject({ clabe: expect.any(String), referencia: expect.any(String) });
     const charge = [...kyvoFake.requests].reverse().find((q) => q.method === "POST");
     expect(charge?.body).toMatchObject({
-      amount: 59600,
+      amount: 69500,
       externalOrderId: r.json.pedidoExterno,
       customer: { name: "Ana Pérez", email: "ana@ejemplo.mx" },
-      metadata: { utm_source: "facebook", os_versao: "B", ua: "Mozilla/5.0 Comprador" },
+      // A Kyvo não tem campo de endereço: o endereço de entrega vai como metadata.
+      metadata: {
+        utm_source: "facebook",
+        os_versao: "B",
+        ua: "Mozilla/5.0 Comprador",
+        entrega_endereco: "Av. Reforma, 222",
+        entrega_bairro: "Juárez",
+        entrega_cidade: "Ciudad de México",
+        entrega_estado: "CDMX",
+        entrega_cep: "06600",
+      },
     });
     expect(charge?.headers["idempotency-key"]).toBe(r.json.pedidoExterno);
     const tx = [...kyvoFake.transactions.values()].at(-1);

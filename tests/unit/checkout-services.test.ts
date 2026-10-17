@@ -459,18 +459,23 @@ describe("bloco “Acesso ao produto” e o idioma do checkout", () => {
 });
 
 describe("duplicar e trocar a moeda", () => {
-  it("duplicar leva o produto do checkout (com a página de obrigado da cópia) e a chave", async () => {
+  it("duplicar leva o produto do checkout (com a página de obrigado da cópia), mas NÃO a chave", async () => {
     const { offer, thanks, link } = await setup();
     await savePaymentGatewayKey(offer.id, "BLACKCAT", BLACKCAT_KEY);
     await saveCheckoutProduct(link.id, input({ provider: "BLACKCAT", thankYouPageId: thanks.id }));
     const copy = await duplicateOffer(offer.id);
+    expect(copy.droppedPaymentKey).toBe(true);
     const [copied] = await listOfferLinks(copy.id);
     const copiedThanks = await prisma.page.findFirstOrThrow({ where: { offerId: copy.id, type: "THANK_YOU" } });
     expect(copied).toMatchObject({
       target: "CHECKOUT",
       checkout: { provider: "BLACKCAT", thankYouPageId: copiedThanks.id },
     });
-    expect((await offerPaymentAccounts(copy.id))[2]).toMatchObject({ provider: "BLACKCAT", configured: true });
+    // O produto do checkout vem junto, mas sem a chave da BlackCat: a cópia pede para cadastrar de novo.
+    expect((await offerPaymentAccounts(copy.id))[2]).toMatchObject({ provider: "BLACKCAT", configured: false });
+    expect(await prisma.paymentGateway.count({ where: { offerId: copy.id } })).toBe(0);
+    // A original fica com a chave dela.
+    expect(await prisma.paymentGateway.count({ where: { offerId: offer.id } })).toBe(1);
   });
 
   it("real → peso: o checkout passa para a Kyvo; de volta ao real, o gateway de PIX com chave", async () => {
@@ -488,7 +493,6 @@ describe("duplicar e trocar a moeda", () => {
         gatewayChanged: true,
         problem: null,
         locale: { from: "Português", to: "Español" },
-        addressOff: false,
         textsToReview: false,
       },
     ]);
@@ -516,45 +520,37 @@ describe("duplicar e trocar a moeda", () => {
     expect((await currencySwitchPlan(offer.id, "BRL")).checkouts).toEqual([]);
   });
 
-  it("endereço só no real: salvar fora dele é recusado; a troca para fora do real desliga o endereço (o frete fica)", async () => {
+  it("endereço vale em qualquer moeda: salvar em peso/euro é aceito e a troca de moeda mantém o endereço e o frete", async () => {
     const { offer, link } = await setup();
     const shipping = [{ id: "frete001", name: "Sedex", eta: "", price: "29,90" }];
     await saveCheckoutProduct(link.id, input({ config: { ...emptyConfig(), address: true, shipping } }));
     const plan = await currencySwitchPlan(offer.id, "EUR");
-    expect(plan.checkouts[0]).toMatchObject({ addressOff: true, locale: null, textsToReview: false });
-    const result = await switchOfferCurrency(offer.id, "EUR");
-    expect(result.checkoutAddressOff).toEqual([{ linkId: link.id, label: "Checkout principal" }]);
+    // A troca de moeda não mexe mais no endereço.
+    expect(plan.checkouts[0]).toMatchObject({ locale: null, textsToReview: false });
+    await switchOfferCurrency(offer.id, "EUR");
     const row = await prisma.checkoutProduct.findUniqueOrThrow({ where: { linkId: link.id } });
     expect(row).toMatchObject({ provider: "KYVO", currency: "EUR", locale: "PT" });
-    expect(parseCheckoutConfig(row.config)).toMatchObject({ address: false, shipping: [{ id: "frete001" }] });
-    // Fora do real, o frete guardado não vira aviso ("ligue o endereço" não dá).
-    expect((await loadCheckoutExport(offer.id))?.issues.some((i) => i.kind === "shipping")).toBe(false);
-    await expectUserError(
-      saveCheckoutProduct(
-        link.id,
-        input({ provider: "KYVO", methods: ["CARD"], config: { ...emptyConfig(), address: true, shipping } }),
-      ),
-      /só existem no checkout em real/,
-      "address",
+    // O endereço e o frete continuam ligados (produto físico vendido fora do Brasil).
+    expect(parseCheckoutConfig(row.config)).toMatchObject({ address: true, shipping: [{ id: "frete001" }] });
+    // Endereço ligado em euro NÃO gera aviso de frete desligado.
+    const issuesAfter = (await loadCheckoutExport(offer.id))?.issues ?? [];
+    expect(issuesAfter.some((i) => i.kind === "shipping")).toBe(false);
+    // Salvar de novo com o endereço ligado em euro é ACEITO (antes era recusado).
+    await saveCheckoutProduct(
+      link.id,
+      input({ provider: "KYVO", methods: ["CARD"], config: { ...emptyConfig(), address: true, shipping } }),
     );
-    // Endereço ligado fora do real (backup, gravação de antes): o "Próximos passos" e o ZIP apontam.
-    await prisma.checkoutProduct.update({
-      where: { linkId: link.id },
-      data: { config: { ...(row.config as object), address: true } },
-    });
-    const issues = (await loadCheckoutExport(offer.id))?.issues ?? [];
-    expect(issues).toContainEqual(expect.objectContaining({ kind: "product", address: true }));
+    const resaved = parseCheckoutConfig(
+      (await prisma.checkoutProduct.findUniqueOrThrow({ where: { linkId: link.id } })).config,
+    );
+    expect(resaved).toMatchObject({ address: true, shipping: [{ id: "frete001" }] });
+    // O único passo que falta é a chave da Kyvo (não há mais "desligar o endereço").
     const links = await listOfferLinks(offer.id);
     const step = (await getOfferReadiness({ id: offer.id, liveUrl: null, links })).items.find(
       (i) => i.id === "checkout-proprio",
     );
     expect(step).toMatchObject({ title: "Cadastrar a chave da Kyvo" });
-    await savePaymentGatewayKey(offer.id, "KYVO", KYVO_KEY);
-    const next = (await getOfferReadiness({ id: offer.id, liveUrl: null, links })).items.find(
-      (i) => i.id === "checkout-proprio",
-    );
-    expect(next).toMatchObject({ title: "Desligar o endereço de “Checkout principal”", done: false });
-    expect(next?.detail).toContain("só existe no checkout em real");
+    expect(step?.detail ?? "").not.toContain("endereço");
   });
 
   it("textos trocados: a troca de moeda avisa para revisar; salvar de novo marca como revisados", async () => {

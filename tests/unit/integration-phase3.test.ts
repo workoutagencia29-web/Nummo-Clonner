@@ -165,7 +165,9 @@ describe("script das páginas (widgets + clones)", () => {
     // t("chave", "padrão em pt-BR") e o formulário aceita número de outro país
     // (as traduções ficam no JSON #os-textos da página, fora do script): +~0,85 KB
     // (hoje ~51 KB).
-    expect(script.length).toBeLessThan(51.5 * 1024);
+    // Carrossel de banners da loja (passa sozinho na horizontal, bolinhas, setas e
+    // toque): +~1,6 KB (hoje ~52,7 KB).
+    expect(script.length).toBeLessThan(53.5 * 1024);
     // Só ASCII: numa hospedagem que serve a página como latin-1, um caractere cru
     // dentro de uma expressão regular pode virar um intervalo inválido e derrubar o
     // script inteiro (o esbuild escapa textos, mas não o que está dentro de regex).

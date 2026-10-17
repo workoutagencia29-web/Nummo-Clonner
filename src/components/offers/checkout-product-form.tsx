@@ -44,7 +44,6 @@ import {
   staleCheckoutTexts,
 } from "@/lib/checkout/config";
 import {
-  addressAllowed,
   BUYER_FIELDS,
   type BuyerField,
   buyerFieldLabel,
@@ -502,9 +501,9 @@ export function CheckoutProductForm({
   const keyState = keys[draft.provider] ?? "missing";
   const providerProblem = errors.provider;
   const thankYouName = pages.find((p) => p.id === draft.thankYouPageId)?.name;
-  // Endereço e frete só no real (o CEP é do Brasil).
-  const addressOk = addressAllowed(currency);
-  const paidShippingOff = addressOk && !config.address && config.shipping.some((s) => (parseAmount(s.price) ?? 0) > 0);
+  // Endereço e frete valem em qualquer moeda; só a busca automática do CEP é do Brasil.
+  const addressIsBr = currency === "BRL";
+  const paidShippingOff = !config.address && config.shipping.some((s) => (parseAmount(s.price) ?? 0) > 0);
   // O frete marcado: o escolhido, se ainda existe; senão o primeiro (como o servidor salva).
   const shippingDefault = config.shipping.some((s) => s.id === config.shippingDefault)
     ? config.shippingDefault
@@ -521,13 +520,9 @@ export function CheckoutProductForm({
   const summaries: Record<SectionId, string> = {
     produto: [draft.name || "Sem nome", cents !== null ? formatAmount(cents, currency) : "sem valor"].join(" · "),
     comprador: `Pede ${andList(asked)}`,
-    entrega: !addressOk
-      ? config.address
-        ? "Endereço ligado (só existe no checkout em real)"
-        : "Sem endereço (só existe no checkout em real)"
-      : config.address
-        ? `Endereço ligado · ${config.shipping.length} ${config.shipping.length === 1 ? "opção de frete" : "opções de frete"}`
-        : "Sem endereço (produto digital)",
+    entrega: config.address
+      ? `Endereço ligado · ${config.shipping.length} ${config.shipping.length === 1 ? "opção de frete" : "opções de frete"}`
+      : "Sem endereço (produto digital)",
     bumps: config.bumps.length
       ? [
           `${config.bumps.length} ${config.bumps.length === 1 ? "order bump" : "order bumps"}`,
@@ -826,54 +821,44 @@ export function CheckoutProductForm({
       </FormSection>
 
       <FormSection title="Endereço e frete" {...sectionProps("entrega")}>
-        {!addressOk && (
-          <p className="text-muted-foreground text-sm">
-            O endereço de entrega (com a busca do CEP) e o frete só existem no checkout em real: em{" "}
-            {OFFER_CURRENCY_NAME[currency]}, o checkout não pede endereço.
-            {config.shipping.length > 0 &&
-              ` ${config.shipping.length === 1 ? "A opção de frete cadastrada fica guardada" : "As opções de frete cadastradas ficam guardadas"} para quando a oferta voltar ao real.`}
-          </p>
-        )}
-        {/* Fora do real o liga/desliga só aparece ligado (veio de um backup): para desligar. */}
-        {(addressOk || config.address) && (
-          <Field data-invalid={Boolean(errors.address)}>
-            <label htmlFor={f("address")} className="flex cursor-pointer items-start gap-3">
-              <input
-                type="checkbox"
-                id={f("address")}
-                checked={config.address}
-                onChange={(e) => {
-                  const on = e.target.checked;
-                  patchConfig({
-                    address: on,
-                    ...(on && !config.shipping.length
-                      ? {
-                          shipping: [{ id: newItemId(), name: "Frete grátis", eta: "", price: "" }],
-                          shippingDefault: null,
-                        }
-                      : {}),
-                  });
-                }}
-                className="mt-0.5 size-4 shrink-0 accent-primary"
-              />
-              <span className="flex flex-col gap-0.5">
-                <span className="font-medium text-sm">Pedir o endereço de entrega</span>
-                <span className="text-muted-foreground text-xs">
-                  Para produto físico. Quem compra digita o CEP e a rua, o bairro, a cidade e o estado se preenchem
-                  sozinhos; se a busca do CEP falhar, dá para digitar tudo.
-                </span>
+        <Field data-invalid={Boolean(errors.address)}>
+          <label htmlFor={f("address")} className="flex cursor-pointer items-start gap-3">
+            <input
+              type="checkbox"
+              id={f("address")}
+              checked={config.address}
+              onChange={(e) => {
+                const on = e.target.checked;
+                patchConfig({
+                  address: on,
+                  ...(on && !config.shipping.length
+                    ? {
+                        shipping: [{ id: newItemId(), name: "Frete grátis", eta: "", price: "" }],
+                        shippingDefault: null,
+                      }
+                    : {}),
+                });
+              }}
+              className="mt-0.5 size-4 shrink-0 accent-primary"
+            />
+            <span className="flex flex-col gap-0.5">
+              <span className="font-medium text-sm">Pedir o endereço de entrega</span>
+              <span className="text-muted-foreground text-xs">
+                {addressIsBr
+                  ? "Para produto físico. Quem compra digita o CEP e a rua, o bairro, a cidade e o estado se preenchem sozinhos; se a busca do CEP falhar, dá para digitar tudo."
+                  : `Para produto físico. Quem compra digita o código postal, o estado, a cidade e a rua (sem busca automática do CEP fora do Brasil). O endereço vai junto da cobrança em ${OFFER_CURRENCY_NAME[currency]} para você enviar o produto.`}
               </span>
-            </label>
-            {errors.address && <FieldError>{errors.address}</FieldError>}
-          </Field>
-        )}
+            </span>
+          </label>
+          {errors.address && <FieldError>{errors.address}</FieldError>}
+        </Field>
         {paidShippingOff && (
           <Callout variant="warning">
             O endereço está desligado: as opções de frete abaixo não aparecem nem são cobradas. Ligue o endereço ou
             apague o frete pago.
           </Callout>
         )}
-        {addressOk && (config.address || config.shipping.length > 0) && (
+        {(config.address || config.shipping.length > 0) && (
           <fieldset className="flex flex-col gap-3" aria-describedby={f("shipping")}>
             <legend className="mb-1 font-medium text-sm">Opções de frete</legend>
             <p id={f("shipping")} tabIndex={-1} className="text-muted-foreground text-xs outline-none">

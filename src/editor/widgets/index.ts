@@ -13,6 +13,7 @@
 import type { Editor } from "grapesjs";
 import { forgetNewLinkTarget } from "@/editor/grapes/new-link";
 import { registerAccessTypes } from "./access";
+import { registerBannerTypes } from "./banner";
 import { registerButtonType } from "./button";
 import { registerCanvasCss } from "./canvas";
 import { registerCountdownType } from "./countdown";
@@ -54,5 +55,6 @@ export function registerWidgetTypes(editor: Editor) {
   // Depois da vitrine: a caixa de compra usa as partes e os campos do cartão.
   registerProductPageTypes(editor);
   registerStoreHeaderTypes(editor);
+  registerBannerTypes(editor);
   registerFooterTypes(editor);
 }

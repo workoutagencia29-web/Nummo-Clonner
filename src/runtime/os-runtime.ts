@@ -27,6 +27,7 @@
  */
 import { initCloneCompat } from "./clone-compat";
 import { initPayments } from "./payments/click";
+import { initBanners } from "./widgets/banner";
 import { initCountdowns } from "./widgets/countdown";
 import { initExitPopups } from "./widgets/exit-popup";
 import { initLeadForms, leadWait } from "./widgets/lead-form";
@@ -192,6 +193,7 @@ interface OsWindow extends Window {
       initVturb,
       initQuizzes,
       initWheels,
+      initBanners,
       // Depois dos contadores: o cabeçalho fixo fica embaixo da "Contagem no topo (barra)".
       initStore,
     ]) {

@@ -398,7 +398,8 @@ export function checkoutConfigFromDraft(
     if (price?.error) errors[`shipping.${i}.price`] = price.error;
     shipping.push({ id: freshId(s.id), name, eta, priceCents: price?.cents ?? 0 });
   });
-  // Endereço só no real (o CEP e a UF do contrato são do Brasil).
+  // Endereço vale em qualquer moeda (addressCurrencyProblem sempre devolve null hoje;
+  // mantido como o ponto único caso um dia se queira re-restringir por moeda).
   const addressProblem = draft.address ? addressCurrencyProblem(currency) : null;
   if (addressProblem) errors.address = addressProblem;
   else if (draft.address && !shipping.length) {
