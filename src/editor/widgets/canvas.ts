@@ -36,6 +36,7 @@
  * (setComponents com asDocument na primeira abertura da página).
  */
 import type { Editor } from "grapesjs";
+import { OVERLAY_HIDE_ROOT_ATTR, OVERLAY_TAG_ATTR } from "@/editor/grapes/overlay-hider";
 import { HIDDEN_HOST } from "@/lib/countdown-bar";
 import { PRIZE_SHOW_ATTR } from "@/lib/wheel";
 import { PRODUCT_NO_DEST_ATTR, PRODUCTS_WARN_ATTR } from "./products-content";
@@ -122,6 +123,12 @@ export const WIDGET_CANVAS_CSS = `
 [data-os-widget=wheel] [data-os-wh-coupon][hidden]{display:flex!important}
 ${BAR},${SH_STICKY}{margin-bottom:34px!important}
 [data-os-widget=product-gallery] .os-pg-thumb:only-child{display:block!important}
+/* "Esconder sobreposições" (botão da barra): tira do caminho tudo que flutua por
+   cima — o que o overlay-hider marca (fixo/sticky/modal, inclusive de clonadas) e
+   o pop-up de saída / notificação do próprio Offer Studio. Vence o os-original. */
+:root[${OVERLAY_HIDE_ROOT_ATTR}] [${OVERLAY_TAG_ATTR}],
+:root[${OVERLAY_HIDE_ROOT_ATTR}] [data-os-widget=exit-popup],
+:root[${OVERLAY_HIDE_ROOT_ATTR}] [data-os-widget=sales-notification]{display:none!important}
 }
 ${BAR},${SH_STICKY}{position:relative;outline:2px dashed #8b5cf6;outline-offset:-2px}
 ${BAR}::after,${SH_STICKY}::after{

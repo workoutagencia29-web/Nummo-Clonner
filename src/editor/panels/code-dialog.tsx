@@ -54,53 +54,20 @@ import { CODE_CATEGORIES, CODE_CATEGORY_LABEL, type CodeCategoryId } from "@/lib
 import { cn } from "@/lib/utils";
 import { getPageCodeAction, savePageCodeAction } from "@/server/actions/page-code";
 import type { EditorDialogProps } from "../editor-app";
+import {
+  asSingleUndoStep,
+  dupResolver,
+  keepReferencedMarks,
+  parseFragment,
+  toEditorHtml,
+  toReadableHtml,
+} from "../grapes/element-html";
 
-// ─── HTML: scripts e on* inertes no editor ───────────────────────────────────
-// Mesma convenção de src/lib/editor-html.ts: no editor, <script> vira <os-script>
-// (inerte), <noscript> vira <os-noscript> (conteúdo como texto), on* vira
-// data-os-on-* e valores "javascript:…" viram data-os-js-*. Aqui mostramos a
-// versão "de verdade" e convertemos de volta ao aplicar — o que se vê é o que
-// sai na página. (Sem importar editor-html: ele puxa cheerio e css-tree.)
-
-const OS_SCRIPT = "os-script";
-const OS_NOSCRIPT = "os-noscript";
-const ATTRS_ATTR = "data-os-attrs";
-const ON_PREFIX = "data-os-on-";
-const ON_ATTR = /^on[a-z]+$/i;
-const JS_PREFIX = "data-os-js-";
-/** Mesmo teste do GrapesJS (allowUnsafeAttrValue: false), que apagaria o atributo. */
-const JS_VALUE = "javascript:";
-
-function storedAttrs(el: Element): Record<string, unknown> {
-  try {
-    const value = JSON.parse(el.getAttribute(ATTRS_ATTR) ?? "{}") as unknown;
-    return value && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
-  } catch {
-    return {};
-  }
-}
-
-function copyAttrs(target: Element, attrs: Record<string, unknown>) {
-  for (const [name, value] of Object.entries(attrs)) {
-    try {
-      target.setAttribute(name, String(value));
-    } catch {
-      // nome de atributo inválido: ignora
-    }
-  }
-}
-
-function attrsOf(el: Element) {
-  const attrs: Record<string, string> = {};
-  for (const attr of Array.from(el.attributes)) attrs[attr.name] = attr.value;
-  return attrs;
-}
-
-function parseFragment(html: string, doc: Document) {
-  const template = doc.createElement("template");
-  template.innerHTML = html;
-  return template;
-}
+// HTML de um elemento ↔ HTML real: toReadableHtml/toEditorHtml e os ajudantes
+// (parseFragment, dupResolver, keepReferencedMarks, asSingleUndoStep) moram em
+// ../grapes/element-html (sem React nem servidor, para o clipboard entre páginas
+// e os testes usarem). Reexportados abaixo para quem importa deste módulo.
+export { toEditorHtml, toReadableHtml };
 
 const ELEMENT_NODE = 1;
 const TEXT_NODE = 3;
@@ -141,168 +108,6 @@ export function formatHtml(html: string, doc: Document = document): string {
   };
   for (const node of top) render(node, 0);
   return lines.join("\n");
-}
-
-// Ids repetidos (src/lib/dup-ids.ts): no editor, o repetido tem um id próprio
-// do editor e o id da página em data-os-dup-id. Aqui ele aparece com o id da
-// página (como no canvas e na página final) e com a marca data-os-eid que o
-// separa do primeiro — a que já veio na página ou o id do editor. Ao aplicar, a
-// marca leva de volta ao mesmo elemento (com o estilo dele).
-
-/** Id do editor do repetido de `pageId` com a marca `eid`, ou null. */
-export type DupResolver = (pageId: string, eid: string) => string | null;
-
-function dupResolver(editor: Editor): DupResolver {
-  const byKey = new Map<string, string>();
-  const walk = (component: Component) => {
-    const attrs = (component.get("attributes") ?? {}) as Record<string, unknown>;
-    const dup = attrs[DUP_ID_ATTR];
-    if (typeof dup === "string" && dup) {
-      const own = attrs[EID_ATTR];
-      byKey.set(`${dup}\n${typeof own === "string" && own ? own : component.getId()}`, component.getId());
-    }
-    for (const child of component.components().models) walk(child);
-  };
-  const wrapper = editor.getWrapper();
-  if (wrapper) walk(wrapper);
-  return (pageId, eid) => byKey.get(`${pageId}\n${eid}`) ?? null;
-}
-
-/** Seletores de atributo da marca (`[data-os-eid="…"]`, qualquer comparação) num texto CSS. */
-const EID_SELECTOR = new RegExp(`\\[\\s*${EID_ATTR}(?![\\w-])[^\\]]*\\]`, "gi");
-
-/**
- * A marca de um repetido sem marca própria é o id dele no editor: o canvas a
- * desenha (e esta janela a mostra), mas ela não vai para a página final e muda
- * a cada abertura. Quando uma regra do CSS da página mira essa marca, ela passa
- * a ser do elemento (atributo data-os-eid): vai para a página final e continua
- * a mesma ao reabrir — a regra vale igual no canvas, na página e depois.
- */
-function keepReferencedMarks(editor: Editor) {
-  const selectors = (editor.getCss({ avoidProtected: true }) ?? "").match(EID_SELECTOR);
-  if (!selectors?.length) return;
-  const probe = document.createElement("i");
-  const referenced = (mark: string) => {
-    probe.setAttribute(EID_ATTR, mark);
-    return selectors.some((selector) => {
-      try {
-        return probe.matches(selector);
-      } catch {
-        return false;
-      }
-    });
-  };
-  const walk = (component: Component) => {
-    const attrs = (component.get("attributes") ?? {}) as Record<string, unknown>;
-    const dup = attrs[DUP_ID_ATTR];
-    const own = attrs[EID_ATTR];
-    if (typeof dup === "string" && dup && !(typeof own === "string" && own) && referenced(component.getId())) {
-      component.addAttributes({ [EID_ATTR]: component.getId() });
-    }
-    for (const child of component.components().models) walk(child);
-  };
-  const wrapper = editor.getWrapper();
-  if (wrapper) walk(wrapper);
-}
-
-/** HTML do editor → HTML real (scripts, noscript, on*, javascript: e ids repetidos de volta), para mostrar ao usuário. */
-export function toReadableHtml(html: string, doc: Document = document): string {
-  const template = parseFragment(html, doc);
-  for (const el of Array.from(template.content.querySelectorAll(`[${DUP_ID_ATTR}][id]`))) {
-    const pageId = el.getAttribute(DUP_ID_ATTR);
-    const editorId = el.getAttribute("id");
-    if (!pageId || !editorId) continue;
-    if (!el.getAttribute(EID_ATTR)) el.setAttribute(EID_ATTR, editorId);
-    el.setAttribute("id", pageId);
-    el.removeAttribute(DUP_ID_ATTR);
-  }
-  // Documento inerte do <template>: ali o conteúdo de um <noscript> vira
-  // elementos (e sai como HTML, não como texto escapado).
-  const inertDoc = template.content.ownerDocument ?? doc;
-  for (const el of Array.from(template.content.querySelectorAll(OS_SCRIPT))) {
-    const script = doc.createElement("script");
-    copyAttrs(script, storedAttrs(el));
-    script.textContent = el.textContent ?? "";
-    el.replaceWith(script);
-  }
-  for (const el of Array.from(template.content.querySelectorAll(OS_NOSCRIPT))) {
-    const noscript = inertDoc.createElement("noscript");
-    copyAttrs(noscript, storedAttrs(el));
-    noscript.innerHTML = el.textContent ?? "";
-    el.replaceWith(noscript);
-  }
-  for (const el of Array.from(template.content.querySelectorAll("*"))) {
-    // Primeiro os valores javascript: (podem estar num data-os-on-*), depois os on*.
-    for (const attr of Array.from(el.attributes)) {
-      if (!attr.name.startsWith(JS_PREFIX)) continue;
-      const target = attr.name.slice(JS_PREFIX.length);
-      // Mesma regra do salvar: um valor novo posto no editor vence o guardado.
-      if (target && !el.hasAttribute(target)) {
-        try {
-          el.setAttribute(target, `${JS_VALUE}${attr.value}`);
-        } catch {
-          // nome de atributo inválido: ignora
-        }
-      }
-      el.removeAttribute(attr.name);
-    }
-    for (const attr of Array.from(el.attributes)) {
-      if (!attr.name.startsWith(ON_PREFIX)) continue;
-      el.setAttribute(`on${attr.name.slice(ON_PREFIX.length)}`, attr.value);
-      el.removeAttribute(attr.name);
-    }
-  }
-  return template.innerHTML;
-}
-
-/**
- * HTML digitado → HTML seguro para o editor (nada executa no painel). Com
- * `resolveDup`, os ids repetidos mostrados por toReadableHtml voltam a ser os
- * elementos do editor (id do editor + data-os-dup-id).
- */
-export function toEditorHtml(html: string, doc: Document = document, resolveDup?: DupResolver): string {
-  const template = parseFragment(html, doc);
-  for (const el of resolveDup ? Array.from(template.content.querySelectorAll(`[${EID_ATTR}][id]`)) : []) {
-    const pageId = el.getAttribute("id") ?? "";
-    const eid = el.getAttribute(EID_ATTR) ?? "";
-    const editorId = resolveDup?.(pageId, eid);
-    if (!editorId || el.hasAttribute(DUP_ID_ATTR)) continue;
-    el.setAttribute("id", editorId);
-    el.setAttribute(DUP_ID_ATTR, pageId);
-    // A marca que era só o id do editor não é do elemento.
-    if (eid === editorId) el.removeAttribute(EID_ATTR);
-  }
-  for (const script of Array.from(template.content.querySelectorAll("script"))) {
-    const inert = doc.createElement(OS_SCRIPT);
-    inert.setAttribute(ATTRS_ATTR, JSON.stringify(attrsOf(script)));
-    inert.setAttribute("hidden", "");
-    inert.textContent = script.textContent ?? "";
-    script.replaceWith(inert);
-  }
-  // <noscript>: o editor leria o conteúdo como página (um <style> ali viraria
-  // CSS de todo visitante). Guardado como texto, volta igual ao salvar.
-  for (const noscript of Array.from(template.content.querySelectorAll("noscript"))) {
-    const inert = doc.createElement(OS_NOSCRIPT);
-    inert.setAttribute(ATTRS_ATTR, JSON.stringify(attrsOf(noscript)));
-    inert.setAttribute("hidden", "");
-    inert.textContent = noscript.innerHTML;
-    noscript.replaceWith(inert);
-  }
-  for (const el of Array.from(template.content.querySelectorAll("*"))) {
-    for (const attr of Array.from(el.attributes)) {
-      if (!ON_ATTR.test(attr.name)) continue;
-      el.setAttribute(`${ON_PREFIX}${attr.name.slice(2).toLowerCase()}`, attr.value);
-      el.removeAttribute(attr.name);
-    }
-    for (const attr of Array.from(el.attributes)) {
-      // O GrapesJS apagaria o atributo inteiro (ex.: href="javascript:void(0)",
-      // onclick="javascript:abrir()"): o valor vai sem o prefixo para data-os-js-*.
-      if (!attr.value.startsWith(JS_VALUE) || attr.name.startsWith(JS_PREFIX)) continue;
-      el.setAttribute(`${JS_PREFIX}${attr.name}`, attr.value.slice(JS_VALUE.length));
-      el.removeAttribute(attr.name);
-    }
-  }
-  return template.innerHTML;
 }
 
 /** HTML que o usuário vê/edita para o elemento (a página inteira, se for o corpo). */
@@ -411,19 +216,6 @@ function replaceInParent(editor: Editor, component: Component, html: string): Co
  * Roda uma troca grande como UM passo de desfazer: enquanto roda, o histórico
  * não tem limite (senão o começo da própria troca seria descartado).
  */
-function asSingleUndoStep<T>(editor: Editor, run: () => T): T {
-  const undo = editor.UndoManager.getInstance() as
-    | { get(key: string): unknown; set(key: string, value: unknown): void }
-    | undefined;
-  const max = undo?.get("maximumStackLength");
-  undo?.set("maximumStackLength", Number.POSITIVE_INFINITY);
-  try {
-    return run();
-  } finally {
-    undo?.set("maximumStackLength", max);
-  }
-}
-
 /**
  * Troca o elemento pelo HTML digitado, numa única ação de desfazer. Elementos
  * com o mesmo id são atualizados (não recriados): ids, estilos (#id), âncoras

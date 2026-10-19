@@ -12,6 +12,7 @@
  * - e, para Duplicar, se o CSS original mira um id (#oferta{…}).
  */
 
+import { DYNAMIC_PSEUDO, selectorParts } from "@/editor/widgets/dom";
 import { mediaOrder, unescapeIdent } from "@/lib/css-keep";
 
 /** Atributo da folha base (BASE_CSS_ATTR em src/lib/editor-html.ts, que é do servidor). */
@@ -157,6 +158,66 @@ function matches(el: Element, rule: CSSStyleRule) {
   } catch {
     return false;
   }
+}
+
+/**
+ * Para COPIAR um elemento para outra página: as regras do CSS ORIGINAL (folha
+ * base `@layer os-original`) que estilizam a subárvore, para o visual ir junto.
+ * Diferente de `componentCss` (que pega só as EDIÇÕES, regras `#id` do editor):
+ * aqui pegamos as regras de CLASSE/ID/atributo do site clonado que miram o
+ * elemento ou um descendente. Só seletores específicos (que têm `.`, `#` ou
+ * `[`) — nunca resets globais (`a`, `div`, `*`), que bagunçariam a página de
+ * destino. Preserva @media/@supports. Devolve uma string de CSS (ou "").
+ */
+export function originalComponentCss(el: Element, doc: Document): string {
+  const base = doc.querySelector<HTMLElement>(`[${BASE_CSS_ATTR}]`) as HTMLLinkElement | HTMLStyleElement | null;
+  const sheet = base?.sheet ?? null;
+  if (!sheet) return "";
+  const blocks: string[] = [];
+  const keptSelector = (selectorText: string): string => {
+    const kept: string[] = [];
+    for (const part of selectorParts(selectorText)) {
+      const bare = part.replace(DYNAMIC_PSEUDO, "").trim();
+      if (!bare || !/[.#[]/.test(bare)) continue; // só classe/id/atributo (sem resets globais a/div/*)
+      try {
+        if (el.matches(bare) || el.querySelector(bare)) kept.push(part.trim());
+      } catch {
+        // seletor que o navegador não entende: ignora
+      }
+    }
+    return kept.join(", ");
+  };
+  const wrap = (media: string[], supports: string[], inner: string): string => {
+    let out = inner;
+    for (const s of supports) out = `@supports ${s}{${out}}`;
+    for (const m of media) out = `@media ${m}{${out}}`;
+    return out;
+  };
+  const visit = (list: CSSRuleList | null, media: string[], supports: string[], depth: number) => {
+    if (!list || depth > 8) return;
+    for (const rule of Array.from(list)) {
+      const r = rule as AnyRule;
+      if ("selectorText" in r && "style" in r) {
+        const styleRule = r as unknown as CSSStyleRule;
+        const sel = keptSelector(styleRule.selectorText);
+        const body = styleRule.style.cssText;
+        if (sel && body) blocks.push(wrap(media, supports, `${sel}{${body}}`));
+      } else if ("styleSheet" in r) {
+        const mediaText = String((r.media as MediaList | undefined)?.mediaText ?? "").trim();
+        const next = mediaText && mediaText !== "all" ? [...media, mediaText] : media;
+        visit(rulesOf(r.styleSheet as CSSStyleSheet), next, supports, depth + 1);
+      } else if ("media" in r && "cssRules" in r) {
+        const mediaText = String((r.media as MediaList).mediaText ?? "").trim();
+        visit(r.cssRules as CSSRuleList, mediaText ? [...media, mediaText] : media, supports, depth + 1);
+      } else if ("conditionText" in r && "cssRules" in r && !("containerName" in r)) {
+        visit(r.cssRules as CSSRuleList, media, [...supports, String(r.conditionText)], depth + 1);
+      } else if ("cssRules" in r && "name" in r && !("containerName" in r) && !("findRule" in r)) {
+        visit(r.cssRules as CSSRuleList, media, supports, depth + 1); // @layer os-original
+      }
+    }
+  };
+  visit(rulesOf(sheet), [], [], 0);
+  return blocks.join("\n");
 }
 
 function supported(win: Window, conditions: string[]) {

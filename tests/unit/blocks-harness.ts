@@ -16,6 +16,8 @@ import type { OsBlock } from "@/editor/blocks";
 import type { registerDynamicTraits } from "@/editor/grapes/components";
 import type { applyLegacyRepair } from "@/editor/grapes/legacy-repair";
 import type { installNewLinkOption } from "@/editor/grapes/new-link";
+import type { createOverlayHider } from "@/editor/grapes/overlay-hider";
+import type { copySelection, installPageClipboard, pasteFromClipboard } from "@/editor/grapes/page-clipboard";
 import type { createEditor, importPageHtml } from "@/editor/grapes/setup";
 import type { setWidgetContext } from "@/editor/widgets";
 import type { bindQuizLink } from "@/editor/widgets/quiz";
@@ -38,6 +40,10 @@ export interface EditorWindow {
     applyLegacyRepair: typeof applyLegacyRepair;
     bindQuizLink: typeof bindQuizLink;
     bindWheelLink: typeof bindWheelLink;
+    createOverlayHider: typeof createOverlayHider;
+    copySelection: typeof copySelection;
+    pasteFromClipboard: typeof pasteFromClipboard;
+    installPageClipboard: typeof installPageClipboard;
     ALL_BLOCKS: OsBlock[];
   };
 }
@@ -57,7 +63,9 @@ export function editorBundle(): Promise<string> {
         import { applyLegacyRepair } from "@/editor/grapes/legacy-repair";
         import { bindQuizLink } from "@/editor/widgets/quiz";
         import { bindWheelLink } from "@/editor/widgets/wheel";
-        window.OS = { createEditor, importPageHtml, registerDynamicTraits, setWidgetContext, installNewLinkOption, applyLegacyRepair, bindQuizLink, bindWheelLink, ALL_BLOCKS };
+        import { createOverlayHider } from "@/editor/grapes/overlay-hider";
+        import { copySelection, installPageClipboard, pasteFromClipboard } from "@/editor/grapes/page-clipboard";
+        window.OS = { createEditor, importPageHtml, registerDynamicTraits, setWidgetContext, installNewLinkOption, applyLegacyRepair, bindQuizLink, bindWheelLink, createOverlayHider, copySelection, pasteFromClipboard, installPageClipboard, ALL_BLOCKS };
       `,
       resolveDir: process.cwd(),
       loader: "ts",

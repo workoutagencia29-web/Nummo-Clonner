@@ -15,6 +15,7 @@ import {
   FileTextIcon,
   HistoryIcon,
   InfoIcon,
+  LayersIcon,
   LinkIcon,
   MonitorIcon,
   MonitorSmartphoneIcon,
@@ -97,6 +98,8 @@ import { STATE_LABELS } from "./grapes/i18n";
 import { applyLegacyRepair } from "./grapes/legacy-repair";
 import { enclosingClickable } from "./grapes/link-select";
 import { installNewLinkOption, type NewLinkRequest } from "./grapes/new-link";
+import { createOverlayHider, type OverlayHider } from "./grapes/overlay-hider";
+import { installPageClipboard } from "./grapes/page-clipboard";
 import { installProductPages, type ProductPagesRequest } from "./grapes/product-pages";
 import { createEditor, DEVICES, type DeviceId, deviceWidthPx, importPageHtml, showLayers } from "./grapes/setup";
 import { skipPhoneValues } from "./grapes/style-cascade";
@@ -1039,6 +1042,7 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
     return panel ? guardDeleteKeys(panel) : undefined;
   }, []);
   const editorRef = useRef<Editor | null>(null);
+  const overlayHiderRef = useRef<OverlayHider | null>(null);
 
   const [editor, setEditor] = useState<Editor | null>(null);
   const [device, setDevice] = useState<DeviceId>(payload.device === "MOBILE" ? "mobile" : "desktop");
@@ -1047,6 +1051,8 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
   const [canUndo, setCanUndo] = useState(false);
   const [canRedo, setCanRedo] = useState(false);
   const [previewing, setPreviewing] = useState(false);
+  /** "Esconder sobreposições": tira do caminho, só no editor, tudo que flutua por cima da página. */
+  const [hideOverlays, setHideOverlays] = useState(false);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewKey, setPreviewKey] = useState(0);
   const [dialog, setDialog] = useState<"code" | "find" | "links" | "versions" | null>(null);
@@ -1301,6 +1307,9 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
       payload.project,
     );
     editorRef.current = ed;
+    overlayHiderRef.current = createOverlayHider(ed);
+    setHideOverlays(false); // editor novo (ex.: troca de versão A/B) nasce com as sobreposições à mostra.
+    installPageClipboard(ed); // Ctrl+C numa página / Ctrl+V noutra (clipboard entre páginas).
     // Layout do computador com layout do celular separado: o celular vê o outro documento.
     if (payload.device === "DESKTOP" && payload.documents.some((d) => d.device === "MOBILE")) skipPhoneValues(ed);
     installTextFlushRedraw(ed);
@@ -1458,6 +1467,8 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
       disposeProductPages();
       disposeAssets();
       disposeVideo();
+      overlayHiderRef.current?.disable();
+      overlayHiderRef.current = null;
       ed.destroy();
       editorRef.current = null;
       // Os painéis nativos ficam nos nossos contêineres: limpa para não duplicar.
@@ -1615,6 +1626,19 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
     if (!(await saveForPreview())) return;
     const url = await ensurePreviewUrl();
     if (url) setPreviewing(true);
+  }
+
+  /** Esconde/mostra, só no editor, o que flutua por cima da página (pop-ups, cookies, pagamento…). */
+  function toggleHideOverlays() {
+    const hider = overlayHiderRef.current;
+    if (!hider) return;
+    if (hider.on) {
+      hider.disable();
+      setHideOverlays(false);
+    } else {
+      hider.enable();
+      setHideOverlays(true);
+    }
   }
 
   async function openAsVisitor() {
@@ -1828,6 +1852,18 @@ function EditorWorkspace({ payload }: { payload: EditorPayload }) {
           disabled={!editor}
         >
           <HistoryIcon />
+        </IconButton>
+        <IconButton
+          label={
+            hideOverlays
+              ? "Mostrar as sobreposições de novo"
+              : "Esconder o que fica na frente (pop-ups, cookies, pagamento…) para editar a página"
+          }
+          onClick={toggleHideOverlays}
+          disabled={!editor || previewing}
+          active={hideOverlays}
+        >
+          <LayersIcon />
         </IconButton>
         <Tooltip>
           <TooltipTrigger asChild>

@@ -60,11 +60,11 @@ export function attr(c: Component, name: string): string {
 }
 
 /** Estados (":hover"…) e pseudoelementos: saem do seletor para saber a que elemento a regra se aplica. */
-const DYNAMIC_PSEUDO =
+export const DYNAMIC_PSEUDO =
   /::?(?:hover|focus-visible|focus-within|focus|active|visited|link|target|checked|disabled|enabled|placeholder-shown|before|after|placeholder|selection|marker|first-line|first-letter|-webkit-[\w-]+|-moz-[\w-]+)(?![\w-])/gi;
 
 /** Partes de uma lista de seletores ("a, b:is(c, d)" → "a", "b:is(c, d)"). */
-function selectorParts(text: string): string[] {
+export function selectorParts(text: string): string[] {
   const parts: string[] = [];
   let depth = 0;
   let start = 0;
