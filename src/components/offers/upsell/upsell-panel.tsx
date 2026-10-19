@@ -1,6 +1,6 @@
 "use client";
 
-import { PlusIcon, Trash2Icon } from "lucide-react";
+import { CopyIcon, PlusIcon, Trash2Icon } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Panel, SaveBar, SectionHeading, useDraft } from "@/components/offers/tracking/form-kit";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ import {
 } from "@/lib/upsell";
 import { createUpsellPageAction, saveUpsellAction } from "@/server/actions/upsell";
 import type { UpsellPageOption, UpsellPanel as UpsellPanelData } from "@/server/services/upsell";
+import { UpsellApplyDialog } from "./upsell-apply-dialog";
 
 /** "— nenhum —" num Select (o Radix não aceita value vazio). */
 const NONE = "__none__";
@@ -44,6 +45,7 @@ export function UpsellPanel({ offerId, initial }: { offerId: string; initial: Up
   // tela, então uma atualização presa a um `flow` antigo se perderia.
   const updateFlow = (fn: (f: UpsellFlow) => UpsellFlow) => setDraft((d) => ({ ...d, flow: fn(d.flow) }));
 
+  const [applyOpen, setApplyOpen] = useState(false);
   // Páginas criadas aqui agora aparecem na hora (antes mesmo da tela recarregar),
   // juntas com as da oferta e sem repetir (quando o recarregar as traz também).
   const [created, setCreated] = useState<UpsellPageOption[]>([]);
@@ -220,11 +222,27 @@ export function UpsellPanel({ offerId, initial }: { offerId: string; initial: Up
                 ))}
               </ul>
             )}
+
+            {initial.flow.steps.length > 0 && (
+              <div className="mt-6 flex flex-wrap items-center gap-3 rounded-lg border bg-muted/30 p-4">
+                <div className="min-w-0 flex-1 basis-64">
+                  <p className="font-medium text-sm">Montou o upsell? Use ele em outras ofertas.</p>
+                  <p className="text-muted-foreground text-xs">
+                    Copia as páginas, os produtos e as ligações para as ofertas que você escolher (mesma moeda).
+                    {dirty && " Salve as alterações primeiro."}
+                  </p>
+                </div>
+                <Button type="button" variant="outline" disabled={dirty} onClick={() => setApplyOpen(true)}>
+                  <CopyIcon /> Usar em outras ofertas
+                </Button>
+              </div>
+            )}
           </>
         )}
 
         <SaveBar dirty={dirty} pending={pending} onReset={() => reset()} saveLabel="Salvar upsell" />
       </form>
+      <UpsellApplyDialog open={applyOpen} onOpenChange={setApplyOpen} offerId={offerId} />
     </Panel>
   );
 }

@@ -9,6 +9,7 @@ import { z } from "zod";
 import type { UpsellFlow } from "@/lib/upsell";
 import { protectedAction } from "@/server/action";
 import { createUpsellPage, saveUpsellFlow } from "@/server/services/upsell";
+import { applyUpsellToOffers, offersForUpsellApply } from "@/server/services/upsell-apply";
 
 const offerId = z.string().min(1, "Oferta inválida.").max(40, "Oferta inválida.");
 const nullable = z
@@ -49,4 +50,22 @@ export const saveUpsellAction = protectedAction(
 export const createUpsellPageAction = protectedAction(
   z.object({ offerId, kind: z.enum(["UPSELL", "DOWNSELL", "THANK_YOU"]) }),
   async ({ offerId: id, kind }) => createUpsellPage(id, kind),
+);
+
+/** Lista as ofertas (mesma moeda) que podem receber este upsell. */
+export const offersForUpsellApplyAction = protectedAction(z.object({ offerId }), async ({ offerId: id }) =>
+  offersForUpsellApply(id),
+);
+
+/**
+ * Aplica (copia) este upsell nas ofertas escolhidas. Revalida a tela (as ofertas
+ * de destino ganham páginas e produtos novos). Devolve o que foi aplicado/pulado.
+ */
+export const applyUpsellAction = protectedAction(
+  z.object({ offerId, targetOfferIds: z.array(offerId).min(1, "Escolha ao menos uma oferta.").max(200) }),
+  async ({ offerId: id, targetOfferIds }) => {
+    const result = await applyUpsellToOffers(id, targetOfferIds);
+    revalidatePath("/", "layout");
+    return result;
+  },
 );

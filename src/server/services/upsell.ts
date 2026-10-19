@@ -6,7 +6,7 @@
  * recebe o os-page da próxima. Regras puras em src/lib/upsell.ts.
  */
 import * as cheerio from "cheerio";
-import { prisma } from "@/lib/db";
+import { atomically, type Db, prisma } from "@/lib/db";
 import { UserError } from "@/lib/errors";
 import { internalLink } from "@/lib/internal-links";
 import {
@@ -155,14 +155,14 @@ export function wireUpsellButtons(html: string, simLinkKey: string | null, decli
  * - páginas de upsell/downsell: botão SIM = checkout da etapa, "Não" = próxima.
  * Salva mesmo incompleto (os pendentes aparecem no painel/Próximos passos).
  */
-export async function saveUpsellFlow(offerId: string, flow: UpsellFlow): Promise<void> {
-  const offer = await prisma.offer.findUnique({ where: { id: offerId }, select: { id: true } });
+export async function saveUpsellFlow(offerId: string, flow: UpsellFlow, db: Db = prisma): Promise<void> {
+  const offer = await db.offer.findUnique({ where: { id: offerId }, select: { id: true } });
   if (!offer) throw new UserError("Oferta não encontrada.");
 
   // Páginas e links da oferta (para conferir que o que o funil cita é desta oferta).
   const [pages, links] = await Promise.all([
-    prisma.page.findMany({ where: { offerId }, select: { id: true } }),
-    prisma.offerLink.findMany({
+    db.page.findMany({ where: { offerId }, select: { id: true } }),
+    db.offerLink.findMany({
       where: { offerId },
       select: { id: true, key: true, payment: { select: { linkId: true } }, checkout: { select: { linkId: true } } },
     }),
@@ -192,33 +192,37 @@ export async function saveUpsellFlow(offerId: string, flow: UpsellFlow): Promise
   }
   const declineOf = new Map(routing.steps.map((r) => [r.stepId, r.declinePageId]));
 
-  await prisma.$transaction(async (tx) => {
-    await tx.offer.update({ where: { id: offerId }, data: { upsell: clean as object } });
+  await atomically(
+    db,
+    async (tx) => {
+      await tx.offer.update({ where: { id: offerId }, data: { upsell: clean as object } });
 
-    // 1) Encadeia o thankYouPageId dos produtos (o redirect pós-pagamento).
-    for (const [key, pageId] of thankYouOf) {
-      const link = linkByKey.get(key);
-      if (!link) continue;
-      if (link.payment)
-        await tx.paymentProduct.update({ where: { linkId: link.id }, data: { thankYouPageId: pageId } });
-      if (link.checkout)
-        await tx.checkoutProduct.update({ where: { linkId: link.id }, data: { thankYouPageId: pageId } });
-    }
-
-    // 2) Liga os botões SIM/Não nas páginas de upsell/downsell (todas as variações/dispositivos).
-    for (const step of clean.steps) {
-      if (!step.pageId) continue;
-      const decline = declineOf.get(step.id) ?? clean.thankYouPageId;
-      const docs = await tx.pageDocument.findMany({
-        where: { variant: { pageId: step.pageId } },
-        select: { id: true, html: true, editableHtml: true },
-      });
-      for (const doc of docs) {
-        const data: { html?: string; editableHtml?: string } = {};
-        if (doc.html) data.html = wireUpsellButtons(doc.html, step.linkKey, decline);
-        if (doc.editableHtml) data.editableHtml = wireUpsellButtons(doc.editableHtml, step.linkKey, decline);
-        if (data.html || data.editableHtml) await tx.pageDocument.update({ where: { id: doc.id }, data });
+      // 1) Encadeia o thankYouPageId dos produtos (o redirect pós-pagamento).
+      for (const [key, pageId] of thankYouOf) {
+        const link = linkByKey.get(key);
+        if (!link) continue;
+        if (link.payment)
+          await tx.paymentProduct.update({ where: { linkId: link.id }, data: { thankYouPageId: pageId } });
+        if (link.checkout)
+          await tx.checkoutProduct.update({ where: { linkId: link.id }, data: { thankYouPageId: pageId } });
       }
-    }
-  });
+
+      // 2) Liga os botões SIM/Não nas páginas de upsell/downsell (todas as variações/dispositivos).
+      for (const step of clean.steps) {
+        if (!step.pageId) continue;
+        const decline = declineOf.get(step.id) ?? clean.thankYouPageId;
+        const docs = await tx.pageDocument.findMany({
+          where: { variant: { pageId: step.pageId } },
+          select: { id: true, html: true, editableHtml: true },
+        });
+        for (const doc of docs) {
+          const data: { html?: string; editableHtml?: string } = {};
+          if (doc.html) data.html = wireUpsellButtons(doc.html, step.linkKey, decline);
+          if (doc.editableHtml) data.editableHtml = wireUpsellButtons(doc.editableHtml, step.linkKey, decline);
+          if (data.html || data.editableHtml) await tx.pageDocument.update({ where: { id: doc.id }, data });
+        }
+      }
+    },
+    { timeout: 60_000 },
+  );
 }

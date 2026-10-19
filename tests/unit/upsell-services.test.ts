@@ -15,6 +15,7 @@ import {
   upsellPanel,
   wireUpsellButtons,
 } from "@/server/services/upsell";
+import { applyUpsellToOffers, offersForUpsellApply } from "@/server/services/upsell-apply";
 import { resetDatabase } from "../setup/per-file";
 
 beforeEach(resetDatabase);
@@ -220,5 +221,104 @@ describe("saveUpsellFlow", () => {
     const ids = new Set(copyPages.map((p) => p.id));
     expect(ids.has(copyFlow.steps[0].pageId as string)).toBe(true);
     expect(ids.has(copyFlow.thankYouPageId as string)).toBe(true);
+  });
+});
+
+describe("applyUpsellToOffers (usar o upsell em outras ofertas)", () => {
+  /** Oferta de origem com um upsell montado (produto principal + 1 upsell + obrigado). */
+  async function sourceWithUpsell(currency: "BRL" | "MXN" = "BRL") {
+    const { id } = await createOffer({ name: "Fonte", currency });
+    const [main, up] = await Promise.all([
+      checkoutLink(id, "principal", "Produto principal"),
+      checkoutLink(id, "up1", "Upsell E-book"),
+    ]);
+    const [upPage, obg] = await Promise.all([
+      upsellPage(id, "Upsell", "UPSELL"),
+      upsellPage(id, "Obrigado", "THANK_YOU"),
+    ]);
+    await saveUpsellFlow(id, {
+      startLinkKey: main.key,
+      thankYouPageId: obg.id,
+      steps: [{ id: "s1", kind: "UPSELL", pageId: upPage.id, linkKey: up.key }],
+    });
+    return { id, upPageId: upPage.id, obgId: obg.id };
+  }
+
+  it("copia as páginas e os produtos da etapa, liga tudo e usa o produto principal do DESTINO", async () => {
+    const source = await sourceWithUpsell();
+    const target = await createOffer({ name: "Destino", currency: "BRL" });
+    const targetMain = await checkoutLink(target.id, "principal", "Produto do destino");
+
+    const res = await applyUpsellToOffers(source.id, [target.id]);
+    expect(res.applied).toHaveLength(1);
+    expect(res.skipped).toHaveLength(0);
+
+    const flow = await getUpsellFlow(target.id);
+    expect(flow.steps).toHaveLength(1);
+    expect(flow.startLinkKey).toBe(targetMain.key); // o principal é o do destino, não o da fonte
+    // A página da etapa e a de obrigado foram COPIADAS (ids novos, no destino).
+    expect(flow.steps[0].pageId).not.toBe(source.upPageId);
+    const pageIds = new Set((await prisma.page.findMany({ where: { offerId: target.id } })).map((p) => p.id));
+    expect(pageIds.has(flow.steps[0].pageId as string)).toBe(true);
+    expect(pageIds.has(flow.thankYouPageId as string)).toBe(true);
+    // O produto da etapa foi copiado (link novo no destino, com produto salvo).
+    const link = await prisma.offerLink.findFirstOrThrow({
+      where: { offerId: target.id, key: flow.steps[0].linkKey as string },
+      include: { checkout: true },
+    });
+    expect(link.checkout).not.toBeNull();
+    // A chave do gateway NÃO foi copiada.
+    expect(await prisma.paymentGateway.count({ where: { offerId: target.id } })).toBe(0);
+    // Os botões SIM/Não da página copiada foram ligados.
+    const html =
+      (await prisma.pageDocument.findFirstOrThrow({ where: { variant: { pageId: flow.steps[0].pageId as string } } }))
+        .html ?? "";
+    expect(html).toContain(`data-os-link="${flow.steps[0].linkKey}"`);
+    expect(html).toContain(`href="os-page:${flow.thankYouPageId}"`);
+    // O produto principal do destino passou a levar para a página de upsell (cadeia de obrigado).
+    const mainProduct = await prisma.checkoutProduct.findUniqueOrThrow({ where: { linkId: targetMain.id } });
+    expect(mainProduct.thankYouPageId).toBe(flow.steps[0].pageId);
+  });
+
+  it("reaplicar substitui (não duplica as páginas/produtos da etapa)", async () => {
+    const source = await sourceWithUpsell();
+    const target = await createOffer({ name: "Destino", currency: "BRL" });
+    await checkoutLink(target.id, "principal", "Produto do destino");
+
+    await applyUpsellToOffers(source.id, [target.id]);
+    const firstStepPage = (await getUpsellFlow(target.id)).steps[0].pageId;
+    const pagesAfter1 = await prisma.page.count({ where: { offerId: target.id } });
+    const linksAfter1 = await prisma.offerLink.count({ where: { offerId: target.id } });
+
+    await applyUpsellToOffers(source.id, [target.id]);
+    const pagesAfter2 = await prisma.page.count({ where: { offerId: target.id } });
+    const linksAfter2 = await prisma.offerLink.count({ where: { offerId: target.id } });
+    expect(pagesAfter2).toBe(pagesAfter1); // não acumulou páginas
+    expect(linksAfter2).toBe(linksAfter1); // nem links
+    // A página da etapa anterior foi trocada por uma nova.
+    expect((await getUpsellFlow(target.id)).steps[0].pageId).not.toBe(firstStepPage);
+  });
+
+  it("pula oferta de outra moeda", async () => {
+    const source = await sourceWithUpsell("BRL");
+    const mxn = await createOffer({ name: "Peso", currency: "MXN" });
+    const res = await applyUpsellToOffers(source.id, [mxn.id]);
+    expect(res.applied).toHaveLength(0);
+    expect(res.skipped).toHaveLength(1);
+    expect(await getUpsellFlow(mxn.id)).toMatchObject({ steps: [] });
+  });
+
+  it("offersForUpsellApply lista só as ofertas da mesma moeda e marca quem já tem upsell", async () => {
+    const source = await sourceWithUpsell("BRL");
+    const sameA = await createOffer({ name: "Mesma A", currency: "BRL" });
+    await createOffer({ name: "Outra moeda", currency: "MXN" });
+    await applyUpsellToOffers(source.id, [sameA.id]); // sameA passa a ter upsell
+
+    const list = await offersForUpsellApply(source.id);
+    const names = list.map((o) => o.name);
+    expect(names).toContain("Mesma A");
+    expect(names).not.toContain("Outra moeda"); // moeda diferente
+    expect(names).not.toContain("Fonte"); // a própria não entra
+    expect(list.find((o) => o.name === "Mesma A")?.hasUpsell).toBe(true);
   });
 });
