@@ -289,6 +289,18 @@ function parseLength(value: string | undefined): number | null {
   return Number.isFinite(n) && n > 0 ? Math.round(n) : null;
 }
 
+/**
+ * Metadados de SVG tirados dos UPLOADS (modo estrito): quem é o dono, com qual
+ * programa foi feito, o nome do arquivo e o caminho dele. `<metadata>` carrega
+ * autor/licença (RDF/dc/cc); `<title>`/`<desc>` podem ter nome ou "feito por…";
+ * os atributos/elementos de editor (Inkscape/Sodipodi) trazem `docname` (o nome
+ * do arquivo) e `export-filename` (um caminho que pode ter o nome de usuário).
+ * Em páginas CLONADAS (keepContent) nada disso é mexido — lá os metadados são do
+ * site copiado, não do dono da oferta, e o SVG limpo fica byte a byte igual.
+ */
+const META_SVG_ELEMENTS = new Set(["metadata", "title", "desc"]);
+const META_SVG_PREFIXES = new Set(["sodipodi", "inkscape", "dc", "cc", "rdf"]);
+
 export interface SanitizedSvg {
   svg: string;
   width: number | null;
@@ -351,7 +363,10 @@ export function sanitizeSvg(text: string, name = "imagem.svg", options: Sanitize
       ANIMATION_ELEMENTS.has(local) &&
       /^(?:on|href$)/.test(localName(el.attribs.attributeName ?? el.attribs.attributename ?? ""));
     const blocked = keep ? ACTIVE_ELEMENTS.has(local) : BLOCKED_ELEMENTS.has(local) || isHtml;
-    if (blocked || animatesDangerous) {
+    // Uploads (modo estrito): tira os metadados que identificam o dono — <metadata>,
+    // <title>, <desc> e qualquer elemento de editor (inkscape:, sodipodi:, rdf:…).
+    const metaElement = !keep && (META_SVG_ELEMENTS.has(local) || META_SVG_PREFIXES.has(prefix ?? ""));
+    if (blocked || animatesDangerous || metaElement) {
       $(el).remove();
       removed++;
       return;
@@ -359,12 +374,18 @@ export function sanitizeSvg(text: string, name = "imagem.svg", options: Sanitize
     for (const [attr, value] of Object.entries(el.attribs)) {
       const attrLocal = localName(attr);
       const v = compact(value);
+      // Atributos de editor (sodipodi:docname, inkscape:export-filename…) e as
+      // declarações xmlns deles: só nos uploads (modo estrito).
+      const metaAttr =
+        !keep &&
+        (META_SVG_PREFIXES.has(prefixOf(attr) ?? "") ||
+          (attr.toLowerCase().startsWith("xmlns:") && META_SVG_PREFIXES.has(attr.slice(6).toLowerCase())));
       const bad =
         attrLocal.startsWith("on") ||
         /(?:java|vb|live)script:/.test(v) ||
         (URL_ATTRIBUTES.has(attrLocal) && v.startsWith("data:") && !(keep ? IMAGE_DATA_URL : SAFE_DATA_URL).test(v)) ||
         (!keep && attrLocal === "style" && DANGEROUS_CSS.test(value));
-      if (bad) {
+      if (bad || metaAttr) {
         $(el).removeAttr(attr);
         removed++;
       }
@@ -444,8 +465,103 @@ function isPixelLimitError(err: unknown) {
 }
 
 /**
+ * Tira os metadados de um GIF animado (as extensões de COMENTÁRIO, de texto e de
+ * aplicação que NÃO sejam o laço NETSCAPE/ANIMEXTS), mantendo os quadros byte a
+ * byte — GIF não tem EXIF, essas extensões são o único lugar de metadado. Sem
+ * nada a tirar, devolve os MESMOS bytes. Qualquer coisa inesperada na estrutura
+ * do arquivo: devolve o original sem mexer (nunca corrompe). O GIF parado já
+ * vira WebP pelo sharp (que remove os metadados).
+ */
+export function stripGifMetadata(data: Uint8Array): Uint8Array {
+  const n = data.length;
+  // "GIF" + descritor de tela mínimo.
+  if (n < 13 || data[0] !== 0x47 || data[1] !== 0x49 || data[2] !== 0x46) return data;
+  const keep: Array<[number, number]> = [[0, 13]];
+  let p = 13;
+  const packed = data[10];
+  if (packed & 0x80) {
+    const gct = 3 * (1 << ((packed & 0x07) + 1));
+    if (p + gct > n) return data;
+    keep.push([p, p + gct]);
+    p += gct;
+  }
+  // Fim dos sub-blocos (tamanho-prefixados) a partir de `pos`; -1 se estourar o arquivo.
+  const subEnd = (pos: number): number => {
+    while (pos < n) {
+      const len = data[pos++];
+      if (len === 0) return pos;
+      pos += len;
+    }
+    return -1;
+  };
+  while (p < n) {
+    const marker = data[p];
+    if (marker === 0x3b) {
+      keep.push([p, p + 1]); // trailer
+      p = n;
+      break;
+    }
+    if (marker === 0x2c) {
+      // Descritor de imagem (10) + tabela local + 1 byte (LZW) + sub-blocos: mantém tudo.
+      if (p + 10 > n) return data;
+      let q = p + 10;
+      const imgPacked = data[p + 9];
+      if (imgPacked & 0x80) q += 3 * (1 << ((imgPacked & 0x07) + 1));
+      if (q >= n) return data;
+      const end = subEnd(q + 1);
+      if (end < 0) return data;
+      keep.push([p, end]);
+      p = end;
+      continue;
+    }
+    if (marker === 0x21) {
+      const label = data[p + 1];
+      if (label === 0xf9) {
+        // Controle gráfico (timing/transparência): mantém.
+        const end = subEnd(p + 2);
+        if (end < 0) return data;
+        keep.push([p, end]);
+        p = end;
+        continue;
+      }
+      if (label === 0xff) {
+        // Aplicação: 1 byte (0x0b) + 11 (id+auth) + sub-blocos. Mantém só o laço.
+        if (p + 14 > n || data[p + 2] !== 0x0b) return data;
+        const id = String.fromCharCode(...data.subarray(p + 3, p + 14));
+        const end = subEnd(p + 14);
+        if (end < 0) return data;
+        if (id === "NETSCAPE2.0" || id === "ANIMEXTS1.0") keep.push([p, end]);
+        p = end;
+        continue;
+      }
+      if (label === 0xfe || label === 0x01) {
+        // Comentário (0xFE) ou texto (0x01, com 1 byte 0x0c + 12 antes): tira.
+        let after = p + 2;
+        if (label === 0x01) {
+          if (p + 15 > n || data[p + 2] !== 0x0c) return data;
+          after = p + 15;
+        }
+        const end = subEnd(after);
+        if (end < 0) return data;
+        p = end;
+        continue;
+      }
+      return data; // extensão desconhecida: não arrisca
+    }
+    return data; // marcador inesperado
+  }
+  const total = keep.reduce((s, [a, b]) => s + (b - a), 0);
+  // Nada tirado (nem lixo depois do trailer) → os mesmos bytes.
+  return total === n ? data : Buffer.concat(keep.map(([a, b]) => data.subarray(a, b)));
+}
+
+/**
  * Valida e prepara uma imagem enviada. Lança AssetError (mensagem em pt-BR)
- * quando o arquivo é grande demais, de formato não aceito ou ilegível.
+ * quando o arquivo é grande demais, de formato não aceito ou ilegível. As fotos
+ * (JPG/PNG/WebP/AVIF parado) viram WebP pelo sharp, que JÁ remove os metadados
+ * (EXIF com GPS/câmera/autor, XMP, IPTC): a imagem guardada fica anônima. O SVG
+ * passa pela limpeza (tira os metadados de autor/editor) e o GIF animado perde
+ * as extensões de metadado — sem deixar nada que identifique o dono da oferta.
  */
 export async function processImage(input: { name: string; data: Uint8Array }): Promise<ProcessedImage> {
   const name = cleanFileName(input.name);
@@ -497,10 +613,13 @@ export async function processImage(input: { name: string; data: Uint8Array }): P
   const pages = meta.pages ?? 1;
   const frameHeight = meta.pageHeight ?? meta.height;
 
-  // Animações que o WebP reprocessado perderia: ficam como vieram.
+  // Animações que o WebP reprocessado perderia: ficam como vieram — mas sem os
+  // metadados. GIF: tira as extensões de comentário/texto/aplicação (menos o laço),
+  // mantendo os quadros byte a byte. AVIF animado: o sharp não reprocessa sem perder
+  // a animação e EXIF nele é raríssimo — fica como veio.
   if (pages > 1 && (meta.format === "gif" || avif)) {
     return {
-      data,
+      data: avif ? data : stripGifMetadata(data),
       ext: avif ? "avif" : "gif",
       mime: avif ? "image/avif" : "image/gif",
       width: meta.width || null,

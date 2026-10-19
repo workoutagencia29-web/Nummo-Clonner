@@ -156,12 +156,30 @@ describe("processImage — fotos viram WebP", () => {
 });
 
 describe("processImage — animações", () => {
-  it("GIF animado fica exatamente como veio", async () => {
+  it("GIF animado sem metadados fica exatamente como veio", async () => {
     const gif = await animatedGif();
     expect((await metaOf(gif)).pages).toBe(3);
     const out = await processImage({ name: "animado.gif", data: gif });
     expect(out).toMatchObject({ ext: "gif", mime: "image/gif", width: 30, height: 20 });
     expect(Buffer.from(out.data).equals(gif)).toBe(true);
+  });
+
+  it("GIF animado perde o comentário (metadado do dono), mantendo os quadros", async () => {
+    const gif = await animatedGif();
+    // Injeta uma extensão de comentário com dados do dono antes do trailer (0x3B).
+    expect(gif[gif.length - 1]).toBe(0x3b);
+    const comment = Buffer.from("Dono: Joao Silva - joao@exemplo.com", "latin1");
+    const ext = Buffer.concat([Buffer.from([0x21, 0xfe, comment.length]), comment, Buffer.from([0x00])]);
+    const withComment = Buffer.concat([gif.subarray(0, gif.length - 1), ext, Buffer.from([0x3b])]);
+    expect(withComment.includes("Joao Silva")).toBe(true);
+    expect((await metaOf(withComment)).pages).toBe(3);
+
+    const out = await processImage({ name: "animado.gif", data: withComment });
+    expect(out).toMatchObject({ ext: "gif", mime: "image/gif" });
+    // O comentário saiu; os 3 quadros ficaram; o arquivo ficou menor.
+    expect(Buffer.from(out.data).includes("Joao Silva")).toBe(false);
+    expect((await metaOf(out.data)).pages).toBe(3);
+    expect(out.data.length).toBeLessThan(withComment.length);
   });
 
   it("WebP animado continua animado (e respeita a largura máxima)", async () => {
@@ -314,6 +332,42 @@ describe("sanitizeSvg / processImage com SVG", () => {
     expect(text).not.toMatch(/script|onload|javascript/i);
     const meta = await metaOf(out.data);
     expect(meta).toMatchObject({ format: "svg", width: 200, height: 100 });
+  });
+
+  it("upload de SVG: tira os metadados que identificam o dono (autor, programa, nome do arquivo)", async () => {
+    const svg = `<?xml version="1.0"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:cc="http://creativecommons.org/ns#" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.0.dtd" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" width="100" height="100" sodipodi:docname="logo-joao-silva.svg" inkscape:export-filename="/home/joaosilva/Área de Trabalho/logo.png">
+  <title>Logo do João Silva</title>
+  <desc>Criado por João Silva no Inkscape</desc>
+  <metadata><rdf:RDF><cc:Work><dc:creator><cc:Agent><dc:title>João Silva</dc:title></cc:Agent></dc:creator></cc:Work></rdf:RDF></metadata>
+  <sodipodi:namedview inkscape:current-layer="layer1"/>
+  <rect x="10" y="10" width="80" height="80" fill="#ff0000"/>
+</svg>`;
+    const out = await processImage({ name: "logo.svg", data: Buffer.from(svg, "utf8") });
+    expect(out).toMatchObject({ ext: "svg", mime: "image/svg+xml", width: 100, height: 100 });
+    const text = Buffer.from(out.data).toString("utf8");
+    // O desenho fica.
+    expect(text).toContain("<rect");
+    expect(text).toContain('fill="#ff0000"');
+    // Nada que identifique o dono.
+    for (const leak of [
+      "João Silva",
+      "joaosilva",
+      "logo-joao-silva",
+      "<metadata",
+      "<title",
+      "<desc",
+      "sodipodi:docname",
+      "inkscape:export-filename",
+      "sodipodi:namedview",
+      "xmlns:dc",
+      "xmlns:cc",
+      "xmlns:rdf",
+      "xmlns:sodipodi",
+      "xmlns:inkscape",
+    ]) {
+      expect(text, leak).not.toContain(leak);
+    }
   });
 });
 
