@@ -88,6 +88,8 @@ export interface CheckoutForm {
   select(bumps: string[], frete: string | null, metodo: string): void;
   /** Confere tudo: os dados, ou null (com os erros na tela e o foco no primeiro). */
   validate(): BuyerData | null;
+  /** Pré-preenche os campos vazios com os dados de quem já comprou no funil (upsell). */
+  prefill(buyer: Partial<BuyerData>): void;
   /** O botão de pagar ocupado (gerando o pagamento) ou livre. */
   busy(on: boolean, label?: string): void;
   /** Mensagem no fim do formulário ("" esconde). */
@@ -625,5 +627,36 @@ export function setupForm(
     showAlert(fx.unavailable);
   }
 
-  return { bumps, frete, metodo, qtd: () => qtd, total, items, select, validate, busy, alert: showAlert };
+  // ── Pré-preenchimento (upsell: quem já comprou no funil) ─────────────────
+  function prefill(buyer: Partial<BuyerData>) {
+    const set = (name: string, value: string | undefined) => {
+      if (!value) return;
+      const el = byName(form, name);
+      if (!el || el.value.trim()) return; // só campo vazio (nunca sobrescreve o que já está lá)
+      el.value = value;
+      setError(el, "");
+      markValid(el);
+    };
+    set("nome", buyer.nome);
+    set("email", buyer.email);
+    if (buyer.telefone) set("telefone", brl ? formatBrPhone(buyer.telefone) : buyer.telefone);
+    if (buyer.documento) set("documento", brl ? formatCpf(buyer.documento) : buyer.documento);
+    const a = buyer.endereco;
+    if (a && cfg.endereco) {
+      set("cep", brl ? formatCep(a.cep) : a.cep);
+      set("rua", a.rua);
+      set("numero", a.numero);
+      set("complemento", a.complemento);
+      set("bairro", a.bairro);
+      set("cidade", a.cidade);
+      set("uf", a.uf);
+      // Já tem endereço: mostra os campos e as opções de frete sem esperar digitar o CEP.
+      if (a.cep) {
+        revealAddress();
+        revealShipping();
+      }
+    }
+  }
+
+  return { bumps, frete, metodo, qtd: () => qtd, total, items, select, validate, prefill, busy, alert: showAlert };
 }

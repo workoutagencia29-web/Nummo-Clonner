@@ -153,6 +153,8 @@ model Offer {
   settings     Json        @default("{}")
   /// Consentimento, estratégia de carregamento, repasse de parâmetros e código livre.
   tracking     Json        @default("{}")
+  /// Funil de upsell pós-compra (sequência de upsells/downsells). Ver src/lib/upsell.ts (UpsellFlow).
+  upsell       Json        @default("{}")
   /// Preenchido quando a oferta está na lixeira.
   deletedAt    DateTime?
   createdAt    DateTime    @default(now())

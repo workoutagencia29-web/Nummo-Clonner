@@ -31,6 +31,7 @@ import {
   storeCatalog,
 } from "@/lib/store-pages";
 import { displayUrl } from "@/lib/text";
+import { type UpsellFlow, upsellProblems } from "@/lib/upsell";
 import { ownCheckoutCoupons, ownCheckoutPrizes, prizeGaps, WHEEL_MARK, wheelPrizeKeys } from "@/lib/wheel-prizes";
 
 export type ReadinessId =
@@ -45,6 +46,7 @@ export type ReadinessId =
   | "empresa"
   | "links-legais"
   | "idioma"
+  | "upsell"
   | "pixel"
   | "zip"
   | "no-ar";
@@ -57,7 +59,7 @@ export type ReadinessId =
  * idioma das páginas ou o cartão "Moeda da oferta".
  */
 export type ReadinessTarget =
-  | { tab: "links" | "rastreamento" | "configuracoes" | "detalhes" }
+  | { tab: "links" | "rastreamento" | "configuracoes" | "detalhes" | "upsell" }
   | { export: true }
   | { editor: string }
   | { link: string }
@@ -154,6 +156,8 @@ export interface ReadinessInput {
    * escolhida): o passo "moeda-vitrines".
    */
   currencyMismatch?: CurrencyMismatch | null;
+  /** Funil de upsell pós-compra (null/ausente/sem etapas = a oferta não tem upsell). */
+  upsell?: UpsellFlow | null;
 }
 
 const LINK_RE = /\bdata-os-link\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]*))/gi;
@@ -1005,6 +1009,25 @@ function liveItem(input: ReadinessInput): ReadinessItem {
   };
 }
 
+/** Funil de upsell: só aparece quando a oferta TEM upsell; opcional. */
+function upsellItem(input: ReadinessInput): ReadinessItem | null {
+  const flow = input.upsell;
+  if (!flow || !flow.steps.length) return null;
+  const problems = upsellProblems(flow);
+  const done = problems.length === 0;
+  return {
+    id: "upsell",
+    title: done ? "Upsell pós-compra pronto" : "Terminar de configurar o upsell",
+    detail: done
+      ? "A sequência de upsell e downsell está ligada (páginas, produtos e para onde cada botão leva)."
+      : problems.map((p) => p.message).join(" "),
+    done,
+    optional: true,
+    cta: "Abrir o Upsell",
+    target: { tab: "upsell" },
+  };
+}
+
 export function computeReadiness(given: ReadinessInput, dateLabel: (d: Date) => string): Readiness {
   const input: ReadinessInput = { ...given, links: renderedLinks(given.links) };
   const wheel = wheelItem(input);
@@ -1028,6 +1051,10 @@ export function computeReadiness(given: ReadinessInput, dateLabel: (d: Date) => 
     companyItem(input),
     ...(legal ? [legal] : []),
     ...(language ? [language] : []),
+    ...(() => {
+      const u = upsellItem(input);
+      return u ? [u] : [];
+    })(),
     pixelItem(input),
     zipItem(input, dateLabel),
     liveItem(input),

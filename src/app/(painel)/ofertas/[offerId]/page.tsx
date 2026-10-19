@@ -21,6 +21,7 @@ import { TagChip } from "@/components/offers/tag-chip";
 import { trackingSectionOf } from "@/components/offers/tracking/helpers";
 import { TrackingSkeleton } from "@/components/offers/tracking/tracking-skeleton";
 import { TrackingTab } from "@/components/offers/tracking/tracking-tab";
+import { UpsellSkeleton, UpsellTab } from "@/components/offers/upsell/upsell-tab";
 import { Button } from "@/components/ui/button";
 import { TabsContent } from "@/components/ui/tabs";
 import { dateTime, plural } from "@/lib/format";
@@ -189,6 +190,11 @@ export default async function OfferPage({ params, searchParams }: PageProps<"/of
             checkoutAccounts={checkoutAccounts}
             checkoutKeySources={{ FLEVOPAY: flevoSources, BLACKCAT: blackcatSources, CLOWNPAY: clownpaySources }}
           />
+        </TabsContent>
+        <TabsContent value="upsell" keepMounted className="mt-4">
+          <Suspense fallback={<UpsellSkeleton />}>
+            <UpsellTab offerId={offer.id} />
+          </Suspense>
         </TabsContent>
         <TabsContent value="rastreamento" keepMounted className="mt-4">
           <Suspense fallback={<TrackingSkeleton />}>

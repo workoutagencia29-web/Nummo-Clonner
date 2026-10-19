@@ -8,6 +8,7 @@ import { replaceQuery } from "@/hooks/replace-query";
 export const OFFER_TABS = [
   { value: "paginas", label: "Páginas do funil" },
   { value: "links", label: "Links e checkouts" },
+  { value: "upsell", label: "Upsell" },
   { value: "rastreamento", label: "Pixels e rastreamento" },
   { value: "configuracoes", label: "Moeda, empresa e SEO" },
   { value: "detalhes", label: "Detalhes" },
@@ -61,7 +62,9 @@ export function OfferTabs({ children }: { children: ReactNode }) {
     >
       <TabsList
         aria-label="Partes da oferta"
-        className="grid h-auto w-full grid-cols-2 items-stretch gap-1 lg:flex lg:min-h-9 lg:w-fit lg:max-w-full lg:flex-wrap lg:items-center lg:justify-start lg:gap-0 [&>*:last-child]:col-span-2"
+        // Grade de 2 colunas abaixo do lg; a última aba ocupa as 2 colunas SÓ quando
+        // o total é ímpar (com número par, todas as linhas ficam cheias — nada de célula vazia).
+        className="grid h-auto w-full grid-cols-2 items-stretch gap-1 lg:flex lg:min-h-9 lg:w-fit lg:max-w-full lg:flex-wrap lg:items-center lg:justify-start lg:gap-0 [&>*:last-child:nth-child(odd)]:col-span-2"
       >
         {OFFER_TABS.map((t) => (
           <TabsTrigger

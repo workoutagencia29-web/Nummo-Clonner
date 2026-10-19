@@ -31,6 +31,7 @@ import { createOfferLink } from "@/server/services/offer-links";
 import { createOffer } from "@/server/services/offers";
 import { createPage } from "@/server/services/pages";
 import { savePaymentGatewayKey } from "@/server/services/payments/gateways";
+import { createUpsellPage, saveUpsellFlow } from "@/server/services/upsell";
 import { resetDatabase } from "../setup/per-file";
 import { FAKE_PIX_CODE, type FakePix, FLEVO_KEY, startFakeFlevopay } from "./pix-fakes";
 
@@ -673,6 +674,115 @@ describe("página de checkout na prévia (Kyvo)", () => {
     expect(s.errors).toEqual([]);
     await s.close();
   }, 60_000);
+});
+
+describe("upsell: o checkout seguinte abre pré-preenchido", () => {
+  it("comprou no principal → o checkout do upsell já vem com nome, e-mail, telefone, CPF e endereço", async () => {
+    const o = await brlOffer();
+    // Segundo checkout (o do upsell) na MESMA oferta → mesmo endpoint → mesmo stash do comprador.
+    const up = await createOfferLink(o.offerId, { label: "Upsell E-book", url: "", kind: "CHECKOUT" });
+    await saveCheckoutProduct(up.id, {
+      name: "E-book bônus",
+      amount: "47,00",
+      provider: "FLEVOPAY",
+      methods: ["PIX"],
+      locale: "PT",
+      thankYouPageId: o.thanksId,
+      accessUrl: "",
+      config: {
+        ...checkoutConfigDraft(parseCheckoutConfig({})),
+        address: true,
+        shipping: [{ id: "frete001", name: "Correios PAC", eta: "5 a 9 dias úteis", price: "" }],
+        shippingDefault: "frete001",
+      },
+    });
+
+    const s = await open(`${o.base}/checkout/${o.key}`);
+    const { page } = s;
+    // Compra o principal: preenche tudo e gera o PIX (ao gerar, os dados ficam guardados nesta aba).
+    await fillBuyer(page);
+    await fillAddress(page);
+    await page.locator("[data-osc-pay]").click();
+    await expect.poll(() => page.locator(".osc-code input").isVisible()).toBe(true);
+
+    // Vai para o checkout do upsell (mesma aba): já abre com os dados dela.
+    await page.goto(`${o.base}/checkout/${up.key}`);
+    await expect.poll(() => page.locator("#osc-nome").inputValue()).toBe("Maria da Silva");
+    expect(await page.locator("#osc-email").inputValue()).toBe("maria@exemplo.com");
+    expect(await page.locator("#osc-telefone").inputValue()).toBe("(11) 98765-4321");
+    expect(await page.locator("#osc-documento").inputValue()).toBe("529.982.247-25");
+    // O endereço veio junto e já aparece (sem precisar digitar o CEP de novo nem chamar a BrasilAPI).
+    expect(await page.locator("#osc-rua").isVisible()).toBe(true);
+    expect(await page.locator("#osc-cep").inputValue()).toBe("01310-100");
+    expect(await page.locator("#osc-rua").inputValue()).toBe("Avenida Paulista");
+    expect(await page.locator("#osc-numero").inputValue()).toBe("1000");
+    expect(await page.locator("#osc-uf").inputValue()).toBe("SP");
+    // Só a busca de CEP do 1º checkout (A); o do upsell (B) não faz nova busca — o endereço já veio preenchido.
+    expect(s.cepCalls).toEqual(["/api/cep/v2/01310100"]);
+    expect(s.errors).toEqual([]);
+    await s.close();
+  }, 90_000);
+});
+
+describe("funil de upsell de ponta a ponta na prévia", () => {
+  it("paga o principal → cai na página de upsell → SIM abre o checkout (preenchido) → paga → obrigado", async () => {
+    const o = await brlOffer();
+    // Produto do upsell (2ª cobrança) e a página-modelo de upsell (botões SIM/Não prontos).
+    const up = await createOfferLink(o.offerId, { label: "Upsell E-book", url: "", kind: "CHECKOUT" });
+    await saveCheckoutProduct(up.id, {
+      name: "E-book bônus",
+      amount: "47,00",
+      provider: "FLEVOPAY",
+      methods: ["PIX"],
+      locale: "PT",
+      thankYouPageId: o.thanksId,
+      accessUrl: "",
+      config: { ...checkoutConfigDraft(parseCheckoutConfig({})) },
+    });
+    const upPage = await createUpsellPage(o.offerId, "UPSELL");
+    // Liga tudo: principal → página de upsell; SIM → checkout do upsell; Não/fim → obrigado.
+    await saveUpsellFlow(o.offerId, {
+      startLinkKey: o.key,
+      thankYouPageId: o.thanksId,
+      steps: [{ id: "s1", kind: "UPSELL", pageId: upPage.id, linkKey: up.key }],
+    });
+
+    const s = await open(`${o.base}/checkout/${o.key}`);
+    const { page } = s;
+    // Compra o principal.
+    await fillBuyer(page);
+    await fillAddress(page);
+    await page.locator("[data-osc-pay]").click();
+    await expect.poll(() => page.locator(".osc-code input").isVisible()).toBe(true);
+    await page.getByRole("button", { name: "Simular pagamento aprovado" }).click();
+    // Pago → vai para a PÁGINA DE UPSELL (o obrigado do produto principal virou a 1ª etapa).
+    await page.waitForURL(new RegExp(`/p/${upPage.id}`), { timeout: 10_000 });
+    const sim = page.locator("a.os-btn[data-os-link]").first();
+    await expect.poll(() => sim.isVisible()).toBe(true);
+    // O botão SIM leva ao checkout do upsell; o "Não" (os-decline) leva ao obrigado.
+    expect(await sim.getAttribute("href")).toBe(`/checkout/${up.key}`);
+    expect(await page.locator("a.os-decline").first().getAttribute("href")).toBe(`/p/${o.thanksId}`);
+
+    // Aceita o upsell: o checkout já abre com os dados de quem acabou de comprar.
+    // (force: o botão SIM pulsa — animação os-pulse —, o que o Playwright vê como "instável".)
+    await sim.click({ force: true });
+    await page.waitForURL(new RegExp(`/checkout/${up.key}`));
+    await expect.poll(() => page.locator("#osc-nome").inputValue()).toBe("Maria da Silva");
+    expect(await page.locator("#osc-email").inputValue()).toBe("maria@exemplo.com");
+    await expect.poll(() => text(page, "[data-osc-total]")).toBe("R$ 47,00");
+    // Paga o upsell → obrigado.
+    await page.locator("[data-osc-pay]").click();
+    await expect.poll(() => page.locator(".osc-code input").isVisible()).toBe(true);
+    await page.getByRole("button", { name: "Simular pagamento aprovado" }).click();
+    await page.waitForURL(new RegExp(`/p/${o.thanksId}`), { timeout: 10_000 });
+
+    // Duas compras distintas (principal e upsell), cada uma com seu Purchase.
+    const events = await s.events();
+    const purchases = events.filter((e) => e.std === "PURCHASE");
+    expect(purchases.map((e) => e.value)).toEqual([197, 47]);
+    expect(s.errors).toEqual([]);
+    await s.close();
+  }, 120_000);
 });
 
 describe("prévia com pagamento real (chave do gateway salva)", () => {

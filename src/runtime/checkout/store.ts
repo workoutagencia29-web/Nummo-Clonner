@@ -13,7 +13,7 @@
  * por oferta: duas ofertas no mesmo domínio podem ter a mesma chave de link).
  * Tudo à prova de armazenamento bloqueado (a página segue sem memória).
  */
-import type { CheckoutPayMethod, PixInstructions } from "@/lib/checkout/contract";
+import type { CheckoutAddress, CheckoutPayMethod, PixInstructions } from "@/lib/checkout/contract";
 import type { SpeiInstructions } from "@/lib/payments/contract";
 
 /** Item da compra para os pixels (produto ou bump). */
@@ -155,4 +155,42 @@ export function initiatedOnce(scope: string): boolean {
 /** PixInstructions → o que fica guardado (a imagem do gateway não: a página gera o QR do código). */
 export function storedPix(pix: PixInstructions): OpenCheckout["pix"] {
   return { codigo: pix.codigo, expiraEm: pix.expiraEm };
+}
+
+// ─── Dados do comprador (pré-preencher o próximo checkout do funil: upsell) ──────
+/**
+ * Dados de quem compra, guardados SÓ nesta aba (sessionStorage, some ao fechar)
+ * para pré-preencher o PRÓXIMO checkout do funil de upsell: a pessoa comprou o
+ * produto principal, aceita o upsell e o checkout já abre com os dados dela.
+ * São os DADOS DELA, no aparelho DELA — NUNCA cartão, CVV nem código PIX. A
+ * chave é o endpoint (= por oferta/site: a prévia separa por subdomínio e o ZIP
+ * é um site por oferta). Serve só de conveniência: nada disso vai ao servidor
+ * sozinho (o servidor segue sem guardar dado pessoal nenhum).
+ */
+export interface StoredBuyer {
+  nome?: string;
+  email?: string;
+  telefone?: string;
+  documento?: string;
+  endereco?: CheckoutAddress;
+}
+
+const buyerKey = (endpoint: string) => `os_comprador:${endpoint}`;
+
+export function saveBuyer(endpoint: string, b: StoredBuyer) {
+  try {
+    sessionStorage.setItem(buyerKey(endpoint), JSON.stringify(b));
+  } catch {
+    // sem armazenamento (aba privada, bloqueado): o próximo checkout só começa vazio
+  }
+}
+
+export function loadBuyer(endpoint: string): StoredBuyer | null {
+  try {
+    const raw = JSON.parse(sessionStorage.getItem(buyerKey(endpoint)) || "null");
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) return raw as StoredBuyer;
+  } catch {
+    // formato estranho ou armazenamento bloqueado: começa vazio
+  }
+  return null;
 }

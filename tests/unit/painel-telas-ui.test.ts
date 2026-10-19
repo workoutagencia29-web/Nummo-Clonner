@@ -736,10 +736,13 @@ describe("Tela da oferta em janelas de 768 a 1440 px", () => {
     }
   });
 
-  it("de lg em diante, as abas ficam numa linha só; abaixo, na grade de duas colunas", async () => {
+  it("telas largas: uma linha; no lg justo a última aba desce em vez de rolar; abaixo do lg, grade de duas colunas", async () => {
+    // 900: grade de 2 colunas (6 abas = 3 linhas cheias). 1024: o menu lateral ocupa
+    // 256 px e as 6 abas passam pouco da linha, então a última desce (sem rolagem lateral —
+    // o teste de overflow acima confere). 1440: sobra espaço, uma linha só.
     for (const [width, rows] of [
       [900, 3],
-      [1024, 1],
+      [1024, 2],
       [1440, 1],
     ] as const) {
       const s = await open("offer", { name: LONG_NAME }, { viewport: { width, height: 900 }, shell: true });

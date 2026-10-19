@@ -50,6 +50,7 @@ import {
   type OpenCheckout,
   openValid,
   purchaseSent,
+  saveBuyer,
   saveOpen,
   storedPix,
 } from "./store";
@@ -470,6 +471,8 @@ export function createFlow(
   function start(data: BuyerData) {
     if (creating) return;
     buyer = data;
+    // Guarda os dados (só nesta aba) para o próximo checkout do funil (upsell) já abrir preenchido.
+    saveBuyer(endpoint, data);
     create();
   }
 

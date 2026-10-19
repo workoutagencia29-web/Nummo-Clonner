@@ -45,6 +45,7 @@ import { createOffer } from "@/server/services/offers";
 import { createPage } from "@/server/services/pages";
 import { savePaymentGatewayKey } from "@/server/services/payments/gateways";
 import { createEventRule } from "@/server/services/tracking";
+import { createUpsellPage, saveUpsellFlow } from "@/server/services/upsell";
 import { resetDatabase } from "../setup/per-file";
 import { readZip } from "./export-fixture";
 import { type FakeKyvo, KYVO_KEY, startFakeKyvo } from "./kyvo-fake";
@@ -331,6 +332,79 @@ describe("checkout do Offer Studio no ZIP", () => {
     expect(exportWarningFix(purchase ?? "")).toEqual({ kind: "purchaseRule" });
     expect(result.warnings.some((w) => w.includes("falta a chave da FlevoPay"))).toBe(true);
     expect(text(PAGAMENTO_CONFIG_FILE)).toContain("'flevopay' => '',");
+  }, 120_000);
+});
+
+describe("funil de upsell no ZIP (estrutura, sem PHP)", () => {
+  beforeEach(async () => {
+    await resetDatabase();
+  });
+
+  /** Oferta com produto principal + upsell, página-modelo de upsell e de obrigado, tudo ligado. */
+  async function upsellFunnel() {
+    const offer = await createOffer({ name: "Funil Upsell", currency: "BRL" });
+    const home = await prisma.page.findFirstOrThrow({ where: { offerId: offer.id, isHome: true } });
+    const principal = await createOfferLink(offer.id, { label: "Checkout principal", url: "", kind: "CHECKOUT" });
+    const up = await createOfferLink(offer.id, { label: "Upsell E-book", url: "", kind: "CHECKOUT" });
+    const sales = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="utf-8"><title>Vendas</title></head><body><h1>Curso</h1><a id="comprar" data-os-link="${principal.key}" href="#" style="display:inline-block;padding:16px">Comprar</a></body></html>`;
+    await prisma.pageDocument.updateMany({ where: { variant: { pageId: home.id } }, data: { html: sales } });
+    await savePaymentGatewayKey(offer.id, "FLEVOPAY", FLEVO_KEY);
+    const upPage = await createUpsellPage(offer.id, "UPSELL"); // "Upsell"  → página da etapa
+    const obg = await createUpsellPage(offer.id, "THANK_YOU"); // "Obrigado" → fim
+    const base: CheckoutConfigDraft = { ...checkoutConfigDraft(parseCheckoutConfig({})) };
+    for (const { link, name, amount } of [
+      { link: principal, name: "Curso", amount: "197,00" },
+      { link: up, name: "E-book", amount: "47,00" },
+    ]) {
+      await saveCheckoutProduct(link.id, {
+        name,
+        amount,
+        provider: "FLEVOPAY",
+        methods: ["PIX"],
+        locale: "PT",
+        thankYouPageId: obg.id, // placeholder; o saveUpsellFlow encadeia o certo
+        accessUrl: "",
+        config: base,
+      });
+    }
+    await saveUpsellFlow(offer.id, {
+      startLinkKey: principal.key,
+      thankYouPageId: obg.id,
+      steps: [{ id: "s1", kind: "UPSELL", pageId: upPage.id, linkKey: up.key }],
+    });
+    const pages = await prisma.page.findMany({ where: { offerId: offer.id }, select: { id: true, slug: true } });
+    const slugOf = (id: string) => pages.find((p) => p.id === id)?.slug ?? "";
+    return {
+      offerId: offer.id,
+      principalKey: principal.key,
+      upKey: up.key,
+      upSlug: slugOf(upPage.id),
+      obgSlug: slugOf(obg.id),
+    };
+  }
+
+  it("páginas exportadas; SIM/Não e a cadeia de obrigado com caminhos relativos", async () => {
+    const o = await upsellFunnel();
+    const { entries, text } = await zip(o.offerId, "upsell.zip");
+
+    // As páginas do funil e os dois checkouts foram para o ZIP.
+    expect(entries.has(`${o.upSlug}/index.html`)).toBe(true);
+    expect(entries.has(`${o.obgSlug}/index.html`)).toBe(true);
+    expect(entries.has(`checkout/${o.principalKey}/index.html`)).toBe(true);
+    expect(entries.has(`checkout/${o.upKey}/index.html`)).toBe(true);
+
+    // Página de upsell (um nível fundo): SIM → checkout do upsell; Não (os-decline) → obrigado.
+    const upHtml = text(`${o.upSlug}/index.html`);
+    expect(upHtml).toContain(`href="../checkout/${o.upKey}/"`); // SIM = data-os-link do produto da etapa
+    expect(upHtml).toContain(`href="../${o.obgSlug}/"`); // Não = os-page da próxima (obrigado)
+    expect(upHtml).not.toContain("os-page:"); // os-page foi resolvido no ZIP
+    // Página de upsell não deve aparecer no Google (vem depois da compra).
+    expect(upHtml).toMatch(/<meta name="robots" content="noindex/);
+
+    // Cadeia de obrigado dos produtos (o redirect pós-pagamento): principal → upsell; upsell → obrigado.
+    const cfg = (key: string) => jsonOf<PublicCheckoutConfig>(text(`checkout/${key}/index.html`), CHECKOUT_CONFIG_ID);
+    expect(cfg(o.principalKey).obrigado).toBe(`../../${o.upSlug}/`);
+    expect(cfg(o.upKey).obrigado).toBe(`../../${o.obgSlug}/`);
   }, 120_000);
 });
 

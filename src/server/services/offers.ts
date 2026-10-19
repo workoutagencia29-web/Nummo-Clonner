@@ -8,6 +8,7 @@ import { remapInternalLinks } from "@/lib/internal-links";
 import { transformPackedProject } from "@/lib/project-data";
 import type { StoreCurrency } from "@/lib/store";
 import { copyName, normalizeText } from "@/lib/text";
+import { parseUpsellFlow, remapUpsellPages } from "@/lib/upsell";
 import { removeVersionFiles } from "@/server/services/documents";
 import { pageStart, templateThumbnailKey } from "@/server/services/page-templates";
 import { rememberOfferCurrency } from "@/server/services/preferences";
@@ -327,6 +328,9 @@ export async function duplicateOffer(offerId: string) {
       // A política de privacidade do banner LGPD aponta para a página nova.
       const tracking = remapTrackingPages(source.tracking, pageIdMap);
       if (tracking) await tx.offer.update({ where: { id: copy.id }, data: { tracking } });
+      // Funil de upsell: as páginas (upsell/downsell/obrigado) apontam para as da cópia (os linkKey ficam).
+      const upsell = remapUpsellPages(parseUpsellFlow(source.upsell), pageIdMap);
+      await tx.offer.update({ where: { id: copy.id }, data: { upsell: upsell as object } });
       if (source.links.length) {
         // Os botões guardam a chave do link, então a cópia funciona sem remapear.
         await tx.offerLink.createMany({

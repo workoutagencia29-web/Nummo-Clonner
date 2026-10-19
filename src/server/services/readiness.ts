@@ -7,6 +7,7 @@ import { chosenOfferCurrency } from "@/lib/offer-currency";
 import { parseOfferSettings } from "@/lib/offer-settings";
 import { computeReadiness, type Readiness, type ReadinessInput } from "@/lib/readiness";
 import { PRODUCT_MARK, STORE_HEADER_MARK } from "@/lib/store-pages";
+import { parseUpsellFlow } from "@/lib/upsell";
 import { WHEEL_MARK } from "@/lib/wheel-prizes";
 import { offerCheckoutCheck } from "./checkout/checks";
 import { storeCurrencyMismatch } from "./offer-currency";
@@ -29,7 +30,7 @@ export async function getOfferReadiness(offer: {
         variant: { select: { pageId: true, page: { select: { name: true, cloneMode: true } } } },
       },
     }),
-    prisma.offer.findUnique({ where: { id: offer.id }, select: { settings: true } }),
+    prisma.offer.findUnique({ where: { id: offer.id }, select: { settings: true, upsell: true } }),
     prisma.pixelConfig.count({ where: { offerId: offer.id, enabled: true } }),
     prisma.export.findFirst({
       where: { offerId: offer.id, status: "DONE" },
@@ -60,6 +61,7 @@ export async function getOfferReadiness(offer: {
       chosenCurrency: chosenOfferCurrency(settings?.settings),
       language: offerSettings.language,
       currencyMismatch,
+      upsell: parseUpsellFlow(settings?.upsell),
       company: offerSettings.company,
       liveUrl: offer.liveUrl,
       lastZipAt: lastZip ? (lastZip.finishedAt ?? lastZip.createdAt) : null,

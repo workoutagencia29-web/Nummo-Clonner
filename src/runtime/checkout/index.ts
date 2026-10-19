@@ -13,7 +13,7 @@ import { CHECKOUT_CONFIG_ID, type PublicCheckoutConfig, readCheckoutConfig } fro
 import { checkoutFixedTexts } from "@/lib/checkout/texts";
 import { createFlow, eventId, trackCheckout } from "./flow";
 import { setupForm } from "./form";
-import { initiatedOnce, loadOpen, timerEnd } from "./store";
+import { initiatedOnce, loadBuyer, loadOpen, timerEnd } from "./store";
 
 /** Endereço absoluto do endpoint (null = fora da origem da página ou inválido). */
 export function checkoutEndpoint(cfg: PublicCheckoutConfig): string | null {
@@ -94,6 +94,9 @@ function boot() {
     form.alert(fx.unavailable);
     return;
   }
+  // Veio de um upsell (já comprou no funil): o checkout abre com os dados dela preenchidos.
+  const buyer = loadBuyer(endpoint);
+  if (buyer) form.prefill(buyer);
   const flow = createFlow(cfg, endpoint, form, formEl, panel, fx, announce);
   const resuming = !!loadOpen(endpoint, cfg.chave);
   formEl.addEventListener("submit", (e) => {
