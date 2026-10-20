@@ -102,12 +102,16 @@ export function serverEventsWho(vendors: readonly ServerEventVendor[] | null | u
 /** " · 50%" do fim do rótulo de uma versão (só vale com o divisor ligado). */
 const SHARE_SUFFIX = /\s*·\s*\d+(?:[.,]\d+)?\s*%$/;
 
-/** Opções que mudam a árvore (o "HTML otimizado" não muda). */
-export type TreeOptions = Pick<ExportOptions, "splitter" | "serverEvents">;
+/** Opções que mudam a árvore (o "HTML otimizado" não muda; o destino muda o backend de pagamento). */
+export type TreeOptions = Pick<ExportOptions, "splitter" | "serverEvents" | "target">;
 
 /** Opções com que o plano é pedido (sem token, nunca com o eventos.php). */
 export function planOptionsFor(options: TreeOptions, hasServerEventTokens: boolean | undefined): TreeOptions {
-  return { splitter: options.splitter, serverEvents: Boolean(options.serverEvents && hasServerEventTokens) };
+  return {
+    splitter: options.splitter,
+    serverEvents: Boolean(options.serverEvents && hasServerEventTokens),
+    target: options.target,
+  };
 }
 
 function cleanPath(raw: string) {
@@ -150,7 +154,7 @@ function nameOf(p: string) {
 export function treeForOptions(
   plan: Pick<ExportPlan, "tree" | "hasServerEventTokens"> & Partial<Pick<ExportPlan, "serverEventVendors">>,
   options: TreeOptions,
-  planFor: TreeOptions = { splitter: true, serverEvents: false },
+  planFor: TreeOptions = { splitter: true, serverEvents: false, target: "php" },
 ): TreeEntry[] {
   const want = planOptionsFor(options, plan.hasServerEventTokens);
   const had = planOptionsFor(planFor, plan.hasServerEventTokens);
@@ -249,6 +253,8 @@ export function optionsSummary(options: Partial<ExportOptions> | null | undefine
   if (hasVariants && o.splitter) out.push("Divisor A/B");
   if (o.serverEvents) out.push(EVENTS_FILE);
   if (o.optimizeHtml) out.push("HTML otimizado");
+  if (o.target === "vercel") out.push("Vercel");
+  else if (o.target === "netlify") out.push("Netlify");
   // "Imagens mais leves" fica de fora: os ZIPs de antes dela aparecem com ela ligada (o padrão).
   return out;
 }

@@ -184,6 +184,61 @@ function OptionRow({
   );
 }
 
+const HOSTING_TARGETS: { value: ExportOptions["target"]; label: string; hint: string }[] = [
+  { value: "php", label: "Hospedagem com PHP", hint: "Hostinger, HostGator, cPanel, Locaweb… (o mais comum)" },
+  {
+    value: "vercel",
+    label: "Vercel (sem PHP)",
+    hint: "O pagamento roda numa função; a chave fica nas variáveis de ambiente",
+  },
+  {
+    value: "netlify",
+    label: "Netlify (sem PHP)",
+    hint: "O pagamento roda numa função; a chave fica nas variáveis de ambiente",
+  },
+];
+
+/** Onde a oferta vai ser hospedada: muda só o backend de pagamento (só aparece com pagamento). */
+function TargetRow({
+  value,
+  onChange,
+  disabled,
+}: {
+  value: ExportOptions["target"];
+  onChange: (target: ExportOptions["target"]) => void;
+  disabled?: boolean;
+}) {
+  const name = useId();
+  return (
+    <fieldset className="flex flex-col gap-2 px-4 py-3" disabled={disabled}>
+      <legend className="font-medium text-sm">Onde você vai hospedar?</legend>
+      <p className="text-muted-foreground text-xs">
+        O pagamento precisa de um servidor. Escolha conforme a sua hospedagem — muda só o pagamento; o resto do ZIP é
+        igual.
+      </p>
+      <div className="flex flex-col gap-1.5">
+        {HOSTING_TARGETS.map((t) => (
+          <label key={t.value} className="flex items-start gap-2 text-sm">
+            <input
+              type="radio"
+              name={name}
+              value={t.value}
+              checked={value === t.value}
+              onChange={() => onChange(t.value)}
+              disabled={disabled}
+              className="mt-1 size-4"
+            />
+            <span>
+              <span className="font-medium text-foreground">{t.label}</span>
+              <span className="block text-muted-foreground text-xs">{t.hint}</span>
+            </span>
+          </label>
+        ))}
+      </div>
+    </fieldset>
+  );
+}
+
 /** Opções do ZIP: só mostra o que se aplica à oferta (divisor com versões A/B; eventos.php com token). */
 export function ExportOptionsForm({
   options,
@@ -191,6 +246,7 @@ export function ExportOptionsForm({
   hasVariants,
   hasServerEventTokens,
   serverEventVendors,
+  hasPayments,
   disabled,
 }: {
   options: ExportOptions;
@@ -199,10 +255,15 @@ export function ExportOptionsForm({
   hasServerEventTokens: boolean;
   /** Plataformas com token salvo (muda o nome da opção: só Meta, só TikTok ou as duas). */
   serverEventVendors?: ServerEventVendor[];
+  /** A oferta cobra na página/checkout (então o destino da hospedagem importa). */
+  hasPayments?: boolean;
   disabled?: boolean;
 }) {
   return (
     <div className="flex flex-col divide-y rounded-lg border">
+      {hasPayments && (
+        <TargetRow value={options.target} onChange={(target) => onChange({ target })} disabled={disabled} />
+      )}
       {hasVariants && (
         <OptionRow
           label="Divisor A/B"

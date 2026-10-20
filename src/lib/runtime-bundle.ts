@@ -67,6 +67,31 @@ function bundle(entry: string) {
   return result.outputFiles[0].text;
 }
 
+/**
+ * Empacota a função serverless de pagamento (Vercel/Netlify) para Node,
+ * embutindo a config da oferta (__OS_CONFIG__) no próprio arquivo — as chaves e
+ * o segredo NUNCA entram aqui (vêm do ambiente). Alvo node20 (a Vercel/Netlify
+ * não aceitam mais Node 18), ESM (.mjs, sem depender de "type":"module"), sem
+ * source map (nada do código-fonte vira arquivo servido).
+ */
+export function serverlessFunctionJs(target: "vercel" | "netlify", config: unknown): string {
+  const entry = path.join(process.cwd(), `src/server/services/payments/serverless/${target}.ts`);
+  const result = buildSync({
+    entryPoints: [entry],
+    bundle: true,
+    minify: true,
+    format: "esm",
+    target: ["node20"],
+    platform: "node",
+    define: { __OS_CONFIG__: JSON.stringify(JSON.stringify(config)) },
+    tsconfig: path.join(process.cwd(), "tsconfig.json"),
+    write: false,
+    legalComments: "none",
+    sourcemap: false,
+  });
+  return result.outputFiles[0].text;
+}
+
 /** CSS que esconde elementos com delay até o script revelá-los. */
 export const DELAY_STYLE = `<style id="os-delay-style">[data-os-delay]:not([data-os-delay="0"]):not(.os-revealed){display:none!important}</style>`;
 

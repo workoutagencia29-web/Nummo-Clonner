@@ -34,7 +34,7 @@ async function build(offerId: string) {
   const target = path.join(tmp, `${offerId}-${Date.now()}.zip`);
   const result = await buildExport({
     offerId,
-    options: { splitter: true, serverEvents: false, optimizeHtml: true, lighterImages: true },
+    options: { splitter: true, serverEvents: false, optimizeHtml: true, lighterImages: true, target: "php" },
     target,
   });
   const zip = await readZip(target);

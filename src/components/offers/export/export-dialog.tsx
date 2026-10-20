@@ -83,6 +83,7 @@ function SetupStage({ c }: { c: ExportController }) {
           hasVariants={plan?.hasVariants ?? false}
           hasServerEventTokens={plan?.hasServerEventTokens ?? false}
           serverEventVendors={plan?.serverEventVendors}
+          hasPayments={plan?.hasPayments ?? false}
           disabled={c.generating}
         />
       </section>
@@ -256,6 +257,8 @@ export function ExportDialog({ c }: { c: ExportController }) {
             preserveJsPages={plan?.preserveJsPages}
             hasPayments={plan?.hasPayments ?? false}
             paymentGateways={plan?.paymentGateways}
+            target={c.options.target}
+            payDeploy={plan?.payDeploy}
           />
           {(c.stage === "setup" || c.historyRows.length > 0) && (
             <ExportHistory

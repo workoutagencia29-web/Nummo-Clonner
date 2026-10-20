@@ -16,7 +16,13 @@ import { dateTime } from "@/lib/format";
 const noop = () => {};
 const html = (el: Parameters<typeof renderToStaticMarkup>[0]) => renderToStaticMarkup(el);
 const count = (text: string, part: string) => text.split(part).length - 1;
-const DEFAULTS: ExportOptions = { splitter: true, serverEvents: false, optimizeHtml: true, lighterImages: true };
+const DEFAULTS: ExportOptions = {
+  splitter: true,
+  serverEvents: false,
+  optimizeHtml: true,
+  lighterImages: true,
+  target: "php",
+};
 
 function view(over: Partial<ExportView> & { id: string }): ExportView {
   return {
@@ -228,7 +234,7 @@ describe("ExportHistory", () => {
   it("ZIP pronto: data, tamanho, opções, baixar e apagar", () => {
     const item = view({
       id: "e1",
-      options: { splitter: true, serverEvents: true, optimizeHtml: true, lighterImages: true },
+      options: { splitter: true, serverEvents: true, optimizeHtml: true, lighterImages: true, target: "php" },
     });
     const out = history({ rows: [item] });
     const when = dateTime(item.createdAt);

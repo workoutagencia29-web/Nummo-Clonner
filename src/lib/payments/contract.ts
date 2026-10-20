@@ -277,8 +277,14 @@ export type PaymentResponse =
  * o pagamento.php usa esta mesma regra (OS_PRODUCT_RE).
  */
 export const PRODUCT_KEY_RE = /^[a-z0-9-]{1,80}$/;
-/** Id de cobrança aceito do navegador (tx_… na Kyvo; sim_… na prévia). */
-export const ORDER_ID_RE = /^[A-Za-z0-9_-]{3,100}$/;
+/**
+ * Id de cobrança aceito do navegador (tx_… na Kyvo; sim_… na prévia). Também
+ * aceita o token lacrado do checkout serverless (ck_… + base64url, no ?pedido=
+ * da página de obrigado / bloco "Acesso ao produto"): por isso vai até 512 (o
+ * token é maior que um id de cobrança; o charset base64url cabe no mesmo
+ * conjunto). Ids curtos (tx_…, sim_…) continuam valendo — nada regride.
+ */
+export const ORDER_ID_RE = /^[A-Za-z0-9_-]{3,512}$/;
 /** E-mail simples (o gateway confere de verdade). */
 export const EMAIL_RE = /^[^\s@]{1,64}@[^\s@]{1,190}\.[^\s@.]{2,63}$/;
 export const NAME_MAX = 120;

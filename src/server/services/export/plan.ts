@@ -23,6 +23,15 @@ import { PAGAMENTO_CONFIG_FILE, PAGAMENTO_FILE, PAGAMENTO_HTACCESS_FILE } from "
 import { EVENTOS_CONFIG_FILE, EVENTOS_FILE, HTACCESS_FILE } from "@/lib/export/php";
 import { planRouteRedirects, type RouteRedirect } from "@/lib/export/routes";
 import {
+  ENV_EXAMPLE_PATH,
+  GATEWAY_ENV_NAME,
+  isServerlessTarget,
+  PAY_SECRET_ENV_NAME,
+  SERVERLESS_FUNCTION_PATH,
+  SERVERLESS_MANIFEST_PATH,
+  serverlessReservedPaths,
+} from "@/lib/export/serverless";
+import {
   COMPANY_MARKER_FIELD,
   checkoutHostingWarning,
   clonedCheckoutWarning,
@@ -39,6 +48,8 @@ import {
   ownCheckoutCouponWarning,
   PAYMENT_HOSTING_WARNING,
   REQUIRED_COMPANY_MARKERS,
+  serverlessHostingWarning,
+  serverlessTreeLabel,
   storeCurrencyWarning,
   wheelPrizesWarning,
 } from "@/lib/export/warnings";
@@ -69,8 +80,10 @@ import {
   checkoutWarnings,
   loadCheckoutExport,
 } from "./checkout";
+import { offerPaySecret } from "./pay-secret";
 import { loadPaymentExport, type PaymentExport, paymentPlanFixes, paymentWarnings } from "./payments";
 import { type PreservePlan, planPreserveFiles } from "./preserve";
+import { serverlessGateways } from "./serverless-config";
 import { type ExportSource, layoutPages, loadExportSource, serverEventPixels } from "./source";
 
 export const README_FILE = "LEIA-ME.txt";
@@ -212,10 +225,16 @@ export function planFrom(
     );
   }
 
-  // Com o checkout, o aviso da hospedagem é um só (o do checkout, com todos os gateways).
-  warnings.push(...paymentWarnings(payment).filter((w) => !(checkout && w === PAYMENT_HOSTING_WARNING)));
+  // Problemas do pagamento/checkout (o que falta), SEM o aviso de hospedagem — esse depende do destino.
+  const serverless = isServerlessTarget(options.target);
+  warnings.push(...paymentWarnings(payment).filter((w) => w !== PAYMENT_HOSTING_WARNING));
   warnings.push(...checkoutWarnings(checkout, payment?.issues.some((i) => i.kind === "doublePurchase") ?? false));
-  if (checkout) warnings.push(checkoutHostingWarning(zipPaymentGateways(payment, checkout)));
+  if (payment || checkout) {
+    const gateways = zipPaymentGateways(payment, checkout);
+    if (serverless) warnings.push(serverlessHostingWarning(options.target as "vercel" | "netlify", gateways));
+    else if (checkout) warnings.push(checkoutHostingWarning(gateways));
+    else warnings.push(PAYMENT_HOSTING_WARNING);
+  }
   const checkoutRoot = source.checkoutRoot ?? ZIP_CHECKOUT_DIR;
   const checkoutPages = (checkout?.products ?? []).map((p) => `${zipCheckoutDir(checkoutRoot, p.key)}index.html`);
 
@@ -223,8 +242,12 @@ export function planFrom(
   const hasOgImage = source.pages.some((p) => effectiveSeo(settings, parsePageSeo(p.seo)).ogImageKey);
   if (hasOgImage && !source.offer.liveUrl) warnings.push(OG_IMAGE_WARNING);
 
+  // Numa hospedagem sem PHP, a função e os manifestos também não podem colidir com o "Com scripts".
+  const serverlessReserved =
+    serverless && (payment || checkout) ? serverlessReservedPaths(options.target as "vercel" | "netlify") : [];
+  const reservedExtra = [SCRIPT_PLACEHOLDER, ...checkoutPages, ...serverlessReserved];
   const preserve: PreservePlan = preservePages.length
-    ? planPreserveFiles(source, layout, reservedZipPaths(layout, [SCRIPT_PLACEHOLDER, ...checkoutPages]))
+    ? planPreserveFiles(source, layout, reservedZipPaths(layout, reservedExtra))
     : { entries: [], collisions: [], blocked: [] };
   // Por último (nunca no lugar de outro arquivo): os caminhos originais das páginas
   // do funil clonado, que o JavaScript das páginas "Com scripts" ainda usa.
@@ -233,10 +256,7 @@ export function planFrom(
         offerRoutes(source.pages),
         source.pages,
         layout.pageDirs,
-        [
-          ...reservedZipPaths(layout, [SCRIPT_PLACEHOLDER, ...checkoutPages]),
-          ...preserve.entries.map((e) => e.zipPath),
-        ],
+        [...reservedZipPaths(layout, reservedExtra), ...preserve.entries.map((e) => e.zipPath)],
         checkoutPages.length ? [checkoutRoot] : [],
       )
     : [];
@@ -272,7 +292,22 @@ export function planFrom(
       { path: HTACCESS_FILE, kind: "file", label: "Bloqueia a pasta dos tokens (Apache)" },
     );
   }
-  if (payment && !checkout) {
+  if ((payment || checkout) && serverless) {
+    const t = options.target as "vercel" | "netlify";
+    tree.push(
+      {
+        path: SERVERLESS_FUNCTION_PATH[t],
+        kind: "file",
+        label: serverlessTreeLabel(t, zipPaymentGateways(payment, checkout)),
+      },
+      { path: SERVERLESS_MANIFEST_PATH[t], kind: "file", label: "Configuração da hospedagem (gerada automaticamente)" },
+      {
+        path: ENV_EXAMPLE_PATH,
+        kind: "file",
+        label: "Modelo das variáveis de ambiente (cole os valores no painel, nunca aqui)",
+      },
+    );
+  } else if (payment && !checkout) {
     tree.push(
       { path: PAGAMENTO_FILE, kind: "file", label: PAYMENT_TREE_LABEL },
       { path: PAGAMENTO_CONFIG_FILE, kind: "file", label: "Chave da Kyvo e produtos do pagamento (não compartilhe)" },
@@ -638,6 +673,17 @@ export async function exportPlan(offerId: string, rawOptions?: unknown): Promise
     // O pagamento.php e a pasta pagamento-dados vão no ZIP (pagamento na página OU checkout):
     // o "Como subir na hospedagem" avisa de não subir as chaves numa hospedagem sem PHP.
     ...((payment || checkout) && { hasPayments: true, paymentGateways: zipPaymentGateways(payment, checkout) }),
+    ...((payment || checkout) &&
+      isServerlessTarget(ctx.options.target) && {
+        payDeploy: {
+          secretEnv: PAY_SECRET_ENV_NAME,
+          secret: offerPaySecret(offerId),
+          gateways: serverlessGateways(payment, checkout).map((p) => ({
+            envVar: GATEWAY_ENV_NAME[p],
+            label: PROVIDER_LABEL[p],
+          })),
+        },
+      }),
     ...(cloned.length > 0 && { clonedCheckoutLinks: cloned }),
     ...(legalPages.length > 0 && {
       legalLinkPages: legalPages.map((p) => ({ name: p.name, documentId: p.documentId })),

@@ -53,7 +53,8 @@ function sameOptions(a: ExportOptions, b: ExportOptions) {
     a.splitter === b.splitter &&
     a.serverEvents === b.serverEvents &&
     a.optimizeHtml === b.optimizeHtml &&
-    a.lighterImages === b.lighterImages
+    a.lighterImages === b.lighterImages &&
+    a.target === b.target
   );
 }
 

@@ -58,6 +58,14 @@ export const ExportOptionsSchema = z.object({
    * páginas que não são "Com scripts"; o visual não muda.
    */
   lighterImages: z.boolean().default(true),
+  /**
+   * Onde o ZIP vai rodar o pagamento: "php" (padrão — a maioria das hospedagens,
+   * com pagamento.php), ou "vercel"/"netlify" (hospedagem SEM PHP — uma função
+   * Node no lugar; a chave fica nas variáveis de ambiente). Só muda o backend de
+   * pagamento; o resto do ZIP é igual. `.catch` para ofertas/ZIPs antigos
+   * (sem o campo) continuarem valendo como "php".
+   */
+  target: z.enum(["php", "vercel", "netlify"]).catch("php").default("php"),
 });
 export type ExportOptions = z.infer<typeof ExportOptionsSchema>;
 
@@ -124,6 +132,16 @@ export interface ExportTreeItem {
   label: string;
 }
 
+/** O que colar nas variáveis de ambiente da hospedagem sem PHP (Vercel/Netlify). */
+export interface PayDeployInfo {
+  /** Nome da variável do segredo (OS_PAY_SECRET). */
+  secretEnv: string;
+  /** Valor do segredo (gerado pela oferta; cole no painel, nunca em arquivo). */
+  secret: string;
+  /** Chave de cada gateway usado: a variável e o nome do gateway. */
+  gateways: { envVar: string; label: string }[];
+}
+
 /**
  * Prévia do que vai no ZIP (exportPlanAction): barata de calcular, sem montar
  * as páginas. Com as opções escolhidas (padrão: ExportOptionsSchema).
@@ -163,6 +181,12 @@ export interface ExportPlan {
   hasPayments?: boolean;
   /** Gateways com chave no pagamento-dados/config.php ("Kyvo", "FlevoPay", "BlackCat"). */
   paymentGateways?: string[];
+  /**
+   * Só nos destinos sem PHP (Vercel/Netlify) com pagamento: o que o usuário cola
+   * nas variáveis de ambiente da hospedagem (o guia mostra). O segredo nunca vai
+   * para arquivo nenhum do ZIP — só aparece aqui, na tela.
+   */
+  payDeploy?: PayDeployInfo;
   /** Links de pagamento na página com algo faltando (conserto "Abrir o link"). */
   paymentLinks?: { linkId: string; label: string }[];
   /** Páginas de obrigado sem o bloco "Acesso ao produto" (conserto "Abrir no editor"). */

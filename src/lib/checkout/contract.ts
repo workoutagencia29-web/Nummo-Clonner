@@ -384,10 +384,15 @@ export function checkoutTotal(
 export const CHECKOUT_KEY_RE = /^[a-z0-9-]{1,80}$/;
 /**
  * Pedido aceito do navegador (a credencial pública: ver o topo do arquivo):
- * de 16 a 100 caracteres, nunca só algarismos — um número de cobrança do
- * gateway (sequencial) nunca vale como credencial.
+ * de 16 a 512 caracteres, nunca só algarismos — um número de cobrança do
+ * gateway (sequencial) nunca vale como credencial. Vai até 512 porque na
+ * hospedagem sem PHP (Vercel/Netlify) a credencial é um token lacrado
+ * (ck_… + base64url, maior que o "ck_"+24 do pagamento.php); o charset
+ * base64url cabe no conjunto, e o "ck_" garante que nunca é só algarismos. O
+ * pagamento.php continua com {16,100} (a credencial curta dele; o token nunca
+ * chega lá).
  */
-export const CHECKOUT_ORDER_RE = /^(?![0-9]+$)[A-Za-z0-9_-]{16,100}$/;
+export const CHECKOUT_ORDER_RE = /^(?![0-9]+$)[A-Za-z0-9_-]{16,512}$/;
 
 /** O texto pode ser a credencial pública de um pedido do checkout? */
 export function isCheckoutOrderId(value: unknown): boolean {

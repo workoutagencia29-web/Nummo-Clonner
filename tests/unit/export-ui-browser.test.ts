@@ -165,7 +165,13 @@ interface Session {
   seq: number;
 }
 
-const DEFAULTS: ExportOptions = { splitter: true, serverEvents: false, optimizeHtml: true, lighterImages: true };
+const DEFAULTS: ExportOptions = {
+  splitter: true,
+  serverEvents: false,
+  optimizeHtml: true,
+  lighterImages: true,
+  target: "php",
+};
 const FILE = "oferta-teste-2026-09-29.zip";
 
 function view(over: Partial<ExportView> & { id: string }): ExportView {
@@ -477,7 +483,7 @@ describe("Baixar ZIP — diálogo", () => {
     await poll(() => treeLabel(s, "index.html").textContent()).toContain("versão A (principal)");
     await poll(() => callsOf(s, "exportPlanAction").at(-1)?.input).toEqual({
       offerId: "o1",
-      options: { splitter: false, serverEvents: true },
+      options: { splitter: false, serverEvents: true, target: "php" },
     });
     // O aviso de PHP do plano não se repete em "Antes de subir" (já está na opção).
     expect(await d.getByText("Antes de subir").count()).toBe(0);
@@ -731,7 +737,7 @@ describe("Baixar ZIP — diálogo", () => {
           progress: 100,
           bytes: 850 * 1024,
           createdAt: day(28),
-          options: { splitter: false, serverEvents: true, optimizeHtml: true, lighterImages: true },
+          options: { splitter: false, serverEvents: true, optimizeHtml: true, lighterImages: true, target: "php" },
         }),
         view({ id: "e2", status: "FAILED", progress: 40, createdAt: day(27), errorMessage: "A página X está vazia." }),
         view({ id: "e1", status: "DONE", progress: 100, bytes: 3 * 1024 * 1024, createdAt: day(26) }),
@@ -775,7 +781,7 @@ describe("Baixar ZIP — diálogo", () => {
     await waitFor(() => callsOf(s, "startExportAction").length === 1, "Gerar ZIP");
     expect(callsOf(s, "startExportAction")[0].input).toEqual({
       offerId: "o1",
-      options: { splitter: false, serverEvents: true, optimizeHtml: true, lighterImages: true },
+      options: { splitter: false, serverEvents: true, optimizeHtml: true, lighterImages: true, target: "php" },
     });
   });
 
@@ -963,7 +969,7 @@ describe("Baixar ZIP — diálogo", () => {
           id: "e1",
           status: "DONE",
           progress: 100,
-          options: { splitter: true, serverEvents: true, optimizeHtml: true, lighterImages: true },
+          options: { splitter: true, serverEvents: true, optimizeHtml: true, lighterImages: true, target: "php" },
         }),
       ],
     });
@@ -1092,7 +1098,7 @@ describe("Baixar ZIP — diálogo", () => {
           id: "e1",
           status: "DONE",
           progress: 100,
-          options: { splitter: true, serverEvents: true, optimizeHtml: true, lighterImages: true },
+          options: { splitter: true, serverEvents: true, optimizeHtml: true, lighterImages: true, target: "php" },
         }),
       ],
     });
@@ -1111,7 +1117,7 @@ describe("Baixar ZIP — diálogo", () => {
     // Com o plano (há token), as opções do último ZIP vão como estavam, com o eventos.php.
     await poll(() => callsOf(s, "startExportAction")[0]?.input).toEqual({
       offerId: "o1",
-      options: { splitter: true, serverEvents: true, optimizeHtml: true, lighterImages: true },
+      options: { splitter: true, serverEvents: true, optimizeHtml: true, lighterImages: true, target: "php" },
     });
   });
 

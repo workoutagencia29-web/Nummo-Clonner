@@ -179,7 +179,7 @@ beforeAll(async () => {
   const target = path.join(tmp, "oferta.zip");
   await buildExport({
     offerId,
-    options: { splitter: true, serverEvents: false, optimizeHtml: true, lighterImages: true },
+    options: { splitter: true, serverEvents: false, optimizeHtml: true, lighterImages: true, target: "php" },
     target,
   });
   const dir = path.join(tmp, "site");

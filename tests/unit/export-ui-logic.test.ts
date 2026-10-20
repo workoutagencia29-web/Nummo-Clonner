@@ -39,7 +39,7 @@ function view(over: Partial<ExportView> & { id: string }): ExportView {
     status: "DONE",
     progress: 100,
     step: null,
-    options: { splitter: true, serverEvents: false, optimizeHtml: true, lighterImages: true },
+    options: { splitter: true, serverEvents: false, optimizeHtml: true, lighterImages: true, target: "php" },
     fileName: "oferta-2026-09-29.zip",
     bytes: 1000,
     errorMessage: null,
@@ -149,18 +149,18 @@ describe("treeForOptions", () => {
   ];
 
   it("com as mesmas opções do plano, a árvore é a dele, sem mudar nada", () => {
-    expect(treeForOptions(plan, { splitter: true, serverEvents: false })).toBe(TREE);
+    expect(treeForOptions(plan, { splitter: true, serverEvents: false, target: "php" })).toBe(TREE);
     expect(
       treeForOptions(
         { tree: withEvents, hasServerEventTokens: true },
-        { splitter: false, serverEvents: true },
-        { splitter: false, serverEvents: true },
+        { splitter: false, serverEvents: true, target: "php" },
+        { splitter: false, serverEvents: true, target: "php" },
       ),
     ).toBe(withEvents);
   });
 
   it("acabou de desligar o divisor: o index.html passa a mostrar a versão de controle", () => {
-    const tree = treeForOptions(plan, { splitter: false, serverEvents: false });
+    const tree = treeForOptions(plan, { splitter: false, serverEvents: false, target: "php" });
     expect(tree[0]).toEqual({ path: "index.html", kind: "page", label: splitterOffLabel(TREE[0].label) });
     expect(tree.slice(1)).toEqual(TREE.slice(1));
     // Não altera o plano recebido.
@@ -170,8 +170,8 @@ describe("treeForOptions", () => {
     expect(
       treeForOptions(
         { tree: pageTree, hasServerEventTokens: false },
-        { splitter: true, serverEvents: false },
-        { splitter: false, serverEvents: false },
+        { splitter: true, serverEvents: false, target: "php" },
+        { splitter: false, serverEvents: false, target: "php" },
       ),
     ).toEqual(pageTree);
   });
@@ -183,7 +183,10 @@ describe("treeForOptions", () => {
       { path: "oferta-b/index.html", kind: "variant", label: "Página principal — versão B (Headline nova) · 33,5%" },
       { path: "upsell/index.html", kind: "page", label: "Upsell · 100%" },
     ];
-    const off = treeForOptions({ tree: server, hasServerEventTokens: false }, { splitter: false, serverEvents: false });
+    const off = treeForOptions(
+      { tree: server, hasServerEventTokens: false },
+      { splitter: false, serverEvents: false, target: "php" },
+    );
     expect(off.map((e) => e.label)).toEqual([
       SPLITTER_OFF_LABEL,
       "Página principal — versão A",
@@ -192,15 +195,18 @@ describe("treeForOptions", () => {
       "Upsell · 100%",
     ]);
     // Com o divisor ligado (como o plano), nada muda.
-    expect(treeForOptions({ tree: server, hasServerEventTokens: false }, { splitter: true, serverEvents: false })).toBe(
-      server,
-    );
+    expect(
+      treeForOptions(
+        { tree: server, hasServerEventTokens: false },
+        { splitter: true, serverEvents: false, target: "php" },
+      ),
+    ).toBe(server);
   });
 
   it("o eventos.php entra com as plataformas atendidas no rótulo, como o servidor mostra", () => {
     const on = treeForOptions(
       { tree: TREE, hasServerEventTokens: true, serverEventVendors: ["TIKTOK", "META"] },
-      { splitter: true, serverEvents: true },
+      { splitter: true, serverEvents: true, target: "php" },
     );
     // O requisito vem primeiro (não some quando o rótulo é cortado) e sem parênteses dentro de parênteses.
     expect(on.find((e) => e.path === "eventos.php")?.label).toBe(
@@ -216,21 +222,24 @@ describe("treeForOptions", () => {
   });
 
   it("acabou de ligar o eventos.php: ele e os arquivos dele entram antes do LEIA-ME", () => {
-    const on = treeForOptions(plan, { splitter: true, serverEvents: true });
+    const on = treeForOptions(plan, { splitter: true, serverEvents: true, target: "php" });
     const paths = on.map((e) => e.path);
     expect(paths.slice(-4)).toEqual([...EVENTS_PATHS, "LEIA-ME.txt"]);
     expect(on.slice(-4, -1)).toEqual(EVENTS_FILES);
     expect(TREE).toHaveLength(8);
     // Sem token: nunca aparece.
-    const noToken = treeForOptions({ tree: TREE, hasServerEventTokens: false }, { splitter: true, serverEvents: true });
+    const noToken = treeForOptions(
+      { tree: TREE, hasServerEventTokens: false },
+      { splitter: true, serverEvents: true, target: "php" },
+    );
     expect(noToken).toBe(TREE);
   });
 
   it("acabou de desligar o eventos.php: ele e os arquivos dele saem", () => {
     const off = treeForOptions(
       { tree: withEvents, hasServerEventTokens: true },
-      { splitter: true, serverEvents: false },
-      { splitter: true, serverEvents: true },
+      { splitter: true, serverEvents: false, target: "php" },
+      { splitter: true, serverEvents: true, target: "php" },
     );
     expect(off).toEqual(TREE);
     // Um eventos.php dentro de uma pasta (arquivo do "Preservar JS") não é o da API.
@@ -241,14 +250,17 @@ describe("treeForOptions", () => {
     expect(
       treeForOptions(
         { tree: nested, hasServerEventTokens: true },
-        { splitter: true, serverEvents: false },
-        { splitter: true, serverEvents: true },
+        { splitter: true, serverEvents: false, target: "php" },
+        { splitter: true, serverEvents: true, target: "php" },
       ),
     ).toEqual([nested[0]]);
   });
 
   it("plano já com o eventos.php: não repete", () => {
-    const on = treeForOptions({ tree: withEvents, hasServerEventTokens: true }, { splitter: true, serverEvents: true });
+    const on = treeForOptions(
+      { tree: withEvents, hasServerEventTokens: true },
+      { splitter: true, serverEvents: true, target: "php" },
+    );
     for (const p of EVENTS_PATHS) expect(on.filter((e) => e.path === p)).toHaveLength(1);
     expect(on.find((e) => e.path === "eventos.php")?.label).toContain("Meta");
   });
@@ -256,7 +268,7 @@ describe("treeForOptions", () => {
   it("sem LEIA-ME, o eventos.php vai para o fim", () => {
     const tree = treeForOptions(
       { tree: [{ path: "index.html", kind: "page", label: "Página inicial" }], hasServerEventTokens: true },
-      { splitter: true, serverEvents: true },
+      { splitter: true, serverEvents: true, target: "php" },
     );
     expect(tree.map((e) => e.path)).toEqual(["index.html", ...EVENTS_PATHS]);
   });
@@ -264,15 +276,17 @@ describe("treeForOptions", () => {
 
 describe("planOptionsFor e visiblePlanWarnings", () => {
   it("o plano nunca é pedido com o eventos.php sem token", () => {
-    expect(planOptionsFor({ splitter: false, serverEvents: true }, true)).toEqual({
+    expect(planOptionsFor({ splitter: false, serverEvents: true, target: "php" }, true)).toEqual({
       splitter: false,
       serverEvents: true,
+      target: "php",
     });
-    expect(planOptionsFor({ splitter: true, serverEvents: true }, false)).toEqual({
+    expect(planOptionsFor({ splitter: true, serverEvents: true, target: "php" }, false)).toEqual({
       splitter: true,
       serverEvents: false,
+      target: "php",
     });
-    expect(planOptionsFor({ splitter: true, serverEvents: true }, undefined).serverEvents).toBe(false);
+    expect(planOptionsFor({ splitter: true, serverEvents: true, target: "php" }, undefined).serverEvents).toBe(false);
   });
 
   it("o aviso de PHP do eventos.php fica na própria opção; os outros aparecem", () => {
@@ -324,13 +338,22 @@ describe("formatBytes", () => {
 describe("optionsSummary", () => {
   it("lista só as opções ligadas; o divisor só conta quando a oferta tem versões", () => {
     expect(
-      optionsSummary({ splitter: true, serverEvents: true, optimizeHtml: true, lighterImages: true }, true),
+      optionsSummary(
+        { splitter: true, serverEvents: true, optimizeHtml: true, lighterImages: true, target: "php" },
+        true,
+      ),
     ).toEqual(["Divisor A/B", "eventos.php", "HTML otimizado"]);
     expect(
-      optionsSummary({ splitter: true, serverEvents: false, optimizeHtml: true, lighterImages: true }, false),
+      optionsSummary(
+        { splitter: true, serverEvents: false, optimizeHtml: true, lighterImages: true, target: "php" },
+        false,
+      ),
     ).toEqual(["HTML otimizado"]);
     expect(
-      optionsSummary({ splitter: false, serverEvents: false, optimizeHtml: false, lighterImages: true }, true),
+      optionsSummary(
+        { splitter: false, serverEvents: false, optimizeHtml: false, lighterImages: true, target: "php" },
+        true,
+      ),
     ).toEqual([]);
   });
 
@@ -347,23 +370,25 @@ describe("opções iniciais e envio", () => {
       serverEvents: false,
       optimizeHtml: true,
       lighterImages: true,
+      target: "php",
     });
     expect(initialOptions(null)).toEqual({
       splitter: true,
       serverEvents: false,
       optimizeHtml: true,
       lighterImages: true,
+      target: "php",
     });
     const list = [
       view({
         id: "3",
         status: "FAILED",
-        options: { splitter: false, serverEvents: false, optimizeHtml: false, lighterImages: true },
+        options: { splitter: false, serverEvents: false, optimizeHtml: false, lighterImages: true, target: "php" },
       }),
       view({
         id: "2",
         status: "DONE",
-        options: { splitter: false, serverEvents: true, optimizeHtml: true, lighterImages: true },
+        options: { splitter: false, serverEvents: true, optimizeHtml: true, lighterImages: true, target: "php" },
       }),
       view({ id: "1", status: "DONE" }),
     ];
@@ -372,6 +397,7 @@ describe("opções iniciais e envio", () => {
       serverEvents: true,
       optimizeHtml: true,
       lighterImages: true,
+      target: "php",
     });
   });
 
@@ -382,6 +408,7 @@ describe("opções iniciais e envio", () => {
       serverEvents: false,
       optimizeHtml: true,
       lighterImages: true,
+      target: "php",
     });
   });
 
@@ -399,7 +426,13 @@ describe("opções iniciais e envio", () => {
   });
 
   it("sem token configurado, nunca pede o eventos.php", () => {
-    const opts = { splitter: true, serverEvents: true, optimizeHtml: true, lighterImages: true };
+    const opts = {
+      splitter: true,
+      serverEvents: true,
+      optimizeHtml: true,
+      lighterImages: true,
+      target: "php" as const,
+    };
     expect(optionsToSend(opts, { hasServerEventTokens: true }).serverEvents).toBe(true);
     expect(optionsToSend(opts, { hasServerEventTokens: false }).serverEvents).toBe(false);
     expect(optionsToSend(opts, null).serverEvents).toBe(false);

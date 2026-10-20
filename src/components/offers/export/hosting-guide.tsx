@@ -3,8 +3,10 @@
 import { ChevronDownIcon, UploadIcon } from "lucide-react";
 import type { ReactNode } from "react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import type { PayDeployInfo } from "@/lib/export/options";
 import { PAGAMENTO_CONFIG_DIR, PAGAMENTO_FILE } from "@/lib/export/payment-php";
 import { EVENTOS_CONFIG_DIR } from "@/lib/export/php";
+import { type ExportTarget, isServerlessTarget, SERVERLESS_ENDPOINT } from "@/lib/export/serverless";
 import { EVENTS_FILE } from "./logic";
 
 function Section({ title, children }: { title: string; children: ReactNode }) {
@@ -53,24 +55,57 @@ export function SafariZipTip() {
  * testar depois de subir.
  * (O mesmo texto do LEIA-ME.txt, src/lib/export/readme.ts.)
  */
+/** Variáveis de ambiente a colar no painel da hospedagem sem PHP. */
+function EnvVars({ info }: { info: PayDeployInfo }) {
+  return (
+    <div className="flex flex-col gap-2 rounded-md border bg-muted/40 p-3">
+      <p className="font-medium text-foreground text-xs">
+        Variáveis de ambiente (cole no painel da hospedagem; NUNCA em arquivo do site):
+      </p>
+      <div className="flex flex-col gap-0.5">
+        <Code>{info.secretEnv}</Code>
+        <p className="break-all pl-1 text-foreground">
+          = <span className="select-all font-mono text-[12px]">{info.secret}</span>
+        </p>
+        <p className="pl-1 text-[11px]">(valor gerado por esta oferta; selecione e copie)</p>
+      </div>
+      {info.gateways.map((g) => (
+        <div key={g.envVar} className="flex flex-col gap-0.5">
+          <Code>{g.envVar}</Code>
+          <p className="pl-1">= a sua chave de API da {g.label}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function HostingGuide({
   open,
   onOpenChange,
   preserveJsPages = [],
   hasPayments = false,
   paymentGateways = [],
+  target = "php",
+  payDeploy,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   /** Páginas no modo "Preservar JS" (só funcionam na raiz do domínio). */
   preserveJsPages?: string[];
-  /** O ZIP leva o pagamento.php (pagamento na página ou checkout do Offer Studio). */
+  /** O ZIP leva o backend de pagamento (pagamento na página ou checkout do Offer Studio). */
   hasPayments?: boolean;
   /** Gateways com chave na pasta pagamento-dados ("Kyvo", "FlevoPay", "BlackCat"). */
   paymentGateways?: string[];
+  /** Destino do ZIP (PHP ou hospedagem sem PHP). */
+  target?: ExportTarget;
+  /** Nas hospedagens sem PHP com pagamento: o que colar nas variáveis de ambiente. */
+  payDeploy?: PayDeployInfo;
 }) {
   const gateways = paymentGateways.length ? paymentGateways : ["Kyvo"];
   const keys = `${gateways.length === 1 ? "a chave" : "as chaves"} ${joinPt(gateways.map((g) => `da ${g}`))}`;
+  const serverless = isServerlessTarget(target);
+  const platformName = target === "vercel" ? "Vercel" : "Netlify";
+  const endpoint = serverless ? SERVERLESS_ENDPOINT[target] : `/${PAGAMENTO_FILE}`;
   return (
     <Collapsible open={open} onOpenChange={onOpenChange} className="rounded-lg border">
       <CollapsibleTrigger className="group flex w-full items-center gap-2 rounded-lg px-4 py-3 text-left font-medium text-sm outline-none hover:bg-accent/50 focus-visible:ring-[3px] focus-visible:ring-ring/50">
@@ -154,21 +189,68 @@ export function HostingGuide({
           )}
         </Section>
 
-        <Section title="Netlify, Cloudflare Pages e outras sem PHP">
-          <p>
-            Extraia o ZIP no computador e envie a pasta: na Netlify, arraste para <strong>Deploy manually</strong>; na
-            Cloudflare Pages, use <strong>Upload assets</strong>. Nessas hospedagens, deixe a opção do{" "}
-            <Code>{EVENTS_FILE}</Code> desligada (sem PHP, o arquivo com o seu token ficaria visível).
-          </p>
-          {hasPayments && (
+        {serverless ? (
+          <Section title={`Subir na ${platformName} (sem PHP)`}>
+            {target === "netlify" ? (
+              <ol className="ml-5 list-decimal space-y-1">
+                <li>
+                  Extraia o ZIP no computador. Em <strong>app.netlify.com</strong>, clique em{" "}
+                  <strong>Add new site → Deploy manually</strong> e arraste a pasta extraída.
+                </li>
+                <li>
+                  Abra <strong>Site configuration → Environment variables</strong> e cadastre as variáveis abaixo.
+                </li>
+                <li>
+                  Volte em <strong>Deploys</strong> e clique em <strong>Trigger deploy → Deploy site</strong> para o
+                  site subir já com as variáveis.
+                </li>
+              </ol>
+            ) : (
+              <ol className="ml-5 list-decimal space-y-1">
+                <li>
+                  Extraia o ZIP no computador. Instale o Vercel CLI uma vez (no Terminal: <Code>npm i -g vercel</Code>),
+                  entre na pasta extraída e rode <Code>vercel</Code>, seguindo as perguntas.
+                </li>
+                <li>
+                  No painel da Vercel, em <strong>Project → Settings → Environment Variables</strong>, cadastre as
+                  variáveis abaixo.
+                </li>
+                <li>
+                  Rode <Code>vercel --prod</Code> para publicar com as variáveis.
+                </li>
+              </ol>
+            )}
+            {hasPayments && payDeploy ? (
+              <EnvVars info={payDeploy} />
+            ) : (
+              <p>
+                Deixe a opção do <Code>{EVENTS_FILE}</Code> desligada (sem PHP, o arquivo com o seu token ficaria
+                visível).
+              </p>
+            )}
             <p>
-              O pagamento <strong>não funciona</strong> nessas hospedagens: o <Code>{PAGAMENTO_FILE}</Code> precisa de
-              PHP e HTTPS. Não envie para lá o <Code>{PAGAMENTO_FILE}</Code> nem a pasta{" "}
-              <Code>{PAGAMENTO_CONFIG_DIR}</Code> (ela guarda {keys}, que{" "}
-              {gateways.length === 1 ? "ficaria visível" : "ficariam visíveis"}).
+              A {platformName} já serve o site em HTTPS. O segredo e as chaves ficam só nas variáveis de ambiente —
+              nunca em arquivo do site.
             </p>
-          )}
-        </Section>
+          </Section>
+        ) : (
+          <Section title="Netlify, Cloudflare Pages e outras sem PHP">
+            <p>
+              Extraia o ZIP no computador e envie a pasta: na Netlify, arraste para <strong>Deploy manually</strong>; na
+              Cloudflare Pages, use <strong>Upload assets</strong>. Nessas hospedagens, deixe a opção do{" "}
+              <Code>{EVENTS_FILE}</Code> desligada (sem PHP, o arquivo com o seu token ficaria visível).
+            </p>
+            {hasPayments && (
+              <p>
+                O pagamento <strong>não funciona</strong> nessas hospedagens com este ZIP: o{" "}
+                <Code>{PAGAMENTO_FILE}</Code> precisa de PHP. Para hospedar na Vercel ou na Netlify, gere o ZIP
+                escolhendo esse destino em “Onde você vai hospedar?”. Não envie para um site estático o{" "}
+                <Code>{PAGAMENTO_FILE}</Code> nem a pasta <Code>{PAGAMENTO_CONFIG_DIR}</Code> (ela guarda {keys}, que{" "}
+                {gateways.length === 1 ? "ficaria visível" : "ficariam visíveis"}).
+              </p>
+            )}
+          </Section>
+        )}
 
         <Section title="Depois de subir, teste">
           <ul className="ml-5 list-disc space-y-1">
@@ -186,14 +268,22 @@ export function HostingGuide({
               código, a hospedagem não tem PHP: apague na hora o <Code>{EVENTS_FILE}</Code> e a pasta{" "}
               <Code>{EVENTOS_CONFIG_DIR}</Code> (ela guarda o seu token).
             </li>
-            {hasPayments && (
-              <li>
-                Abra <strong>seudominio.com.br/{PAGAMENTO_FILE}</strong>: deve aparecer “funcionando”, com {keys}{" "}
-                {gateways.length === 1 ? "cadastrada" : "cadastradas"} e HTTPS “sim”. Depois faça uma compra de teste
-                com um valor baixo (o LEIA-ME.txt explica o passo a passo) e confira a venda no painel{" "}
-                {gateways.length === 1 ? `da ${gateways[0]}` : "do gateway"}.
-              </li>
-            )}
+            {hasPayments &&
+              (serverless ? (
+                <li>
+                  Abra <strong>seudominio{endpoint}</strong>: deve aparecer um resumo com{" "}
+                  <strong>“segredo”: true</strong> e as chaves marcadas. Se vier “segredo”: false ou uma chave em false,
+                  falta cadastrar a variável no painel da {platformName}. Depois faça uma compra de teste com um valor
+                  baixo e confira a venda no painel {gateways.length === 1 ? `da ${gateways[0]}` : "do gateway"}.
+                </li>
+              ) : (
+                <li>
+                  Abra <strong>seudominio.com.br/{PAGAMENTO_FILE}</strong>: deve aparecer “funcionando”, com {keys}{" "}
+                  {gateways.length === 1 ? "cadastrada" : "cadastradas"} e HTTPS “sim”. Depois faça uma compra de teste
+                  com um valor baixo (o LEIA-ME.txt explica o passo a passo) e confira a venda no painel{" "}
+                  {gateways.length === 1 ? `da ${gateways[0]}` : "do gateway"}.
+                </li>
+              ))}
           </ul>
         </Section>
       </CollapsibleContent>

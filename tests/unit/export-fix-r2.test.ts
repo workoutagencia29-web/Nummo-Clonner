@@ -558,7 +558,7 @@ function exportView(over: Partial<ExportView> & { id: string }): ExportView {
     status: "DONE",
     progress: 100,
     step: null,
-    options: { splitter: true, serverEvents: false, optimizeHtml: true, lighterImages: true },
+    options: { splitter: true, serverEvents: false, optimizeHtml: true, lighterImages: true, target: "php" },
     fileName: "oferta.zip",
     bytes: 1024,
     errorMessage: null,

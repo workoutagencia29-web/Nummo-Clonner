@@ -84,6 +84,17 @@ import {
 } from "@/lib/export/php";
 import { leiaMe } from "@/lib/export/readme";
 import { routeRedirectHtml, zipPageRoutes } from "@/lib/export/routes";
+import {
+  ENV_EXAMPLE_PATH,
+  GATEWAY_ENV_NAME,
+  isServerlessTarget,
+  PAY_SECRET_ENV_NAME,
+  paymentEndpoint,
+  SERVERLESS_FUNCTION_PATH,
+  SERVERLESS_MANIFEST_PATH,
+  serverlessEnvExample,
+  serverlessManifest,
+} from "@/lib/export/serverless";
 import { splitterHtml } from "@/lib/export/splitter";
 import {
   clonedCheckoutWarning,
@@ -104,6 +115,7 @@ import {
   paymentScript,
   productScript,
   runtimeScript,
+  serverlessFunctionJs,
   trackingScript,
 } from "@/lib/runtime-bundle";
 import { seoRenderFrom } from "@/lib/seo-render";
@@ -120,6 +132,7 @@ import { NO_PAGES_MESSAGE } from "./keys";
 import { loadPaymentExport, zipPaymentConfig, zipPaymentRender } from "./payments";
 import { clonedCheckoutPlan, planFrom, README_FILE, SERVER_VENDOR_LABEL, uniqueVendors } from "./plan";
 import { PRESERVE_COPY_MAX_BYTES } from "./preserve";
+import { buildServerlessConfig, serverlessGateways } from "./serverless-config";
 import { type ExportSource, loadExportSource, type SourceDocument, type SourcePage, serverEventPixels } from "./source";
 import { writeZip, type ZipEntry } from "./zip";
 
@@ -387,6 +400,7 @@ export async function buildExport(input: BuildInput): Promise<BuildResult> {
           ? `<script src="${rel}${ASSETS_DIR}${paymentJs.name}" ${PAYMENT_SCRIPT_ATTR}></script>`
           : "",
         checkout: checkout !== null,
+        target: input.options.target,
       }),
       routes: pageRoutes?.config ?? null,
     });
@@ -481,7 +495,7 @@ export async function buildExport(input: BuildInput): Promise<BuildResult> {
       variant: null,
     });
     let out = await renderCheckoutPage(source.offer.id, product.key, {
-      endpoint: `${rel}${PAGAMENTO_FILE}`,
+      endpoint: paymentEndpoint(input.options.target, rel),
       simulation: false,
       pageHref,
       scriptTag: checkoutJs
@@ -589,14 +603,25 @@ export async function buildExport(input: BuildInput): Promise<BuildResult> {
     generated.set(HTACCESS_FILE, Buffer.from(htaccess(), "utf8"));
   }
 
-  // pagamento.php (+ pagamento-dados/config.php com as chaves e o .htaccess que bloqueia a pasta)
+  // Backend de pagamento: PHP (pagamento.php + config.php com a chave) OU, numa
+  // hospedagem sem PHP, uma função Node (a chave vem do ambiente, nunca de arquivo).
   if (payment || checkout) {
-    generated.set(PAGAMENTO_FILE, Buffer.from(pagamentoPhp(), "utf8"));
-    generated.set(
-      PAGAMENTO_CONFIG_FILE,
-      Buffer.from(pagamentoConfigPhp(await zipPaymentConfig(payment, layout.pageDirs, checkout)), "utf8"),
-    );
-    generated.set(PAGAMENTO_HTACCESS_FILE, Buffer.from(pagamentoHtaccess(), "utf8"));
+    const t = input.options.target;
+    if (isServerlessTarget(t)) {
+      // Vercel/Netlify: função + manifesto + .env.example. NUNCA o config.php
+      // (que levaria a chave em texto para um host que serve arquivos estáticos).
+      const serverlessConfig = buildServerlessConfig(payment, checkout);
+      generated.set(SERVERLESS_FUNCTION_PATH[t], Buffer.from(serverlessFunctionJs(t, serverlessConfig), "utf8"));
+      generated.set(SERVERLESS_MANIFEST_PATH[t], Buffer.from(serverlessManifest(t), "utf8"));
+      generated.set(ENV_EXAMPLE_PATH, Buffer.from(serverlessEnvExample(serverlessGateways(payment, checkout)), "utf8"));
+    } else {
+      generated.set(PAGAMENTO_FILE, Buffer.from(pagamentoPhp(), "utf8"));
+      generated.set(
+        PAGAMENTO_CONFIG_FILE,
+        Buffer.from(pagamentoConfigPhp(await zipPaymentConfig(payment, layout.pageDirs, checkout)), "utf8"),
+      );
+      generated.set(PAGAMENTO_HTACCESS_FILE, Buffer.from(pagamentoHtaccess(), "utf8"));
+    }
   }
 
   // 404.html: "não encontrada" (e, na Cloudflare Pages, nada de entregar o divisor para qualquer caminho)
@@ -642,6 +667,11 @@ export async function buildExport(input: BuildInput): Promise<BuildResult> {
           gateway: PROVIDER_LABEL[p.provider],
         })),
         checkoutGateways: checkoutGateways(checkout).map((p) => PROVIDER_LABEL[p]),
+        target: input.options.target,
+        payEnvVars:
+          isServerlessTarget(input.options.target) && (payment || checkout)
+            ? [PAY_SECRET_ENV_NAME, ...serverlessGateways(payment, checkout).map((p) => GATEWAY_ENV_NAME[p])]
+            : undefined,
         preserveJs: plan.preserveJsPages,
         hiddenFromSearch: [...hiddenByType],
         warnings,

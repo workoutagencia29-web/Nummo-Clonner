@@ -31,6 +31,10 @@ export interface ReadmeInput {
   checkouts?: { name: string; dir: string; price: string; gateway: string }[];
   /** Gateways dos checkouts ("FlevoPay", "BlackCat", "Kyvo"). */
   checkoutGateways?: string[];
+  /** Destino do ZIP ("php", "vercel", "netlify"); sem o campo = "php". */
+  target?: "php" | "vercel" | "netlify";
+  /** Hospedagem sem PHP: nomes das variáveis de ambiente a cadastrar (OS_PAY_SECRET, OS_*_KEY). */
+  payEnvVars?: string[];
   /** Páginas "Com scripts" (modo PRESERVE_JS da clonagem). */
   preserveJs: string[];
   /** Páginas de obrigado/upsell que saíram fora do Google (noindex) por padrão. */
@@ -59,6 +63,9 @@ export function leiaMe(input: ReadmeInput): string {
   const gateways = input.checkoutGateways ?? [];
   const pixGateways = gateways.filter((g) => g !== "Kyvo");
   const withPagamento = payments.length > 0 || checkouts.length > 0;
+  const serverless = input.target === "vercel" || input.target === "netlify";
+  const platform = input.target === "vercel" ? "Vercel" : "Netlify";
+  const payEnvVars = input.payEnvVars ?? [];
 
   push(
     LINE,
@@ -143,7 +150,7 @@ export function leiaMe(input: ReadmeInput): string {
     "  junto o 404.html: sem ele, a Cloudflare Pages mostra a página inicial em",
     "  qualquer endereço errado.",
     ...(input.serverEvents.length ? ["  ATENÇÃO: nesses serviços o eventos.php NÃO funciona. Veja abaixo."] : []),
-    ...(withPagamento
+    ...(withPagamento && !serverless
       ? [
           `  ATENÇÃO: nesses serviços ${
             checkouts.length && payments.length
@@ -153,6 +160,9 @@ export function leiaMe(input: ReadmeInput): string {
                 : "o pagamento na página (pagamento.php) NÃO funciona"
           }. Veja abaixo.`,
         ]
+      : []),
+    ...(withPagamento && serverless
+      ? [`  Este ZIP é para a ${platform}: o pagamento roda numa função. Veja "PAGAMENTO" abaixo.`]
       : []),
     "",
     "FTP (FileZilla): descompacte o ZIP no computador e envie todo o conteúdo",
@@ -291,7 +301,43 @@ export function leiaMe(input: ReadmeInput): string {
     );
   }
 
-  if (payments.length) {
+  if (withPagamento && serverless) {
+    const whatRuns =
+      checkouts.length && payments.length
+        ? "o checkout do Offer Studio e o pagamento na página"
+        : checkouts.length
+          ? "o checkout do Offer Studio"
+          : "o pagamento na página";
+    push(
+      "",
+      `PAGAMENTO NA ${platform.toUpperCase()} (sem PHP)`,
+      "------------------------------------",
+      "",
+      `Neste ZIP, ${whatRuns} roda numa função Node (a pasta ${input.target === "vercel" ? "api/" : "netlify/functions/"}),`,
+      `não em PHP. A ${platform} já serve o site em HTTPS. A chave do gateway e o`,
+      "segredo NÃO estão em nenhum arquivo: ficam nas variáveis de ambiente.",
+      "",
+      "DEPOIS DE SUBIR, cadastre no painel da hospedagem, em",
+      `${input.target === "vercel" ? "Settings > Environment Variables" : "Site configuration > Environment variables"},`,
+      "estas variáveis (o arquivo .env.example lista os nomes):",
+      ...(payEnvVars.length ? payEnvVars.map((v) => `  • ${v}`) : ["  • OS_PAY_SECRET", "  • OS_<GATEWAY>_KEY"]),
+      "",
+      "O VALOR do OS_PAY_SECRET foi mostrado na tela do Offer Studio ao exportar",
+      '(seção "Como subir na hospedagem", botão de copiar). As OS_..._KEY recebem',
+      "a mesma chave de API que você cadastrou no Offer Studio. Sem essas",
+      'variáveis a função responde "configuração" e não cobra.',
+      "",
+      "Como conferir depois de subir:",
+      `  1. Abra meusite.com${input.target === "vercel" ? "/api/pagamento" : "/.netlify/functions/pagamento"} — deve aparecer`,
+      '     um resumo em JSON com "segredo": true e as chaves marcadas. Se vier',
+      '     "segredo": false ou uma chave false, falta cadastrar a variável.',
+      "  2. Faça uma compra de teste com um valor baixo e confira a venda no",
+      "     painel do gateway.",
+      "",
+    );
+  }
+
+  if (payments.length && !serverless) {
     push(
       "",
       "PAGAMENTO NA PÁGINA (pagamento.php)",
@@ -350,7 +396,7 @@ export function leiaMe(input: ReadmeInput): string {
     );
   }
 
-  if (checkouts.length) {
+  if (checkouts.length && !serverless) {
     const site = "meusite.com";
     push(
       "",

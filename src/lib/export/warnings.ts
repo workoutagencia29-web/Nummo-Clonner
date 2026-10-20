@@ -361,6 +361,24 @@ export function checkoutHostingWarning(gateways: readonly string[]): string {
 export const PAYMENT_HOSTING_WARNING =
   "O pagamento na página precisa de hospedagem com PHP 7.4 ou mais novo (com cURL) e do site em HTTPS (o cadeado no endereço): Hostinger, HostGator e cPanel têm. Em Netlify, Vercel, Cloudflare Pages ou outra hospedagem só de arquivos o pagamento não funciona e a chave da Kyvo ficaria visível: não suba lá o pagamento.php nem a pasta pagamento-dados.";
 
+/**
+ * ZIP para hospedagem SEM PHP (Vercel/Netlify): o pagamento roda numa função
+ * Node e a chave fica nas variáveis de ambiente (nunca em arquivo). O aviso diz
+ * o que configurar no painel depois de subir.
+ */
+export function serverlessHostingWarning(target: "vercel" | "netlify", gateways: readonly string[]): string {
+  const nome = target === "vercel" ? "Vercel" : "Netlify";
+  const chaves = gateways.length ? `a chave de ${joinPt([...gateways])}` : "a chave do gateway";
+  return `O pagamento vai rodar numa função da ${nome} (não precisa de PHP). Depois de subir, no painel da ${nome}, em “Environment variables / Variáveis de ambiente”, cole o OS_PAY_SECRET (o valor que o Offer Studio mostrou ao exportar) e ${chaves} (OS_…_KEY) — veja o .env.example e o LEIA-ME.txt. Sem essas variáveis a função responde “configuração” e não cobra. A ${nome} já serve o site em HTTPS.`;
+}
+
+/** Item da função serverless em "O que vai no ZIP". */
+export function serverlessTreeLabel(target: "vercel" | "netlify", gateways: readonly string[]): string {
+  const nome = target === "vercel" ? "Vercel" : "Netlify";
+  const names = gateways.length ? joinPt([...gateways]) : "do gateway";
+  return `Função de pagamento da ${nome} · cria as cobranças (${names}), confere o pagamento e entrega o acesso só a quem pagou (a chave vai nas variáveis de ambiente)`;
+}
+
 /** Problema do pagamento na página (src/lib/payments/checks.ts) → aviso do ZIP em pt-BR. */
 export function paymentIssueWarning(issue: PaymentIssue, provider = "Kyvo"): string {
   if (issue.kind === "key") {

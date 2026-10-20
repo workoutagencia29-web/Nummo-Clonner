@@ -46,7 +46,7 @@ interface PlanState extends Loaded<ExportPlan> {
   for: TreeOptions;
 }
 
-const DEFAULT_TREE_OPTIONS: TreeOptions = { splitter: true, serverEvents: false };
+const DEFAULT_TREE_OPTIONS: TreeOptions = { splitter: true, serverEvents: false, target: "php" };
 
 const empty = <T>(): Loaded<T> => ({ data: null, loading: false, error: null });
 
@@ -129,6 +129,7 @@ export function useExportController(offerId: string) {
   const tokens = plan.data?.hasServerEventTokens;
   const wantSplitter = options.splitter;
   const wantEvents = planOptionsFor(options, tokens).serverEvents;
+  const wantTarget = options.target;
   const planSeq = useRef(0);
   const loadPlan = useCallback(
     async (forOptions: TreeOptions) => {
@@ -145,8 +146,8 @@ export function useExportController(offerId: string) {
     [offerId],
   );
   const reloadPlan = useCallback(
-    () => loadPlan({ splitter: wantSplitter, serverEvents: wantEvents }),
-    [loadPlan, wantSplitter, wantEvents],
+    () => loadPlan({ splitter: wantSplitter, serverEvents: wantEvents, target: wantTarget }),
+    [loadPlan, wantSplitter, wantEvents, wantTarget],
   );
   // Ao abrir, na hora; ao mudar uma opção, logo depois (a árvore já se ajusta enquanto isso).
   const hasPlan = plan.data !== null;
@@ -157,11 +158,11 @@ export function useExportController(offerId: string) {
   useEffect(() => {
     if (!open) return;
     const timer = setTimeout(
-      () => void loadPlan({ splitter: wantSplitter, serverEvents: wantEvents }),
+      () => void loadPlan({ splitter: wantSplitter, serverEvents: wantEvents, target: wantTarget }),
       hasPlanRef.current ? 250 : 0,
     );
     return () => clearTimeout(timer);
-  }, [open, loadPlan, wantSplitter, wantEvents]);
+  }, [open, loadPlan, wantSplitter, wantEvents, wantTarget]);
 
   const historySeq = useRef(0);
   const loadHistory = useCallback(async () => {

@@ -71,7 +71,9 @@ describe("o pedido público é uma credencial", () => {
       expect(isCheckoutOrderId(bad), bad).toBe(false);
     for (const good of ["sim_0123456789abcdef01", "ck_Q1w2E3r4T5y6U7i8O9p0"])
       expect(isCheckoutOrderId(good), good).toBe(true);
-    expect(CHECKOUT_ORDER_RE.test("a".repeat(101))).toBe(false);
+    // Até 512 agora (o token lacrado do checkout serverless é maior que o "ck_"+24 do pagamento.php).
+    expect(CHECKOUT_ORDER_RE.test("a".repeat(513))).toBe(false);
+    expect(CHECKOUT_ORDER_RE.test(`ck_${"A1b2".repeat(80)}`)).toBe(true);
     expect(parseCheckoutRequest({ acao: "checkout_status", checkout: "checkout", pedido: "239" })).toBeNull();
   });
 

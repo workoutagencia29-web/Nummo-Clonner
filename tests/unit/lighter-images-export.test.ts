@@ -59,7 +59,7 @@ async function build(offerId: string, lighterImages: boolean, dir: string) {
   const target = path.join(tmp, `${lighterImages ? "com" : "sem"}.zip`);
   await buildExport({
     offerId,
-    options: { splitter: true, serverEvents: false, optimizeHtml: true, lighterImages },
+    options: { splitter: true, serverEvents: false, optimizeHtml: true, lighterImages, target: "php" },
     target,
     requestedAt: new Date(2026, 9, 9, 3, 0),
   });

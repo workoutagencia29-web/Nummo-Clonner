@@ -4,7 +4,8 @@
  * caminho relativo do pagamento.php) e os avisos (src/lib/export/warnings.ts).
  * A chave só é lida na montagem (worker), nunca na prévia do ZIP.
  */
-import { PAGAMENTO_FILE, type PagamentoConfig } from "@/lib/export/payment-php";
+import type { PagamentoConfig } from "@/lib/export/payment-php";
+import { type ExportTarget, paymentEndpoint } from "@/lib/export/serverless";
 import { PAYMENT_HOSTING_WARNING, paymentIssueWarning } from "@/lib/export/warnings";
 import { type PaymentCheck, type PaymentIssue, paymentIssues } from "@/lib/payments/checks";
 import { orderProductCode } from "@/lib/payments/orders";
@@ -63,13 +64,20 @@ export function paymentPlanFixes(payment: PaymentExport | null) {
  */
 export function zipPaymentRender(
   payment: PaymentExport | null,
-  opts: { rel: string; pageHref: (pageId: string) => string; scriptTag: string; checkout?: boolean },
+  opts: {
+    rel: string;
+    pageHref: (pageId: string) => string;
+    scriptTag: string;
+    checkout?: boolean;
+    /** Destino do ZIP: PHP (pagamento.php) ou serverless (/api/pagamento…). */
+    target?: ExportTarget;
+  },
 ): PaymentRender | null {
   if (!payment && !opts.checkout) return null;
   return paymentRenderFor(
     payment?.products ?? [],
     {
-      endpoint: `${opts.rel}${PAGAMENTO_FILE}`,
+      endpoint: paymentEndpoint(opts.target ?? "php", opts.rel),
       simulation: false,
       pageHref: opts.pageHref,
       scriptTag: opts.scriptTag,
