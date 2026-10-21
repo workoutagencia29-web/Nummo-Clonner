@@ -14,12 +14,14 @@ import { deadWheelButtonsWarning, exportWarningFix, wheelPrizesWarning } from "@
 import { computeReadiness } from "@/lib/readiness";
 import {
   clampChance,
+  cleanSlice,
   parsePrizeParam,
   parseSlices,
   pickSlice,
   prizeId,
   prizeParam,
   realChances,
+  serializeSlices,
   sliceAt,
   stopRotation,
   type WheelSlice,
@@ -61,6 +63,16 @@ describe("fatias", () => {
   it("chance real pelos pesos (as chances não precisam somar 100)", () => {
     expect(realChances([40, 30, 20, 10])).toEqual([40, 30, 20, 10]);
     expect(realChances([50, 30, 20, 10])).toEqual([45.5, 27.3, 18.2, 9.1]);
+  });
+
+  it("chance do 2º giro (chance2): lida com o mesmo piso de 1%; ausente continua ausente; volta no round-trip", () => {
+    expect(cleanSlice({ text: "A", chance: 50, chance2: 80 }, 0).chance2).toBe(80);
+    expect(cleanSlice({ text: "A", chance: 50, chance2: 0 }, 0).chance2).toBe(1); // piso de 1%, como a chance do 1º
+    expect(cleanSlice({ text: "A", chance: 50 }, 0).chance2).toBeUndefined(); // sem definir = ausente
+    const round = parseSlices(
+      serializeSlices([cleanSlice({ text: "A", chance: 10, chance2: 90, link: "", coupon: "" }, 0)]),
+    );
+    expect(round[0].chance2).toBe(90);
   });
 });
 

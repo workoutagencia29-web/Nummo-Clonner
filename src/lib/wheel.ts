@@ -19,8 +19,13 @@
 export interface WheelSlice {
   text: string;
   color: string;
-  /** Peso (1 a 100). */
+  /** Peso do 1º giro (1 a 100). */
   chance: number;
+  /**
+   * Peso do 2º giro da "segunda chance" (1 a 100). Ausente = o 2º giro usa a
+   * mesma `chance` do 1º. Tem o mesmo piso de 1% (nenhuma fatia fica impossível).
+   */
+  chance2?: number;
   /** Chave do link da oferta do prêmio ("" = sem link ainda). */
   link: string;
   /** Cupom mostrado ao visitante ("" = sem cupom). */
@@ -81,6 +86,8 @@ export function cleanSlice(raw: unknown, i: number): WheelSlice {
     coupon: lose ? "" : str(o.coupon, 40),
   };
   if (lose) slice.lose = true;
+  // Chance do 2º giro: só guarda quando foi definida (ausente = o 2º usa `chance`).
+  if (o.chance2 !== undefined && o.chance2 !== null && o.chance2 !== "") slice.chance2 = clampChance(o.chance2);
   return slice;
 }
 

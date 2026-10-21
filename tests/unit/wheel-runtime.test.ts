@@ -43,6 +43,16 @@ const SLICES: WheelSlice[] = [
   { text: "50% OFF", color: "#10b981", chance: 10, link: "c30", coupon: "" },
 ];
 
+/** Chances diferentes por giro: o 1º quase sempre cai no "perdeu" (idx 2), o 2º quase
+ * sempre ganha "10% OFF" (idx 0). Com o mesmo sorteio (0.5), o 1º dá idx2 e o 2º idx0 —
+ * prova que o 2º giro usa a chance2 (se usasse a chance do 1º, cairia de novo no idx2). */
+const PERSPIN_SLICES: WheelSlice[] = [
+  { text: "10% OFF", color: "#7c3aed", chance: 1, chance2: 97, link: "c10", coupon: "" },
+  { text: "30% OFF", color: "#ec4899", chance: 1, chance2: 1, link: "c30", coupon: "" },
+  { text: "Não foi dessa vez", color: "#64748b", chance: 97, chance2: 1, link: "", coupon: "", lose: true },
+  { text: "50% OFF", color: "#10b981", chance: 1, chance2: 1, link: "", coupon: "" },
+];
+
 const LINKS = [
   { key: "checkout", url: "https://pay.exemplo.com/cheio", kind: "CHECKOUT" },
   { key: "c10", url: "https://pay.exemplo.com/dez", kind: "CHECKOUT" },
@@ -105,6 +115,8 @@ let browser: Browser;
 let wheelHtml = "";
 /** A mesma roleta com a "segunda chance" ligada (data-os-second-chance="1"). */
 let wheelHtmlSecond = "";
+/** Segunda chance ligada com chance diferente no 1º e no 2º giro (PERSPIN_SLICES). */
+let wheelHtmlPerSpin = "";
 let salesHtml = "";
 let wheel: WheelRender;
 /** Roleta e um botão de compra (checkout cheio) na mesma página: o bloco solto na página de vendas. */
@@ -153,7 +165,15 @@ beforeAll(async () => {
   wheelHtml = await exportPage(editor, { links: LINKS, wheel });
   await setAttrs(editor, '[data-os-widget="wheel"]', { "data-os-second-chance": "1" });
   wheelHtmlSecond = await exportPage(editor, { links: LINKS, wheel });
-  await setAttrs(editor, '[data-os-widget="wheel"]', { "data-os-second-chance": "0" });
+  await setAttrs(editor, '[data-os-widget="wheel"]', {
+    "data-os-slices": JSON.stringify(PERSPIN_SLICES),
+    "data-os-second-chance": "1",
+  });
+  wheelHtmlPerSpin = await exportPage(editor, { links: LINKS, wheel });
+  await setAttrs(editor, '[data-os-widget="wheel"]', {
+    "data-os-slices": JSON.stringify(SLICES),
+    "data-os-second-chance": "0",
+  });
   for (const scope of ["ofa", "ofb"]) {
     scoped[`/${scope}/roleta/`] = await exportPage(editor, { links: LINKS, wheel: { ...wheel, scope } });
     scoped[`/${scope}/vendas/`] = salesPage({ ...wheel, scope });
@@ -342,6 +362,21 @@ describe("roleta na página", () => {
     expect(await page.locator("[data-os-wh-prize]").textContent()).toBe("10% OFF");
     await site.close();
   }, 30_000);
+
+  it("segunda chance: o 2º giro usa a chance do 2º giro de cada fatia (chance2)", async () => {
+    // Mesmo sorteio (0.5): no 1º giro cai no "Não foi dessa vez" (chance alta no 1º);
+    // no 2º ganha "10% OFF" (chance2 alta nele). Se o 2º usasse a chance do 1º, perderia de novo.
+    const site = await open("/perspin/", { random: 0.5, routes: { "/perspin/": wheelHtmlPerSpin } });
+    const { page } = site;
+    await page.locator("[data-os-wh-spin]").tap();
+    await expect.poll(() => visible(page, "[data-os-wh-again]"), { timeout: 8000 }).toBe(true);
+    expect((await wheelEvents(page)).map((e) => e.prize)).toEqual(["Não foi dessa vez"]);
+    await page.locator("[data-os-wh-respin]").tap();
+    await expect.poll(() => visible(page, "[data-os-wh-result]"), { timeout: 8000 }).toBe(true);
+    expect(await page.locator("[data-os-wh-prize]").textContent()).toBe("10% OFF");
+    expect((await wheelEvents(page)).map((e) => e.prize)).toEqual(["Não foi dessa vez", "10% OFF"]);
+    await site.close();
+  }, 40_000);
 
   it("uma vez por visitante: quem volta vê a roda parada no prêmio, com o resultado e o botão", async () => {
     const site = await open(WHEEL_PATH, { random: 0.05 });

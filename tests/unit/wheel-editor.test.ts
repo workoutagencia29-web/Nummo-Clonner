@@ -188,6 +188,25 @@ describe("bloco Roleta de desconto", () => {
     expect((await canvas(page)).texts[1]).toBe("20%OFF");
   });
 
+  it("segunda chance: a chance do 2º giro aparece por fatia ao ligar e some ao desligar", async () => {
+    const count = () => sliceField<number>(page, "return box.querySelectorAll('.os-sl-chance2').length");
+    const label2 = () =>
+      sliceField<string | null>(page, "return box.querySelector('.os-sl-chance2')?.getAttribute('aria-label') ?? null");
+    const setSecond = (v: string) =>
+      page.evaluate((val) => {
+        (window as unknown as EditorWindow).ed
+          .getWrapper()
+          ?.find('[data-os-widget="wheel"]')[0]
+          ?.addAttributes({ "data-os-second-chance": val });
+      }, v);
+    expect(await count()).toBe(0); // desligada: um campo de chance por fatia
+    await setSecond("1");
+    expect(await count()).toBe(4); // ligada: a chance do 2º giro por fatia (4 fatias)
+    expect(await label2()).toBe("Chance no 2º giro da fatia 1 (%)");
+    await setSecond("0");
+    expect(await count()).toBe(0); // desligou de novo: somem
+  });
+
   it("prêmio: link da oferta, “Sem prêmio” e “＋ Criar link da oferta…” (liga a fatia ao link novo); o aviso do canvas acompanha", async () => {
     const options = await sliceField<string[]>(
       page,

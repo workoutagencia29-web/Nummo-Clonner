@@ -275,11 +275,10 @@ function setup(wheel: HTMLElement) {
     busy = true;
     closeAgain();
     attempt++;
-    // Sorteio primeiro: a animação só leva até a fatia sorteada.
-    const i = pickSlice(
-      slices.map((s) => s.chance),
-      Math.random(),
-    );
+    // Sorteio primeiro: a animação só leva até a fatia sorteada. O 2º giro usa a
+    // chance do 2º giro de cada fatia (chance2), quando definida.
+    const chances = attempt >= 2 ? slices.map((s) => s.chance2 ?? s.chance) : slices.map((s) => s.chance);
+    const i = pickSlice(chances, Math.random());
     const s = slices[i];
     const now = Date.now();
     const until = now + days * DAY;

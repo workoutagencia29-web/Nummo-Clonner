@@ -169,7 +169,12 @@ export const WARN_TEXT: Record<Exclude<SliceWarn, "">, string> = {
  * prêmio, avisos, opções da lista de prêmio, aviso de chance). Mudou só um
  * valor (texto, cor, chance, cupom): a lista é atualizada no lugar.
  */
-function structureKey(slices: WheelSlice[], links: (SliceLink & { label: string })[], notice: string) {
+function structureKey(
+  slices: WheelSlice[],
+  links: (SliceLink & { label: string })[],
+  notice: string,
+  secondOn: boolean,
+) {
   return JSON.stringify([
     slices.map((s) => [
       s.lose ? 1 : 0,
@@ -178,15 +183,21 @@ function structureKey(slices: WheelSlice[], links: (SliceLink & { label: string 
     ]),
     links.map((l) => [l.key, l.label, l.payment ? 1 : 0, l.checkout == null ? 0 : l.checkout ? 2 : 1]),
     notice,
+    secondOn ? 1 : 0,
   ]);
 }
 
-const sumText = (slices: WheelSlice[]) => {
-  const total = slices.reduce((sum, s) => sum + s.chance, 0);
+const sumText = (chances: number[], prefix = "") => {
+  const total = chances.reduce((sum, c) => sum + c, 0);
   return total === 100
-    ? "As chances somam 100%."
-    : `As chances somam ${total}%: cada fatia sai na proporção do número dela (a chance real aparece ao lado).`;
+    ? `As chances${prefix} somam 100%.`
+    : `As chances${prefix} somam ${total}%: cada fatia sai na proporção do número dela (a chance real aparece ao lado).`;
 };
+
+/** A "segunda chance" está ligada na roleta (mostra a chance do 2º giro por fatia). */
+const secondOnOf = (wheel: Component) => wheel.getAttributes()["data-os-second-chance"] === "1";
+/** Chance do 2º giro de cada fatia (ausente = usa a do 1º). */
+const chances2Of = (slices: WheelSlice[]) => slices.map((s) => s.chance2 ?? s.chance);
 
 /** Valor de um campo, sem mexer no que já está igual (o cursor fica onde está). */
 function setValue(input: HTMLInputElement | HTMLSelectElement | null, value: string) {
@@ -195,7 +206,9 @@ function setValue(input: HTMLInputElement | HTMLSelectElement | null, value: str
 
 /** Atualiza os valores da lista já montada (os campos continuam os mesmos: o foco fica onde está). */
 function refreshSlices(box: HTMLElement, slices: WheelSlice[]) {
+  const secondOn = box.querySelector(".os-sl-chance2") != null;
   const real = realChances(slices.map((s) => s.chance));
+  const real2 = secondOn ? realChances(chances2Of(slices)) : [];
   slices.forEach((s, i) => {
     const item = box.querySelector<HTMLElement>(`[data-os-slice="${i}"]`);
     if (!item) return;
@@ -207,9 +220,20 @@ function refreshSlices(box: HTMLElement, slices: WheelSlice[]) {
     setValue(q<HTMLInputElement>(".os-sl-coupon"), s.coupon);
     const realEl = q(".os-sl-real");
     if (realEl) realEl.textContent = `sai em ${fmt(real[i])}% dos giros`;
+    if (secondOn) {
+      setValue(q<HTMLInputElement>(".os-sl-chance2"), String(s.chance2 ?? s.chance));
+      const real2El = q(".os-sl-real2");
+      if (real2El) real2El.textContent = `sai em ${fmt(real2[i])}% dos giros`;
+    }
   });
   const sum = box.querySelector(".os-sl-sum");
-  if (sum) sum.textContent = sumText(slices);
+  if (sum)
+    sum.textContent = sumText(
+      slices.map((s) => s.chance),
+      secondOn ? " do 1º giro" : "",
+    );
+  const sum2 = box.querySelector(".os-sl-sum2");
+  if (sum2) sum2.textContent = sumText(chances2Of(slices), " do 2º giro");
 }
 
 /**
@@ -222,7 +246,8 @@ function refreshSlices(box: HTMLElement, slices: WheelSlice[]) {
 function renderSlices(editor: Editor, box: HTMLElement, wheel: Component, notice = "") {
   const slices = wheelSlices(wheel);
   const links = widgetContext(editor).links;
-  const key = structureKey(slices, links, notice);
+  const secondOn = secondOnOf(wheel);
+  const key = structureKey(slices, links, notice, secondOn);
   if (box.dataset.osSlKey === key && box.firstChild) {
     refreshSlices(box, slices);
     return;
@@ -277,31 +302,45 @@ function renderSlices(editor: Editor, box: HTMLElement, wheel: Component, notice
     });
     top.append(color, text, up, down, remove);
 
-    const odds = el("label", "os-sl-row os-sl-odds");
-    odds.append(el("span", "os-sl-label", "Chance"));
-    const chance = el("input", "os-sl-chance");
-    chance.type = "number";
-    chance.min = "1";
-    chance.max = "100";
-    chance.step = "1";
-    chance.setAttribute("aria-label", `Chance da fatia ${n} (%)`);
-    chance.addEventListener("change", () => {
-      const raw = Number(chance.value.replace(",", "."));
-      const zero = !chance.value.trim() || !Number.isFinite(raw) || raw < 1;
-      const cur = now();
-      const next = cur.map((x, k) => (k === i ? cleanSlice({ ...x, chance: clampChance(raw) }, k) : x));
-      if (zero) {
-        // Sem mudança de verdade (já era 1): só mostra o aviso.
-        if (cur[i]?.chance === 1) renderSlices(editor, box, wheel, ZERO_CHANCE);
-        else {
-          pendingNotice.set(wheel, ZERO_CHANCE);
-          save(next);
+    // Uma linha de chance ("chance" = 1º giro, "chance2" = 2º giro da segunda chance).
+    // As classes extras (os-sl-chance2/os-sl-real2) só servem para consultar; o visual
+    // vem das classes base os-sl-chance/os-sl-real.
+    const chanceRow = (field: "chance" | "chance2", labelText: string) => {
+      const row = el("label", "os-sl-row os-sl-odds");
+      row.append(el("span", "os-sl-label", labelText));
+      const input = el("input", field === "chance2" ? "os-sl-chance os-sl-chance2" : "os-sl-chance");
+      input.type = "number";
+      input.min = "1";
+      input.max = "100";
+      input.step = "1";
+      input.setAttribute("aria-label", `${labelText} da fatia ${n} (%)`);
+      input.addEventListener("change", () => {
+        const raw = Number(input.value.replace(",", "."));
+        const zero = !input.value.trim() || !Number.isFinite(raw) || raw < 1;
+        const cur = now();
+        const curVal = field === "chance2" ? (cur[i]?.chance2 ?? cur[i]?.chance) : cur[i]?.chance;
+        const next = cur.map((x, k) => (k === i ? cleanSlice({ ...x, [field]: clampChance(raw) }, k) : x));
+        if (zero) {
+          // Sem mudança de verdade (já era 1): só mostra o aviso.
+          if (curVal === 1) renderSlices(editor, box, wheel, ZERO_CHANCE);
+          else {
+            pendingNotice.set(wheel, ZERO_CHANCE);
+            save(next);
+          }
+          return;
         }
-        return;
-      }
-      save(next);
-    });
-    odds.append(chance, el("span", "os-sl-unit", "%"), el("span", "os-sl-real"));
+        save(next);
+      });
+      row.append(
+        input,
+        el("span", "os-sl-unit", "%"),
+        el("span", field === "chance2" ? "os-sl-real os-sl-real2" : "os-sl-real"),
+      );
+      return row;
+    };
+    const oddsRows = secondOn
+      ? [chanceRow("chance", "Chance no 1º giro"), chanceRow("chance2", "Chance no 2º giro")]
+      : [chanceRow("chance", "Chance")];
 
     const prize = el("select", "os-sl-prize");
     prize.setAttribute("aria-label", `Prêmio da fatia ${n}`);
@@ -343,7 +382,7 @@ function renderSlices(editor: Editor, box: HTMLElement, wheel: Component, notice
     const prizeRow = el("label", "os-sl-row os-sl-prow");
     prizeRow.append(el("span", "os-sl-label", "Prêmio"), prize);
 
-    item.append(top, odds, prizeRow);
+    item.append(top, ...oddsRows, prizeRow);
     if (!s.lose) {
       const coupon = el("input", "os-sl-coupon");
       coupon.type = "text";
@@ -362,6 +401,7 @@ function renderSlices(editor: Editor, box: HTMLElement, wheel: Component, notice
   box.appendChild(list);
 
   box.appendChild(el("p", "os-sl-sum"));
+  if (secondOn) box.appendChild(el("p", "os-sl-sum os-sl-sum2"));
   if (notice) {
     const alert = el("p", "os-sl-alert", notice);
     alert.setAttribute("role", "alert");
@@ -397,6 +437,9 @@ const fmt = (n: number) => String(n).replace(".", ",");
 /** Aviso a mostrar depois da próxima redesenhada da lista (chance 0 corrigida). */
 const pendingNotice = new WeakMap<Component, string>();
 
+/** Caixa da lista de fatias de cada roleta (para redesenhar ao ligar/desligar a 2ª chance). */
+const slicesBox = new WeakMap<Component, HTMLElement>();
+
 function registerSlicesTrait(editor: Editor) {
   editor.Traits.addType<{ onChange(): void; setInputValue(): void }>("os-slices", {
     noLabel: true,
@@ -421,6 +464,7 @@ function registerSlicesTrait(editor: Editor) {
     onUpdate({ elInput, component }: { elInput: HTMLElement; component: Component }) {
       const wheel = wheelOf(component);
       if (!wheel) return;
+      slicesBox.set(wheel, elInput);
       const notice = pendingNotice.get(wheel) ?? "";
       pendingNotice.delete(wheel);
       renderSlices(editor, elInput, wheel, notice);
@@ -484,7 +528,7 @@ const WHEEL_TRAITS: TraitDef[] = [
   heading("Segunda chance", "wh-again"),
   checkAttr(
     "data-os-second-chance",
-    "Dar uma segunda chance: quando o 1º giro não ganha, abre “mais uma chance” e deixa girar de novo (os dois giros usam a chance real das fatias)",
+    "Dar uma segunda chance: quando o 1º giro não ganha, abre “mais uma chance” e deixa girar de novo. Em Fatias você define a chance do 1º giro e a do 2º giro de cada fatia (piso de 1% nos dois — todo prêmio continua possível)",
     false,
   ),
   heading("Prêmio na página de vendas", "wh-premio"),
@@ -547,6 +591,11 @@ export function registerWheelTypes(editor: Editor) {
       },
       init(this: Component) {
         this.on("change:attributes:data-os-slices", () => redraw(this));
+        // Ligar/desligar a 2ª chance mostra/esconde a chance do 2º giro em cada fatia.
+        this.on("change:attributes:data-os-second-chance", () => {
+          const box = slicesBox.get(this);
+          if (box) renderSlices(editor, box, this);
+        });
       },
     },
     view: {
