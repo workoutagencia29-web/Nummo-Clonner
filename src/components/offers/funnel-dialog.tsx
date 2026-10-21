@@ -44,7 +44,7 @@ import {
   quotedList,
 } from "@/lib/funnel";
 import { linkUrlHint } from "@/lib/link-url";
-import { clampChance, realChances } from "@/lib/wheel";
+import { clampChance, realChances, WHEEL_MIN_CHANCE } from "@/lib/wheel";
 import { offerPreviewUrlAction } from "@/server/actions/editor";
 import { createQuizWheelFunnelAction } from "@/server/actions/funnel";
 
@@ -71,7 +71,7 @@ interface Row extends FunnelPrize {
   key: number;
   /** A chance digitada (texto), para poder apagar e digitar de novo. */
   chanceText: string;
-  /** Digitou menos que 1%: a chance voltou para 1% (aviso na linha). */
+  /** Digitou menos que 0,1%: a chance voltou para 0,1% (aviso na linha). */
   raised?: boolean;
 }
 
@@ -131,7 +131,8 @@ export function FunnelDialog({
 
   const sales = pages.find((p) => p.id === salesPageId);
   const chances = rows.map((r) => r.chance);
-  const total = chances.reduce((s, c) => s + c, 0);
+  // Arredonda a soma (as chances têm casas decimais).
+  const total = Math.round(chances.reduce((s, c) => s + c, 0) * 10) / 10;
   const real = realChances(chances);
 
   function update(key: number, patch: Partial<Row>) {
@@ -319,7 +320,7 @@ export function FunnelDialog({
                   <p className="text-xs text-muted-foreground">
                     {total === 100
                       ? "As chances somam 100%."
-                      : `As chances somam ${total}: cada prêmio sai na proporção do número dele (a chance real aparece ao lado).`}
+                      : `As chances somam ${String(total).replace(".", ",")}: cada prêmio sai na proporção do número dele (a chance real aparece ao lado).`}
                   </p>
                 </div>
               </fieldset>
@@ -419,9 +420,10 @@ function PrizeRow({
             <Input
               id={`${id}-chance`}
               type="number"
-              inputMode="numeric"
-              min={1}
+              inputMode="decimal"
+              min={WHEEL_MIN_CHANCE}
               max={100}
+              step={0.1}
               value={row.chanceText}
               aria-label={`Chance do prêmio ${n} (%)`}
               className="pr-7 tabular-nums"
@@ -432,7 +434,11 @@ function PrizeRow({
               onBlur={() => {
                 const typed = Number(row.chanceText.replace(",", "."));
                 const chance = clampChance(row.chanceText);
-                onChange({ chance, chanceText: String(chance), raised: !Number.isFinite(typed) || typed < 1 });
+                onChange({
+                  chance,
+                  chanceText: String(chance),
+                  raised: !Number.isFinite(typed) || typed < WHEEL_MIN_CHANCE,
+                });
               }}
             />
             <span className="pointer-events-none absolute top-1/2 right-2.5 -translate-y-1/2 text-sm text-muted-foreground">
@@ -510,8 +516,8 @@ function PrizeRow({
           )}
           {row.raised && (
             <p className="text-xs text-muted-foreground">
-              Todo prêmio precisa ter chance de sair (mínimo 1%): um prêmio que aparece na roleta mas nunca sai pode ser
-              considerado propaganda enganosa.
+              Todo prêmio precisa ter chance de sair (mínimo 0,1%): um prêmio que aparece na roleta mas nunca sai pode
+              ser considerado propaganda enganosa.
             </p>
           )}
         </div>

@@ -51,13 +51,13 @@ describe("fatias", () => {
       ]),
     );
     expect(parsed).toEqual([
-      { text: "20% OFF", color: "#7c3aed", chance: 1, link: "", coupon: "A" },
+      { text: "20% OFF", color: "#7c3aed", chance: 0.1, link: "", coupon: "A" },
       { text: "Não foi dessa vez", color: "#f59e0b", chance: 100, link: "", coupon: "", lose: true },
     ]);
     expect(parseSlices("isso não é json")).toEqual([]);
     expect(parseSlices(JSON.stringify(Array.from({ length: 20 }, () => ({ text: "x" }))))).toHaveLength(12);
-    // Toda fatia tem chance real: 0, negativo ou vazio vira 1%.
-    expect([0, -5, "", "abc", 0.4, 1.6, "35,4", 140].map(clampChance)).toEqual([1, 1, 1, 1, 1, 2, 35, 100]);
+    // Toda fatia tem chance real: de 0,1 a 100, uma casa decimal; 0, negativo ou vazio vira 0,1%.
+    expect([0, -5, "", "abc", 0.4, 1.6, "35,4", 140].map(clampChance)).toEqual([0.1, 0.1, 0.1, 0.1, 0.4, 1.6, 35.4, 100]);
   });
 
   it("chance real pelos pesos (as chances não precisam somar 100)", () => {
@@ -65,9 +65,9 @@ describe("fatias", () => {
     expect(realChances([50, 30, 20, 10])).toEqual([45.5, 27.3, 18.2, 9.1]);
   });
 
-  it("chance do 2º giro (chance2): lida com o mesmo piso de 1%; ausente continua ausente; volta no round-trip", () => {
+  it("chance do 2º giro (chance2): lida com o mesmo piso de 0,1%; ausente continua ausente; volta no round-trip", () => {
     expect(cleanSlice({ text: "A", chance: 50, chance2: 80 }, 0).chance2).toBe(80);
-    expect(cleanSlice({ text: "A", chance: 50, chance2: 0 }, 0).chance2).toBe(1); // piso de 1%, como a chance do 1º
+    expect(cleanSlice({ text: "A", chance: 50, chance2: 0 }, 0).chance2).toBe(0.1); // piso de 0,1%, como a chance do 1º
     expect(cleanSlice({ text: "A", chance: 50 }, 0).chance2).toBeUndefined(); // sem definir = ausente
     const round = parseSlices(
       serializeSlices([cleanSlice({ text: "A", chance: 10, chance2: 90, link: "", coupon: "" }, 0)]),

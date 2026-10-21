@@ -118,7 +118,7 @@ describe("createQuizWheelFunnel", () => {
     expect($q("[data-os-qz-go]").attr("data-os-link")).toBeUndefined();
     expect($q("title").text()).toBe("Quiz");
 
-    // Roleta: fatias ligadas aos links, cupom, chance mínima de 1%, "Resgatar" → página de vendas.
+    // Roleta: fatias ligadas aos links, cupom, chance mínima de 0,1%, "Resgatar" → página de vendas.
     const wheelHtml = await htmlOf(result.wheel.id);
     const $w = cheerio.load(wheelHtml);
     const slices = parseSlices($w('[data-os-widget="wheel"]').attr("data-os-slices"));
@@ -126,7 +126,7 @@ describe("createQuizWheelFunnel", () => {
       ["10% OFF", 40, links[0].key, ""],
       ["20% OFF", 30, links[1].key, ""],
       ["30% OFF", 20, links[2].key, "Roleta30"],
-      ["50% OFF", 1, links[3].key, ""],
+      ["50% OFF", 0.1, links[3].key, ""],
     ]);
     expect(new Set(slices.map((s) => s.color)).size).toBe(4);
     expect($w("[data-os-wh-go]").attr("href")).toBe(internalLink(salesId));

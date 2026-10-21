@@ -36,7 +36,7 @@ export interface WheelSlice {
 
 export const WHEEL_MIN_SLICES = 2;
 export const WHEEL_MAX_SLICES = 12;
-export const WHEEL_MIN_CHANCE = 1;
+export const WHEEL_MIN_CHANCE = 0.1;
 export const WHEEL_MAX_CHANCE = 100;
 /** Dias que o prêmio fica guardado (padrão). */
 export const WHEEL_DAYS = 7;
@@ -65,11 +65,12 @@ const HEX_RE = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i;
 
 const str = (v: unknown, max: number) => (typeof v === "string" ? v.trim().slice(0, max) : "");
 
-/** Chance aceita: inteiro de 1 a 100 (o que vier fora disso é ajustado). */
+/** Chance aceita: de 0,1 a 100 com uma casa decimal (o que vier fora disso é ajustado). */
 export function clampChance(v: unknown): number {
   const n = typeof v === "number" ? v : Number(String(v ?? "").replace(",", "."));
   if (!Number.isFinite(n)) return WHEEL_MIN_CHANCE;
-  return Math.min(WHEEL_MAX_CHANCE, Math.max(WHEEL_MIN_CHANCE, Math.round(n)));
+  const r = Math.round(n * 10) / 10; // uma casa decimal
+  return Math.min(WHEEL_MAX_CHANCE, Math.max(WHEEL_MIN_CHANCE, r));
 }
 
 /** Fatia arrumada (texto, cor, chance e link válidos). */

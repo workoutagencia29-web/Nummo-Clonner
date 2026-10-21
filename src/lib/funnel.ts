@@ -71,7 +71,7 @@ export function prizeProblems(prize: Pick<FunnelPrize, "text" | "url">): PrizePr
   return out;
 }
 
-/** Linha arrumada para gravar (chance de 1 a 100, endereço completo, sem espaços nas pontas). */
+/** Linha arrumada para gravar (chance de 0,1 a 100, endereço completo, sem espaços nas pontas). */
 export function cleanPrize(prize: FunnelPrize): FunnelPrize {
   return {
     text: prize.text.trim().slice(0, PRIZE_TEXT_MAX),

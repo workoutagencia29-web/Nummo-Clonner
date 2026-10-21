@@ -168,14 +168,14 @@ describe("bloco Roleta de desconto", () => {
     expect((await canvas(page)).colors[1]).toBe("#0ea5e9");
 
     await sliceField(page, "set('.os-sl-chance', '0', 3)");
-    expect((await slices(page))[3].chance).toBe(1);
+    expect((await slices(page))[3].chance).toBe(0.1);
     expect(await sliceField<string>(page, "return box.querySelector('.os-sl-alert')?.textContent")).toBe(
-      "Toda fatia precisa ter chance de sair (mínimo 1%). Uma fatia que aparece na roleta mas nunca sai pode ser considerada propaganda enganosa — a chance voltou para 1%.",
+      "Toda fatia precisa ter chance de sair (mínimo 0,1%). Uma fatia que aparece na roleta mas nunca sai pode ser considerada propaganda enganosa — a chance voltou para 0,1%.",
     );
     expect(await sliceField<string>(page, "return box.querySelector('.os-sl-sum').textContent")).toBe(
-      "As chances somam 91%: cada fatia sai na proporção do número dela (a chance real aparece ao lado).",
+      "As chances somam 90,1%: cada fatia sai na proporção do número dela (a chance real aparece ao lado).",
     );
-    // De novo 0 (já estava em 1): o aviso aparece outra vez, sem mudar nada.
+    // De novo 0 (já estava em 0,1): o aviso aparece outra vez, sem mudar nada.
     await sliceField(page, "set('.os-sl-chance', '-3', 3)");
     expect(await sliceField<string | null>(page, "return box.querySelector('.os-sl-alert') && 'sim'")).toBe("sim");
 

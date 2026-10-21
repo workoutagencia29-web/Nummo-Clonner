@@ -188,8 +188,8 @@ describe("janela “Adicionar funil Quiz → Roleta”", () => {
     const chance = dialog.getByLabel("Chance do prêmio 3 (%)");
     await chance.fill("0");
     await chance.blur();
-    expect(await chance.inputValue()).toBe("1");
-    await dialog.getByText("Todo prêmio precisa ter chance de sair (mínimo 1%)", { exact: false }).waitFor();
+    expect(await chance.inputValue()).toBe("0.1");
+    await dialog.getByText("Todo prêmio precisa ter chance de sair (mínimo 0,1%)", { exact: false }).waitFor();
 
     for (let i = 0; i < 9; i++) await dialog.getByRole("button", { name: "Adicionar prêmio" }).click();
     expect(await prizeTexts(page)).toHaveLength(12);

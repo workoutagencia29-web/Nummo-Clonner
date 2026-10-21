@@ -6,7 +6,7 @@
  * - As fatias ficam em data-os-slices (JSON, ver src/lib/wheel.ts) e são
  *   editadas no campo "os-slices" (lista própria: texto, cor, chance, prêmio =
  *   link da oferta com "＋ Criar link da oferta…", cupom; subir, descer,
- *   remover e "＋ Adicionar fatia"). Toda fatia tem chance real (mínimo 1%):
+ *   remover e "＋ Adicionar fatia"). Toda fatia tem chance real (mínimo 0,1%):
  *   o campo avisa se alguém tentar 0.
  * - O desenho da roda (SVG), o texto do prêmio e o cupom de exemplo do
  *   resultado não são guardados como elementos: o HTML deles é refeito a partir
@@ -27,6 +27,7 @@ import {
   serializeSlices,
   WHEEL_COLORS,
   WHEEL_MAX_SLICES,
+  WHEEL_MIN_CHANCE,
   WHEEL_MIN_SLICES,
   type WheelSlice,
   wheelSvg,
@@ -114,7 +115,7 @@ function paintBadge(editor: Editor, wheel: Component, el: HTMLElement | undefine
 // ─── Campo "Fatias" (os-slices) ──────────────────────────────────────────────
 
 const ZERO_CHANCE =
-  "Toda fatia precisa ter chance de sair (mínimo 1%). Uma fatia que aparece na roleta mas nunca sai pode ser considerada propaganda enganosa — a chance voltou para 1%.";
+  "Toda fatia precisa ter chance de sair (mínimo 0,1%). Uma fatia que aparece na roleta mas nunca sai pode ser considerada propaganda enganosa — a chance voltou para 0,1%.";
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls: string, text?: string): HTMLElementTagNameMap[K] {
   const node = document.createElement(tag);
@@ -188,10 +189,11 @@ function structureKey(
 }
 
 const sumText = (chances: number[], prefix = "") => {
-  const total = chances.reduce((sum, c) => sum + c, 0);
+  // Arredonda a soma (as chances têm casas decimais) e mostra com vírgula.
+  const total = Math.round(chances.reduce((sum, c) => sum + c, 0) * 10) / 10;
   return total === 100
     ? `As chances${prefix} somam 100%.`
-    : `As chances${prefix} somam ${total}%: cada fatia sai na proporção do número dela (a chance real aparece ao lado).`;
+    : `As chances${prefix} somam ${String(total).replace(".", ",")}%: cada fatia sai na proporção do número dela (a chance real aparece ao lado).`;
 };
 
 /** A "segunda chance" está ligada na roleta (mostra a chance do 2º giro por fatia). */
@@ -310,19 +312,19 @@ function renderSlices(editor: Editor, box: HTMLElement, wheel: Component, notice
       row.append(el("span", "os-sl-label", labelText));
       const input = el("input", field === "chance2" ? "os-sl-chance os-sl-chance2" : "os-sl-chance");
       input.type = "number";
-      input.min = "1";
+      input.min = String(WHEEL_MIN_CHANCE);
       input.max = "100";
-      input.step = "1";
+      input.step = "0.1";
       input.setAttribute("aria-label", `${labelText} da fatia ${n} (%)`);
       input.addEventListener("change", () => {
         const raw = Number(input.value.replace(",", "."));
-        const zero = !input.value.trim() || !Number.isFinite(raw) || raw < 1;
+        const zero = !input.value.trim() || !Number.isFinite(raw) || raw < WHEEL_MIN_CHANCE;
         const cur = now();
         const curVal = field === "chance2" ? (cur[i]?.chance2 ?? cur[i]?.chance) : cur[i]?.chance;
         const next = cur.map((x, k) => (k === i ? cleanSlice({ ...x, [field]: clampChance(raw) }, k) : x));
         if (zero) {
-          // Sem mudança de verdade (já era 1): só mostra o aviso.
-          if (curVal === 1) renderSlices(editor, box, wheel, ZERO_CHANCE);
+          // Sem mudança de verdade (já era o mínimo): só mostra o aviso.
+          if (curVal === WHEEL_MIN_CHANCE) renderSlices(editor, box, wheel, ZERO_CHANCE);
           else {
             pendingNotice.set(wheel, ZERO_CHANCE);
             save(next);
