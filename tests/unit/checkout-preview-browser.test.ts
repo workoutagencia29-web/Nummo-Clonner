@@ -428,6 +428,11 @@ describe("página de checkout na prévia (PIX)", () => {
       expect(await page.locator(".osc-qr svg path").count()).toBe(1);
       expect(await page.locator(".osc-exp b").textContent()).toMatch(/^(30:00|29:5\d)$/);
       expect(await page.locator(".osc-wait").textContent()).toBe("Aguardando o pagamento…");
+      // Tela de PIX voltada para conversão: copiar é o botão principal (grande), com passo a passo
+      // numerado e a garantia de que a liberação é automática (reduz o abandono "pago depois").
+      expect(await page.locator(".osc-code .osc-copy-big[data-osc-copy]").isVisible()).toBe(true);
+      expect(await page.locator(".osc-steps li").count()).toBe(3);
+      expect(await page.locator(".osc-reassure").textContent()).toContain("Não precisa enviar comprovante");
       await shot(page, `${device}-5-pix-gerado`);
 
       // Recarregar com o PIX aberto volta para ele (e não conta outro InitiateCheckout).

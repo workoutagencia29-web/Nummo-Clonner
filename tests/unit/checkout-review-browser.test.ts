@@ -382,7 +382,7 @@ describe("validade pelo relógio do servidor", () => {
     // Conferiu o status (pendente) e o PIX continua lá.
     await expect.poll(() => fake.state.checks.length, { timeout: 10_000 }).toBeGreaterThan(0);
     expect(await pixShown(page)).toBe(true);
-    expect(await heading(page)).toBe("Pague com PIX");
+    expect(await heading(page)).toBe("Falta pouco! Pague com PIX");
     expect(s.errors).toEqual([]);
     await s.close();
   }, 30_000);

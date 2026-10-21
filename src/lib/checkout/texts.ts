@@ -152,7 +152,13 @@ export interface CheckoutFixedTexts {
   pixExpiresIn: string;
   pixExpired: string;
   pixNew: string;
-  pixSteps: string;
+  /** "Como pagar" (título dos passos). */
+  pixHow: string;
+  pixStep1: string;
+  pixStep2: string;
+  pixStep3: string;
+  /** Tranquiliza: liberação automática, sem comprovante, pode deixar aberto. */
+  pixReassure: string;
   approved: string;
   declined: string;
   unavailable: string;
@@ -224,15 +230,19 @@ const FIXED: Record<CheckoutLang, CheckoutFixedTexts> = {
     invalidCep: "CEP inválido.",
     cepNotFound: "Não encontramos o CEP. Preencha o endereço.",
     pixInstant: "Aprovação imediata",
-    pixTitle: "Pague com PIX",
-    pixCopy: "Copiar código",
-    pixCopied: "Código copiado!",
+    pixTitle: "Falta pouco! Pague com PIX",
+    pixCopy: "Copiar código PIX",
+    pixCopied: "Copiado! Agora é só pagar",
     pixWaiting: "Aguardando o pagamento…",
-    pixExpiresIn: "O código expira em",
+    pixExpiresIn: "Pague agora — o código expira em",
     pixExpired: "O código PIX expirou.",
     pixNew: "Gerar novo PIX",
-    pixSteps:
-      "Abra o app do seu banco, escolha pagar com PIX (QR Code ou copia e cola) e confirme. A confirmação chega aqui sozinha.",
+    pixHow: "Como pagar",
+    pixStep1: "Toque em “Copiar código PIX” acima.",
+    pixStep2: "Abra o app do seu banco e vá em PIX › Pix Copia e Cola.",
+    pixStep3: "Cole o código, confirme o pagamento e pronto!",
+    pixReassure:
+      "Assim que você pagar, esta tela libera o acesso na hora, sozinha. Não precisa enviar comprovante — é só deixar a página aberta.",
     approved: "Pagamento aprovado!",
     declined: "O pagamento não foi aprovado.",
     unavailable: "Pagamento indisponível no momento. Tente de novo em alguns minutos.",
@@ -248,8 +258,8 @@ const FIXED: Record<CheckoutLang, CheckoutFixedTexts> = {
     optional: "opcional",
     fixErrors: "Confira os campos marcados em vermelho.",
     pixCreating: "Gerando o seu PIX…",
-    pixScan: "Escaneie o QR Code com o app do seu banco:",
-    pixCopyLabel: "Ou copie o código PIX (copia e cola):",
+    pixScan: "Prefere o QR Code? Aponte a câmera do app do banco:",
+    pixCopyLabel: "Copie o código e cole no app do seu banco:",
     pixAmount: "Valor a pagar",
     redirecting: "Levando você para a página de confirmação…",
     approvedStay: "Obrigado pela compra! Os detalhes chegam no seu e-mail.",
@@ -295,14 +305,19 @@ const FIXED: Record<CheckoutLang, CheckoutFixedTexts> = {
     invalidCep: "Código postal inválido.",
     cepNotFound: "No encontramos el código postal. Completa la dirección.",
     pixInstant: "Aprobación inmediata",
-    pixTitle: "Paga con PIX",
-    pixCopy: "Copiar código",
-    pixCopied: "¡Código copiado!",
+    pixTitle: "¡Ya casi! Paga con PIX",
+    pixCopy: "Copiar código PIX",
+    pixCopied: "¡Copiado! Ahora paga",
     pixWaiting: "Esperando el pago…",
-    pixExpiresIn: "El código vence en",
+    pixExpiresIn: "Paga ahora — el código vence en",
     pixExpired: "El código PIX venció.",
     pixNew: "Generar nuevo PIX",
-    pixSteps: "Abre la app de tu banco, elige pagar con PIX y confirma.",
+    pixHow: "Cómo pagar",
+    pixStep1: "Toca en “Copiar código PIX” arriba.",
+    pixStep2: "Abre la app de tu banco y entra en PIX › Pix Copia y Pega.",
+    pixStep3: "Pega el código, confirma el pago y ¡listo!",
+    pixReassure:
+      "En cuanto pagues, esta pantalla libera el acceso al instante, sola. No necesitas enviar comprobante — solo deja la página abierta.",
     approved: "¡Pago aprobado!",
     declined: "El pago no fue aprobado.",
     unavailable: "Pago no disponible en este momento. Inténtalo de nuevo en unos minutos.",
@@ -318,8 +333,8 @@ const FIXED: Record<CheckoutLang, CheckoutFixedTexts> = {
     optional: "opcional",
     fixErrors: "Revisa los campos marcados en rojo.",
     pixCreating: "Generando tu PIX…",
-    pixScan: "Escanea el código QR con la app de tu banco:",
-    pixCopyLabel: "O copia el código PIX:",
+    pixScan: "¿Prefieres el QR? Apunta la cámara de la app de tu banco:",
+    pixCopyLabel: "Copia el código y pégalo en la app de tu banco:",
     pixAmount: "Monto a pagar",
     redirecting: "Te llevamos a la página de confirmación…",
     approvedStay: "¡Gracias por tu compra! Recibirás los detalles en tu correo.",
@@ -365,14 +380,19 @@ const FIXED: Record<CheckoutLang, CheckoutFixedTexts> = {
     invalidCep: "Invalid ZIP code.",
     cepNotFound: "We couldn't find this ZIP code. Please fill in the address.",
     pixInstant: "Instant approval",
-    pixTitle: "Pay with PIX",
-    pixCopy: "Copy code",
-    pixCopied: "Code copied!",
+    pixTitle: "Almost there! Pay with PIX",
+    pixCopy: "Copy PIX code",
+    pixCopied: "Copied! Now pay",
     pixWaiting: "Waiting for payment…",
-    pixExpiresIn: "The code expires in",
+    pixExpiresIn: "Pay now — the code expires in",
     pixExpired: "The PIX code expired.",
     pixNew: "Generate a new PIX",
-    pixSteps: "Open your bank app, choose to pay with PIX and confirm.",
+    pixHow: "How to pay",
+    pixStep1: "Tap “Copy PIX code” above.",
+    pixStep2: "Open your bank app and go to PIX › Copy & Paste.",
+    pixStep3: "Paste the code, confirm the payment, and you're done!",
+    pixReassure:
+      "As soon as you pay, this screen unlocks access instantly, on its own. No receipt needed — just keep the page open.",
     approved: "Payment approved!",
     declined: "The payment was not approved.",
     unavailable: "Payment unavailable right now. Please try again in a few minutes.",
@@ -388,8 +408,8 @@ const FIXED: Record<CheckoutLang, CheckoutFixedTexts> = {
     optional: "optional",
     fixErrors: "Please check the fields marked in red.",
     pixCreating: "Generating your PIX…",
-    pixScan: "Scan the QR code with your bank app:",
-    pixCopyLabel: "Or copy the PIX code:",
+    pixScan: "Prefer the QR code? Point your bank app's camera:",
+    pixCopyLabel: "Copy the code and paste it in your bank app:",
     pixAmount: "Amount due",
     redirecting: "Taking you to the confirmation page…",
     approvedStay: "Thank you for your purchase! The details are on their way to your email.",

@@ -565,8 +565,37 @@ export function createFlow(
     const nodes: Node[] = [heading(fx.pixTitle)];
     const amount = make("p", "osc-amount");
     amount.append(make("small", "", fx.pixAmount), document.createTextNode(money(o.valor, o.moeda)));
-    nodes.push(amount, make("p", "osc-note", fx.pixScan));
+    nodes.push(amount);
+    // Urgência: a validade logo abaixo do valor (pagar agora, não "depois").
+    const exp = make("p", "osc-exp");
+    const clock = make("b");
+    if (pix.expiraEm) {
+      exp.append(document.createTextNode(`${fx.pixExpiresIn} `), clock);
+      nodes.push(exp);
+    }
+    // PRINCIPAL (a maioria compra pelo celular e não consegue escanear a própria tela):
+    // o código "copia e cola" com o botão grande de copiar.
+    nodes.push(make("p", "osc-note", fx.pixCopyLabel));
+    const code = make("div", "osc-code");
+    const input = make("input");
+    input.readOnly = true;
+    input.value = pix.codigo;
+    input.setAttribute("aria-label", fx.pixCopyLabel);
+    input.addEventListener("focus", () => input.select());
+    const copy = button("osc-copy osc-copy-big", fx.pixCopy, () =>
+      copyText(pix.codigo, copy, fx.pixCopied, pt.copyFail),
+    );
+    copy.setAttribute("data-osc-copy", "");
+    code.append(input, copy);
+    nodes.push(code);
+    // Passo a passo numerado (reduz a dúvida de "como pago?").
+    nodes.push(make("p", "osc-how", fx.pixHow));
+    const steps = make("ol", "osc-steps");
+    steps.append(make("li", "", fx.pixStep1), make("li", "", fx.pixStep2), make("li", "", fx.pixStep3));
+    nodes.push(steps);
+    // SECUNDÁRIO (computador): o QR Code, para quem paga com o celular na mão.
     const qr = make("div", "osc-qr");
+    let hasQr = false;
     if (image && QR_IMAGE_RE.test(image)) {
       const img = make("img");
       img.src = image.replace(/\s+/g, "");
@@ -574,29 +603,23 @@ export function createFlow(
       img.width = 216;
       img.height = 216;
       qr.appendChild(img);
+      hasQr = true;
     } else {
       const svg = qrSvg(pix.codigo, fx.pixTitle);
-      if (svg) qr.innerHTML = svg;
-      else qr.hidden = true;
+      if (svg) {
+        qr.innerHTML = svg;
+        hasQr = true;
+      }
     }
-    nodes.push(qr, make("p", "osc-note", fx.pixCopyLabel));
-    const code = make("div", "osc-code");
-    const input = make("input");
-    input.readOnly = true;
-    input.value = pix.codigo;
-    input.setAttribute("aria-label", fx.pixCopyLabel);
-    input.addEventListener("focus", () => input.select());
-    const copy = button("osc-copy", fx.pixCopy, () => copyText(pix.codigo, copy, fx.pixCopied, pt.copyFail));
-    copy.setAttribute("data-osc-copy", "");
-    code.append(input, copy);
-    nodes.push(code);
-    const exp = make("p", "osc-exp");
-    const clock = make("b");
-    if (pix.expiraEm) {
-      exp.append(document.createTextNode(`${fx.pixExpiresIn} `), clock);
-      nodes.push(exp);
-    }
-    nodes.push(make("p", "osc-steps", fx.pixSteps), waiting(fx.pixWaiting), changeButton(false));
+    if (hasQr) nodes.push(make("p", "osc-qrlabel", fx.pixScan), qr);
+    // Tira a maior dúvida do PIX: é automático e não precisa de comprovante.
+    const reassure = make("p", "osc-reassure");
+    reassure.append(make("b", "", "✓"), document.createTextNode(` ${fx.pixReassure}`));
+    nodes.push(reassure, waiting(fx.pixWaiting));
+    // "Alterar dados ou pedido": link discreto, para não competir com o copiar.
+    const change = button("osc-link osc-change", fx.pixChange, confirmChange);
+    change.setAttribute("data-osc-change", "");
+    nodes.push(change);
     const extra = previewExtra([
       [CHECKOUT_SIM_TEXTS.approve, "pago"],
       [CHECKOUT_SIM_TEXTS.decline, "recusado"],
