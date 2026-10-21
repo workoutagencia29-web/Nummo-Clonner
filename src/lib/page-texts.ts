@@ -66,6 +66,7 @@ export const PAGE_TEXTS = {
     whWon: "¡Ganaste {p}!", // Você ganhou {p}!
     whCode: " Tu cupón: {c}.", // Seu cupom: {c}.
     whSpin: "Girando la ruleta…", // Girando a roleta…
+    whAgain: "¡Casi! Tienes una oportunidad más. Gira de nuevo.", // Quase! Você tem mais uma chance. Gire de novo.
     // Quiz (leitores de tela)
     qzStep: "Pregunta {n} de {t}", // Pergunta {n} de {t}
     // Notificação de compra
@@ -99,6 +100,7 @@ export const PAGE_TEXTS = {
     whWon: "You won {p}!",
     whCode: " Your coupon: {c}.",
     whSpin: "Spinning the wheel…",
+    whAgain: "Almost! You have one more chance. Spin again.",
     qzStep: "Question {n} of {t}",
     snFrom: "{n} from {c}",
     snAction: "just bought",

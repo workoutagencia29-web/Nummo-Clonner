@@ -103,6 +103,8 @@ const META_STUB = `(function(){var c=window.__calls=window.__calls||[];var A=fun
 
 let browser: Browser;
 let wheelHtml = "";
+/** A mesma roleta com a "segunda chance" ligada (data-os-second-chance="1"). */
+let wheelHtmlSecond = "";
 let salesHtml = "";
 let wheel: WheelRender;
 /** Roleta e um botão de compra (checkout cheio) na mesma página: o bloco solto na página de vendas. */
@@ -149,6 +151,9 @@ beforeAll(async () => {
   const draft = await exportPage(editor, { links: LINKS });
   wheel = wheelRenderData([draft], LINKS);
   wheelHtml = await exportPage(editor, { links: LINKS, wheel });
+  await setAttrs(editor, '[data-os-widget="wheel"]', { "data-os-second-chance": "1" });
+  wheelHtmlSecond = await exportPage(editor, { links: LINKS, wheel });
+  await setAttrs(editor, '[data-os-widget="wheel"]', { "data-os-second-chance": "0" });
   for (const scope of ["ofa", "ofb"]) {
     scoped[`/${scope}/roleta/`] = await exportPage(editor, { links: LINKS, wheel: { ...wheel, scope } });
     scoped[`/${scope}/vendas/`] = salesPage({ ...wheel, scope });
@@ -305,6 +310,36 @@ describe("roleta na página", () => {
     // Clicar no centro trava o botão de baixo E o próprio centro.
     expect(await page.locator("[data-os-wh-spin]").isDisabled()).toBe(true);
     expect(await page.locator(".os-wh-hub").isDisabled()).toBe(true);
+    await site.close();
+  }, 30_000);
+
+  it("segunda chance: 1º giro sem prêmio abre o modal “mais uma chance”; girar de novo decide o resultado", async () => {
+    // random 0.7 → fatia “Não foi dessa vez” (índice 2), nos dois giros (giro real).
+    const site = await open("/roleta2/", { random: 0.7, routes: { "/roleta2/": wheelHtmlSecond } });
+    const { page } = site;
+    expect(await visible(page, "[data-os-wh-again]")).toBe(false);
+    await page.locator("[data-os-wh-spin]").tap();
+    // 1º giro sem prêmio: abre o modal e NÃO mostra o resultado; o botão de baixo trava.
+    await expect.poll(() => visible(page, "[data-os-wh-again]"), { timeout: 8000 }).toBe(true);
+    expect(await visible(page, "[data-os-wh-result]")).toBe(false);
+    expect(await page.locator("[data-os-wh-spin]").isDisabled()).toBe(true);
+    expect((await wheelEvents(page)).map((e) => e.prize)).toEqual(["Não foi dessa vez"]);
+    // Gira de novo pelo botão do modal → resultado final (2º giro real).
+    await page.locator("[data-os-wh-respin]").tap();
+    await expect.poll(() => visible(page, "[data-os-wh-result]"), { timeout: 8000 }).toBe(true);
+    expect(await visible(page, "[data-os-wh-again]")).toBe(false);
+    expect((await wheelEvents(page)).map((e) => e.prize)).toEqual(["Não foi dessa vez", "Não foi dessa vez"]);
+    await site.close();
+  }, 40_000);
+
+  it("segunda chance: quem ganha logo no 1º giro NÃO vê o modal", async () => {
+    // random 0 → fatia “10% OFF” (índice 0, com prêmio): ganhou direto.
+    const site = await open("/roleta2/", { random: 0, routes: { "/roleta2/": wheelHtmlSecond } });
+    const { page } = site;
+    await page.locator("[data-os-wh-spin]").tap();
+    await expect.poll(() => visible(page, "[data-os-wh-result]"), { timeout: 8000 }).toBe(true);
+    expect(await visible(page, "[data-os-wh-again]")).toBe(false);
+    expect(await page.locator("[data-os-wh-prize]").textContent()).toBe("10% OFF");
     await site.close();
   }, 30_000);
 

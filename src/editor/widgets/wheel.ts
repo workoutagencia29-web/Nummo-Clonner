@@ -481,6 +481,12 @@ const WHEEL_TRAITS: TraitDef[] = [
       goOf(component)?.addAttributes({ "data-os-lose-label": String(value ?? "").trim() });
     },
   },
+  heading("Segunda chance", "wh-again"),
+  checkAttr(
+    "data-os-second-chance",
+    "Dar uma segunda chance: quando o 1º giro não ganha, abre “mais uma chance” e deixa girar de novo (os dois giros usam a chance real das fatias)",
+    false,
+  ),
   heading("Prêmio na página de vendas", "wh-premio"),
   numberAttr("data-os-days", "Prêmio guardado por (dias)", 1, 365),
   checkAttr("data-os-banner", "Mostrar a faixa “Você ganhou…” no topo da página de vendas", true),
@@ -573,7 +579,14 @@ export function registerWheelTypes(editor: Editor) {
   dc.addType(WHEEL_BUTTON_TYPE, {
     isComponent: (node) => {
       if (node.tagName !== "BUTTON") return false;
-      if (!(node.hasAttribute?.("data-os-wh-spin") || node.hasAttribute?.("data-os-wh-copy"))) return false;
+      if (
+        !(
+          node.hasAttribute?.("data-os-wh-spin") ||
+          node.hasAttribute?.("data-os-wh-copy") ||
+          node.hasAttribute?.("data-os-wh-respin")
+        )
+      )
+        return false;
       // Texto direto no <button>: vai para um <span> (o Espaço entra no texto ao editar).
       const wrapped = Array.from(node.children as HTMLCollection).some((c) => c.classList.contains("os-wh-btxt"));
       return !wrapped && node.innerHTML.trim()
@@ -588,7 +601,10 @@ export function registerWheelTypes(editor: Editor) {
       getName(this: Component) {
         const custom = this.get("custom-name");
         if (custom) return String(custom);
-        return this.getAttributes()["data-os-wh-copy"] !== undefined ? "Botão Copiar" : "Botão Girar";
+        const a = this.getAttributes();
+        if (a["data-os-wh-copy"] !== undefined) return "Botão Copiar";
+        if (a["data-os-wh-respin"] !== undefined) return "Botão Girar de novo";
+        return "Botão Girar";
       },
     },
   });

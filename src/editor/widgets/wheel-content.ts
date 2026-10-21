@@ -63,7 +63,7 @@ export const WHEEL_CSS = [
   ".os-wheel .os-wh-hub:disabled{cursor:default}",
   ".os-wheel .os-wh-spin{display:block;width:100%;max-width:340px;margin:22px auto 0;padding:18px 20px;border:0;border-radius:16px;background-color:var(--os-wh-cta);color:#fff;font-family:inherit;font-size:20px;font-weight:900;line-height:1.2;letter-spacing:.03em;text-transform:uppercase;cursor:pointer;box-shadow:0 14px 28px -14px var(--os-wh-cta),inset 0 -4px 0 rgba(0,0,0,.18)}",
   ".os-wheel .os-wh-spin:disabled{opacity:.6;cursor:default}",
-  ".os-wheel .os-wh-spin:focus-visible,.os-wheel .os-wh-hub:focus-visible,.os-wheel .os-wh-copy:focus-visible,.os-wheel .os-wh-go:focus-visible{outline-width:3px;outline-style:solid;outline-color:var(--os-wh-rim);outline-offset:3px}",
+  ".os-wheel .os-wh-spin:focus-visible,.os-wheel .os-wh-hub:focus-visible,.os-wheel .os-wh-respin:focus-visible,.os-wheel .os-wh-copy:focus-visible,.os-wheel .os-wh-go:focus-visible{outline-width:3px;outline-style:solid;outline-color:var(--os-wh-rim);outline-offset:3px}",
   ".os-wheel .os-wh-nojs{display:none;margin:14px 0 0;color:#6b7280;font-size:13px}",
   ".os-wheel .os-wh-result{margin:22px 0 0;padding:20px 16px 22px;border-radius:18px;background-color:#f0fdf4;box-shadow:inset 0 0 0 2px #bbf7d0}",
   ".os-wheel .os-wh-win{margin:0;color:#166534;font-size:18px;font-weight:800;line-height:1.35}",
@@ -75,6 +75,14 @@ export const WHEEL_CSS = [
   ".os-wheel .os-wh-go{display:block;width:100%;max-width:none;margin:16px 0 0;padding:19px 20px;border:0;border-radius:16px;background-color:var(--os-wh-cta);background-image:none;color:#fff;font-family:inherit;font-size:19px;font-weight:900;line-height:1.25;text-align:center;text-decoration:none;text-transform:none;box-shadow:0 14px 28px -14px var(--os-wh-cta),inset 0 -3px 0 rgba(0,0,0,.15)}",
   ".os-wheel .os-wh-note{margin:10px 0 0;color:#6b7280;font-size:13px}",
   ".os-wheel .os-wh-result[hidden],.os-wheel .os-wh-coupon[hidden]{display:none}",
+  // Modal "mais uma chance" (segunda chance): cobre a roleta na página publicada.
+  ".os-wheel .os-wh-again{position:absolute;inset:0;z-index:6;display:flex;align-items:center;justify-content:center;padding:18px;background-color:rgba(15,23,42,.62)}",
+  ".os-wheel .os-wh-again[hidden]{display:none}",
+  ".os-wheel .os-wh-again-box{width:100%;max-width:330px;margin:0 auto;padding:24px 20px;border-radius:18px;background:#fff;color:#1f2937;text-align:center;box-shadow:0 24px 50px -18px rgba(0,0,0,.55)}",
+  ".os-wheel .os-wh-again-title{margin:0;color:inherit;font-size:22px;font-weight:900;line-height:1.2}",
+  ".os-wheel .os-wh-again-sub{margin:8px 0 0;color:#6b7280;font-size:15px;line-height:1.5}",
+  ".os-wheel .os-wh-respin{display:block;width:100%;margin:18px 0 0;padding:16px 18px;border:0;border-radius:14px;background-color:var(--os-wh-cta);color:#fff;font-family:inherit;font-size:18px;font-weight:900;line-height:1.2;letter-spacing:.03em;text-transform:uppercase;cursor:pointer;box-shadow:0 12px 24px -12px var(--os-wh-cta),inset 0 -4px 0 rgba(0,0,0,.18)}",
+  ".os-wheel .os-wh-respin:disabled{opacity:.6;cursor:default}",
   // Sem JavaScript (e antes de o script começar): o aviso no lugar do "Girar".
   ".os-wheel:not(.os-wh-on):not([data-gjs-type]) .os-wh-nojs{display:block}",
   ".os-wheel:not(.os-wh-on):not([data-gjs-type]) .os-wh-spin{display:none}",
@@ -94,6 +102,10 @@ export interface WheelSpec {
   /** Texto do botão para quem caiu numa fatia sem prêmio. */
   loseLabel: string;
   note: string;
+  /** Textos do modal "mais uma chance" (segunda chance, quando o 1º giro não ganha). */
+  againTitle: string;
+  againSub: string;
+  againSpin: string;
 }
 
 const textDef = (tagName: string, content: string, cls: string, name: string, attributes?: Def["attributes"]): Def => ({
@@ -141,6 +153,7 @@ export function wheelDef(spec: WheelSpec, { html = false } = {}): Def {
       "data-os-minutes": String(WHEEL_MINUTES),
       "data-os-banner": "1",
       "data-os-track": "1",
+      "data-os-second-chance": "0",
     },
     components: [
       textDef("h2", spec.title, "os-wh-title", "Título"),
@@ -225,6 +238,24 @@ export function wheelDef(spec: WheelSpec, { html = false } = {}): Def {
           textDef("p", spec.note, "os-wh-note", "Observação", { "data-os-wh-note": "" }),
         ],
       },
+      {
+        tagName: "div",
+        name: "Modal da segunda chance",
+        classes: ["os-wh-again"],
+        attributes: { "data-os-wh-again": "", hidden: true },
+        components: [
+          {
+            tagName: "div",
+            name: "Caixa",
+            classes: ["os-wh-again-box"],
+            components: [
+              textDef("p", spec.againTitle, "os-wh-again-title", "Título da 2ª chance"),
+              textDef("p", spec.againSub, "os-wh-again-sub", "Texto da 2ª chance"),
+              buttonDef(spec.againSpin, "os-wh-respin", "Botão Girar de novo", { "data-os-wh-respin": "" }),
+            ],
+          },
+        ],
+      },
     ],
   };
 }
@@ -249,4 +280,7 @@ export const DEFAULT_WHEEL: WheelSpec = {
   go: "RESGATAR MEU DESCONTO",
   loseLabel: "CONTINUAR PARA A OFERTA",
   note: "Seu desconto fica reservado para você neste aparelho.",
+  againTitle: "Você tem mais uma chance! 🍀",
+  againSub: "Quase! Você destravou um giro bônus. Gire de novo e boa sorte.",
+  againSpin: "GIRAR DE NOVO",
 };

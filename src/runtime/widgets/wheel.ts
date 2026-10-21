@@ -146,6 +146,10 @@ function setup(wheel: HTMLElement) {
   const code = q("[data-os-wh-code]");
   const days = wheelNumber(wheel.getAttribute("data-os-days"), WHEEL_DAYS, 1, 365);
   const track = flag(wheel, "track", true);
+  // Segunda chance: se o 1º giro não ganhar, abre o modal "mais uma chance" e deixa girar de novo.
+  const againBox = q("[data-os-wh-again]");
+  const respin = q<HTMLButtonElement>(".os-wh-respin");
+  const canSecond = flag(wheel, "second-chance", false) && !!againBox && !!respin;
   const reduced = reducedMotion();
   // Separada por oferta: duas ofertas no mesmo domínio não dividem o giro.
   const memory = scopedKey(`os_roleta_${sliceSignature(slices)}`, wheel.getAttribute(SCOPE_ATTR) || "");
@@ -158,8 +162,25 @@ function setup(wheel: HTMLElement) {
   live.setAttribute("aria-live", "polite");
   wheel.appendChild(live);
 
+  const openAgain = () => {
+    if (!againBox) return;
+    againBox.hidden = false;
+    if (respin) respin.disabled = false;
+    live.textContent = t("whAgain", "Quase! Você tem mais uma chance. Gire de novo.");
+    try {
+      respin?.focus({ preventScroll: true });
+    } catch {
+      respin?.focus();
+    }
+  };
+  const closeAgain = () => {
+    if (againBox) againBox.hidden = true;
+  };
+
   let rotation = 0;
-  let spun = false;
+  let busy = false; // uma animação de giro em andamento
+  let finished = false; // o ciclo acabou (resultado final mostrado)
+  let attempt = 0; // giros feitos neste ciclo (1 ou 2)
   let won: WheelSlice | null = null;
 
   const emit = (kind: WheelEventDetail["kind"], s: WheelSlice) => {
@@ -180,6 +201,9 @@ function setup(wheel: HTMLElement) {
     wheel.classList.add("os-wh-done");
     wheel.classList.toggle("os-wh-lost", !!s.lose);
     lockSpin();
+    finished = true;
+    closeAgain();
+    if (respin) respin.disabled = true;
     if (prizeEl) prizeEl.textContent = s.text;
     if (couponBox) couponBox.hidden = !s.coupon;
     if (code) code.textContent = s.coupon;
@@ -226,8 +250,9 @@ function setup(wheel: HTMLElement) {
     }
   };
 
-  // Voltou (o mesmo visitante, a mesma roleta): a roda já aparece parada no prêmio.
-  let memo: { i?: unknown; u?: unknown } | null = null;
+  // Voltou (o mesmo visitante, a mesma roleta): a roda já aparece parada no prêmio
+  // ou, se parou no "não ganhou" do 1º giro com 2ª chance, no modal "mais uma chance".
+  let memo: { i?: unknown; u?: unknown; a?: unknown } | null = null;
   try {
     memo = JSON.parse(load(memory) || "null");
   } catch {
@@ -235,16 +260,21 @@ function setup(wheel: HTMLElement) {
   }
   const mi = memo && typeof memo.i === "number" ? memo.i : -1;
   const mu = memo && typeof memo.u === "number" ? memo.u : 0;
-  if (mi >= 0 && mi < slices.length && mu > Date.now()) {
-    spun = true;
+  if (memo && memo.a === 1 && canSecond && mi >= 0 && mi < slices.length) {
+    attempt = 1;
+    rotate(stopRotation(mi, slices.length, 0, 0, 0.5), 0);
+    lockSpin();
+    openAgain();
+  } else if (mi >= 0 && mi < slices.length && mu > Date.now()) {
     rotate(stopRotation(mi, slices.length, 0, 0, 0.5), 0);
     show(mi, mu, false);
   }
 
-  const onSpin = (e: Event) => {
-    e.preventDefault();
-    if (spun) return;
-    spun = true;
+  const runSpin = () => {
+    if (busy || finished) return;
+    busy = true;
+    closeAgain();
+    attempt++;
     // Sorteio primeiro: a animação só leva até a fatia sorteada.
     const i = pickSlice(
       slices.map((s) => s.chance),
@@ -253,10 +283,17 @@ function setup(wheel: HTMLElement) {
     const s = slices[i];
     const now = Date.now();
     const until = now + days * DAY;
-    save(memory, JSON.stringify({ i, u: until, at: now }));
-    if (!s.lose && s.link) savePrize(prizeId(s), until, s.text, s.coupon);
+    // 1º giro sem prêmio + 2ª chance ligada: abre o modal "mais uma chance" em vez do resultado final.
+    const toSecond = attempt === 1 && !!s.lose && canSecond;
+    if (toSecond) {
+      save(memory, JSON.stringify({ i, at: now, a: 1 }));
+    } else {
+      save(memory, JSON.stringify({ i, u: until, at: now }));
+      if (!s.lose && s.link) savePrize(prizeId(s), until, s.text, s.coupon);
+    }
     emit("spin", s);
     lockSpin();
+    if (respin) respin.disabled = true;
     wheel.classList.add("os-wh-spinning");
     wheel.setAttribute("aria-busy", "true");
     live.textContent = t("whSpin", "Girando a roleta…");
@@ -274,14 +311,21 @@ function setup(wheel: HTMLElement) {
     const finish = () => {
       if (done) return;
       done = true;
+      busy = false;
       wheel.classList.remove("os-wh-spinning");
       wheel.removeAttribute("aria-busy");
-      show(i, until, true);
+      if (toSecond) openAgain();
+      else show(i, until, true);
     };
     if (ms) disc.addEventListener("transitionend", finish, { once: true });
     setTimeout(finish, ms ? ms + 400 : 150);
   };
-  for (let i = 0; i < spinButtons.length; i++) spinButtons[i].addEventListener("click", onSpin);
+  const triggerSpin = (e: Event) => {
+    e.preventDefault();
+    runSpin();
+  };
+  for (let i = 0; i < spinButtons.length; i++) spinButtons[i].addEventListener("click", triggerSpin);
+  respin?.addEventListener("click", triggerSpin);
 
   // "Resgatou": só quem ganhou um prêmio (quem caiu em "Sem prêmio" só continua para a oferta).
   go?.addEventListener("click", () => {

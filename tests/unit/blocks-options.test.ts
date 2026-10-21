@@ -353,7 +353,9 @@ describe("script das páginas", () => {
     // hoje ~39,4 KB.
     // Carrossel de banners da loja (passa sozinho na horizontal, bolinhas, setas e
     // toque; respeita "menos movimento"): +~1,6 KB (hoje ~41 KB).
-    expect(Buffer.byteLength(widgets, "utf8")).toBeLessThan(41_200);
+    // Segunda chance da roleta (1º giro sem prêmio abre o modal "mais uma chance" e
+    // deixa girar de novo; os dois giros reais): +~0,6 KB (hoje ~41,8 KB).
+    expect(Buffer.byteLength(widgets, "utf8")).toBeLessThan(42_200);
     // O script inteiro (widgets + botões com data-os-href + delay de VSL) compila.
     expect(runtimeScript()).toContain("os-widgets-css");
   });

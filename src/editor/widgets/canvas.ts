@@ -164,6 +164,8 @@ form[data-os-widget=lead-form]:is([data-os-webhook=""],:not([data-os-webhook])):
 [data-os-widget=wheel] [data-os-wh-lose]{margin-top:14px;padding-top:12px;border-top:1px dashed #86efac}
 [data-os-widget=wheel] [data-os-wh-lose]::before{content:"Quem cair numa fatia sem prêmio vê:";${LABEL}margin:0 auto 8px}
 [data-os-widget=wheel] [data-os-wh-coupon]::before{content:"Aparece só quando o prêmio tem cupom";${LABEL}flex-basis:100%;margin:0 auto 4px}
+[data-os-widget=wheel] [data-os-wh-again]{position:static!important;inset:auto!important;padding:0!important;background-color:transparent!important;margin-top:20px;outline:2px dashed #93c5fd;outline-offset:8px}
+[data-os-widget=wheel] [data-os-wh-again]::before{content:"Modal “mais uma chance” (aparece se não ganhar e a 2ª chance estiver ligada)";${LABEL}margin:0 auto 12px}
 [data-os-widget=access] .os-ac-part{position:relative;margin-bottom:26px;padding:4px;border-radius:12px;outline:2px dashed #c4b5fd;outline-offset:6px}
 [data-os-widget=access] .os-ac-part::before{${LABEL}margin:0 auto 12px}
 [data-os-widget=access] [data-os-ac-wait]::before{content:"Enquanto confere o pagamento"}
