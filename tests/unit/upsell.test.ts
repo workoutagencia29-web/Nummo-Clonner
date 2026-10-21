@@ -14,7 +14,7 @@ import {
 } from "@/lib/upsell";
 
 const flow = (over: Partial<UpsellFlow> = {}): UpsellFlow => ({
-  startLinkKey: "principal",
+  startLinkKeys: ["principal"],
   thankYouPageId: "obrigado",
   steps: [],
   ...over,
@@ -122,9 +122,14 @@ describe("parse e remap", () => {
         { id: "x", kind: "OUTRO" }, // kind inválido: some
       ],
     });
-    expect(parsed.startLinkKey).toBe("principal");
+    expect(parsed.startLinkKeys).toEqual(["principal"]); // formato antigo (uma chave) vira lista de um
     expect(parsed.steps).toHaveLength(1);
     expect(parsed.steps[0]).toMatchObject({ id: "u1", kind: "UPSELL", pageId: "p", linkKey: "l" });
+  });
+
+  it("parseUpsellFlow lê a lista nova de produtos que iniciam (sem repetir)", () => {
+    const parsed = parseUpsellFlow({ startLinkKeys: ["a", "b", "a", ""], steps: [] });
+    expect(parsed.startLinkKeys).toEqual(["a", "b"]);
   });
 
   it("remapUpsellPages troca os pageId (duplicar oferta); página sem par vira null", () => {
@@ -135,6 +140,6 @@ describe("parse e remap", () => {
     const out = remapUpsellPages(f, new Map([["pu1", "novo1"]]));
     expect(out.thankYouPageId).toBeNull(); // "ob" não está no mapa
     expect(out.steps[0].pageId).toBe("novo1");
-    expect(out.startLinkKey).toBe("principal"); // linkKey não muda
+    expect(out.startLinkKeys).toEqual(["principal"]); // linkKey não muda
   });
 });

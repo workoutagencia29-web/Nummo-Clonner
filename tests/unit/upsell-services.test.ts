@@ -122,7 +122,7 @@ describe("saveUpsellFlow", () => {
     ]);
 
     await saveUpsellFlow(offerId, {
-      startLinkKey: main.key,
+      startLinkKeys: [main.key],
       thankYouPageId: obg.id,
       steps: [
         { id: "s1", kind: "UPSELL", pageId: p1.id, linkKey: l1.key },
@@ -132,7 +132,7 @@ describe("saveUpsellFlow", () => {
 
     // Guardou o funil.
     const saved = await getUpsellFlow(offerId);
-    expect(saved.startLinkKey).toBe("principal");
+    expect(saved.startLinkKeys).toEqual(["principal"]);
     expect(saved.steps.map((s) => s.pageId)).toEqual([p1.id, p2.id]);
 
     // thankYou em cadeia: principal → upsell1 → upsell2 → obrigado.
@@ -165,7 +165,7 @@ describe("saveUpsellFlow", () => {
       upsellPage(offerId, "Obrigado", "THANK_YOU"),
     ]);
     await saveUpsellFlow(offerId, {
-      startLinkKey: main.key,
+      startLinkKeys: [main.key],
       thankYouPageId: obg.id,
       steps: [
         { id: "s1", kind: "UPSELL", pageId: p1.id, linkKey: l1.key },
@@ -185,12 +185,12 @@ describe("saveUpsellFlow", () => {
     const l1 = await checkoutLink(offerId, "up1", "Upsell 1");
     const p1 = await upsellPage(offerId, "Upsell 1", "UPSELL");
     await saveUpsellFlow(offerId, {
-      startLinkKey: "naoexiste",
+      startLinkKeys: ["naoexiste"],
       thankYouPageId: "paginafora",
       steps: [{ id: "s1", kind: "UPSELL", pageId: p1.id, linkKey: l1.key }],
     });
     const saved = await getUpsellFlow(offerId);
-    expect(saved.startLinkKey).toBeNull(); // link de fora
+    expect(saved.startLinkKeys).toEqual([]); // link de fora é removido da lista
     expect(saved.thankYouPageId).toBeNull(); // página de fora
     expect(saved.steps[0].pageId).toBe(p1.id); // esta é da oferta
   });
@@ -206,14 +206,14 @@ describe("saveUpsellFlow", () => {
       upsellPage(offerId, "Obrigado", "THANK_YOU"),
     ]);
     await saveUpsellFlow(offerId, {
-      startLinkKey: main.key,
+      startLinkKeys: [main.key],
       thankYouPageId: obg.id,
       steps: [{ id: "s1", kind: "UPSELL", pageId: p1.id, linkKey: l1.key }],
     });
     const copy = await duplicateOffer(offerId);
     const copyFlow = await getUpsellFlow(copy.id);
     // Os linkKey são estáveis; as páginas apontam para as da CÓPIA.
-    expect(copyFlow.startLinkKey).toBe("principal");
+    expect(copyFlow.startLinkKeys).toEqual(["principal"]);
     expect(copyFlow.steps[0].linkKey).toBe("up1");
     expect(copyFlow.steps[0].pageId).not.toBe(p1.id);
     expect(copyFlow.steps[0].pageId).toBeTruthy();
@@ -237,7 +237,7 @@ describe("applyUpsellToOffers (usar o upsell em outras ofertas)", () => {
       upsellPage(id, "Obrigado", "THANK_YOU"),
     ]);
     await saveUpsellFlow(id, {
-      startLinkKey: main.key,
+      startLinkKeys: [main.key],
       thankYouPageId: obg.id,
       steps: [{ id: "s1", kind: "UPSELL", pageId: upPage.id, linkKey: up.key }],
     });
@@ -255,7 +255,7 @@ describe("applyUpsellToOffers (usar o upsell em outras ofertas)", () => {
 
     const flow = await getUpsellFlow(target.id);
     expect(flow.steps).toHaveLength(1);
-    expect(flow.startLinkKey).toBe(targetMain.key); // o principal é o do destino, não o da fonte
+    expect(flow.startLinkKeys).toEqual([targetMain.key]); // o principal é o do destino, não o da fonte
     // A página da etapa e a de obrigado foram COPIADAS (ids novos, no destino).
     expect(flow.steps[0].pageId).not.toBe(source.upPageId);
     const pageIds = new Set((await prisma.page.findMany({ where: { offerId: target.id } })).map((p) => p.id));

@@ -86,9 +86,12 @@ function ItemAction({ offerId, item }: { offerId: string; item: ReadinessItem })
       </Button>
     );
   }
+  // O upsell tem página própria (fora das abas); o resto é uma aba da oferta.
+  const href =
+    item.target.tab === "upsell" ? `/ofertas/${offerId}/upsell` : `/ofertas/${offerId}?aba=${item.target.tab}`;
   return (
     <Button size="sm" variant={variant} asChild>
-      <Link href={`/ofertas/${offerId}?aba=${item.target.tab}`} scroll={false} aria-label={aria}>
+      <Link href={href} scroll={false} aria-label={aria}>
         {item.cta}
       </Link>
     </Button>

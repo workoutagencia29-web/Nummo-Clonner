@@ -145,15 +145,16 @@ async function applyToOne(
       if (offerCurrencyOf(target.settings) !== sourceCurrency) throw new UserError("A moeda é diferente.");
 
       // Reaplicar: tira o upsell copiado antes (páginas das etapas + obrigado + produtos das etapas),
-      // mantendo o produto principal (startLinkKey) e a página inicial.
+      // mantendo os produtos que iniciam (startLinkKeys) e a página inicial.
       const current = parseUpsellFlow(target.upsell);
       if (current.steps.length) {
         const oldPageIds = [
           ...new Set([...current.steps.map((s) => s.pageId), current.thankYouPageId].filter(Boolean) as string[]),
         ];
+        const startSet = new Set(current.startLinkKeys);
         const oldLinkKeys = [
           ...new Set(
-            current.steps.map((s) => s.linkKey).filter((k): k is string => Boolean(k) && k !== current.startLinkKey),
+            current.steps.map((s) => s.linkKey).filter((k): k is string => Boolean(k) && !startSet.has(k as string)),
           ),
         ];
         if (oldPageIds.length)
@@ -278,9 +279,10 @@ async function applyToOne(
       });
       const mainProduct = candidates.find((c) => c.payment || c.checkout)?.key ?? null;
 
-      // ── Monta e liga o funil no destino (na mesma transação).
+      // ── Monta e liga o funil no destino (na mesma transação). O produto principal
+      // do destino vira o único que inicia; depois o usuário pode marcar outros.
       const targetFlow: UpsellFlow = {
-        startLinkKey: mainProduct,
+        startLinkKeys: mainProduct ? [mainProduct] : [],
         thankYouPageId: sourceFlow.thankYouPageId ? (pageIdMap.get(sourceFlow.thankYouPageId) ?? null) : null,
         steps: sourceFlow.steps.map((s) => ({
           ...s,

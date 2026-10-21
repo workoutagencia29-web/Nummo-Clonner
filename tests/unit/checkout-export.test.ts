@@ -368,7 +368,7 @@ describe("funil de upsell no ZIP (estrutura, sem PHP)", () => {
       });
     }
     await saveUpsellFlow(offer.id, {
-      startLinkKey: principal.key,
+      startLinkKeys: [principal.key],
       thankYouPageId: obg.id,
       steps: [{ id: "s1", kind: "UPSELL", pageId: upPage.id, linkKey: up.key }],
     });

@@ -172,7 +172,7 @@ export async function saveUpsellFlow(offerId: string, flow: UpsellFlow, db: Db =
 
   // Limpa referências a páginas/links que não são mais desta oferta.
   const clean: UpsellFlow = {
-    startLinkKey: flow.startLinkKey && linkByKey.has(flow.startLinkKey) ? flow.startLinkKey : null,
+    startLinkKeys: flow.startLinkKeys.filter((k) => linkByKey.has(k)),
     thankYouPageId: flow.thankYouPageId && pageIds.has(flow.thankYouPageId) ? flow.thankYouPageId : null,
     steps: flow.steps.map((s) => ({
       ...s,
@@ -183,8 +183,10 @@ export async function saveUpsellFlow(offerId: string, flow: UpsellFlow, db: Db =
 
   const routing = upsellRouting(clean);
   // linkKey → página de "obrigado" (para onde vai ao pagar aquele produto).
+  // Cada produto que inicia cai na 1ª etapa; os produtos das etapas sobrescrevem
+  // abaixo (um produto que inicia E é etapa usa o destino da etapa).
   const thankYouOf = new Map<string, string | null>();
-  if (clean.startLinkKey) thankYouOf.set(clean.startLinkKey, routing.startPageId);
+  for (const key of clean.startLinkKeys) thankYouOf.set(key, routing.startPageId);
   const stepById = new Map(clean.steps.map((s) => [s.id, s]));
   for (const r of routing.steps) {
     const step = stepById.get(r.stepId);

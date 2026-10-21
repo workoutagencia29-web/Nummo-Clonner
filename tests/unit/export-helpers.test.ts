@@ -844,6 +844,7 @@ describe("LEIA-ME e nome do arquivo", () => {
       serverEvents: false,
       optimizeHtml: true,
       lighterImages: true,
+      target: "php",
     });
   });
 });

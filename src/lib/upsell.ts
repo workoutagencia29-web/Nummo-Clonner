@@ -2,8 +2,9 @@
  * Funil de upsell pós-compra (puro, sem dependências): a sequência que roda
  * DEPOIS da pessoa comprar o produto principal.
  *
- * Como funciona: o produto principal (`startLinkKey`) tem, como "página de
- * obrigado", a 1ª etapa da sequência. Em cada etapa de UPSELL a pessoa vê a
+ * Como funciona: cada produto que INICIA a sequência (`startLinkKeys`) tem, como
+ * "página de obrigado", a 1ª etapa da sequência — um mesmo upsell pode valer para
+ * vários checkouts/pagamentos da oferta. Em cada etapa de UPSELL a pessoa vê a
  * página e, no "SIM", abre um checkout novo (pré-preenchido com os dados do
  * pedido anterior) do produto daquela etapa; pago, segue para a próxima etapa.
  * No "Não", vai para o DOWNSELL atrelado àquele upsell (se houver) ou para a
@@ -33,8 +34,12 @@ export interface UpsellStep {
 }
 
 export interface UpsellFlow {
-  /** Produto principal que INICIA a sequência (a 1ª etapa vira o "obrigado" dele). */
-  startLinkKey: string | null;
+  /**
+   * Produtos cuja COMPRA inicia a sequência (a 1ª etapa vira o "obrigado" de cada
+   * um). Vários: um mesmo upsell pode valer para mais de um checkout/pagamento da
+   * oferta. Vazio = nenhuma compra dispara o upsell ainda.
+   */
+  startLinkKeys: string[];
   /** Etapas do caminho principal (upsells e downsells soltos), em ordem; downsells atrelados ficam aqui também, com `attachedTo`. */
   steps: UpsellStep[];
   /** Página de OBRIGADO final. */
@@ -42,7 +47,7 @@ export interface UpsellFlow {
 }
 
 export function emptyUpsellFlow(): UpsellFlow {
-  return { startLinkKey: null, steps: [], thankYouPageId: null };
+  return { startLinkKeys: [], steps: [], thankYouPageId: null };
 }
 
 /** Lê o JSON guardado de forma tolerante (item estragado some sem derrubar o resto). */
@@ -67,7 +72,16 @@ export function parseUpsellFlow(raw: unknown): UpsellFlow {
       });
     }
   }
-  return { startLinkKey: str(o.startLinkKey), steps, thankYouPageId: str(o.thankYouPageId) };
+  // Produtos que iniciam: formato novo `startLinkKeys` (array); ofertas antigas
+  // guardaram uma chave só em `startLinkKey` — é lida como lista de um item.
+  const startLinkKeys: string[] = [];
+  const pushKey = (v: unknown) => {
+    const k = str(v);
+    if (k && !startLinkKeys.includes(k)) startLinkKeys.push(k);
+  };
+  if (Array.isArray(o.startLinkKeys)) for (const v of o.startLinkKeys) pushKey(v);
+  else pushKey(o.startLinkKey);
+  return { startLinkKeys, steps, thankYouPageId: str(o.thankYouPageId) };
 }
 
 /** Caminho principal: etapas sem `attachedTo`, na ordem. */
@@ -127,7 +141,7 @@ export function upsellRouting(flow: UpsellFlow): { startPageId: string | null; s
 export function remapUpsellPages(flow: UpsellFlow, map: Map<string, string>): UpsellFlow {
   const page = (id: string | null) => (id ? (map.get(id) ?? null) : null);
   return {
-    startLinkKey: flow.startLinkKey,
+    startLinkKeys: flow.startLinkKeys,
     thankYouPageId: page(flow.thankYouPageId),
     steps: flow.steps.map((s) => ({ ...s, pageId: page(s.pageId) })),
   };
@@ -146,7 +160,8 @@ export interface UpsellProblem {
 export function upsellProblems(flow: UpsellFlow): UpsellProblem[] {
   const out: UpsellProblem[] = [];
   if (!flow.steps.length) return out; // sem upsell: nada a cobrar
-  if (!flow.startLinkKey) out.push({ stepId: "flow", message: "Escolha o produto principal que começa a sequência." });
+  if (!flow.startLinkKeys.length)
+    out.push({ stepId: "flow", message: "Marque ao menos uma compra que começa o upsell." });
   if (upsellCount(flow) > UPSELL_MAX) out.push({ stepId: "flow", message: `No máximo ${UPSELL_MAX} upsells.` });
   if (downsellCount(flow) > DOWNSELL_MAX) out.push({ stepId: "flow", message: `No máximo ${DOWNSELL_MAX} downsells.` });
   const ids = new Set(flow.steps.map((s) => s.id));

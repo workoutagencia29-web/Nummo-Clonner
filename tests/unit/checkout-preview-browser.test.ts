@@ -747,7 +747,7 @@ describe("funil de upsell de ponta a ponta na prévia", () => {
     const upPage = await createUpsellPage(o.offerId, "UPSELL");
     // Liga tudo: principal → página de upsell; SIM → checkout do upsell; Não/fim → obrigado.
     await saveUpsellFlow(o.offerId, {
-      startLinkKey: o.key,
+      startLinkKeys: [o.key],
       thankYouPageId: o.thanksId,
       steps: [{ id: "s1", kind: "UPSELL", pageId: upPage.id, linkKey: up.key }],
     });

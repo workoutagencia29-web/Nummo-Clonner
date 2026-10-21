@@ -21,7 +21,6 @@ import { TagChip } from "@/components/offers/tag-chip";
 import { trackingSectionOf } from "@/components/offers/tracking/helpers";
 import { TrackingSkeleton } from "@/components/offers/tracking/tracking-skeleton";
 import { TrackingTab } from "@/components/offers/tracking/tracking-tab";
-import { UpsellSkeleton, UpsellTab } from "@/components/offers/upsell/upsell-tab";
 import { Button } from "@/components/ui/button";
 import { TabsContent } from "@/components/ui/tabs";
 import { dateTime, plural } from "@/lib/format";
@@ -192,9 +191,16 @@ export default async function OfferPage({ params, searchParams }: PageProps<"/of
           />
         </TabsContent>
         <TabsContent value="upsell" keepMounted className="mt-4">
-          <Suspense fallback={<UpsellSkeleton />}>
-            <UpsellTab offerId={offer.id} />
-          </Suspense>
+          <div className="max-w-3xl rounded-lg border bg-card p-6">
+            <h2 className="font-medium text-base">Upsell pós-compra</h2>
+            <p className="mt-1 text-muted-foreground text-sm">
+              Monte, numa tela própria, a sequência de ofertas que roda depois da compra — e marque em quais compras ela
+              começa.
+            </p>
+            <Button asChild className="mt-4">
+              <Link href={`/ofertas/${offer.id}/upsell`}>Abrir o montador de upsell</Link>
+            </Button>
+          </div>
         </TabsContent>
         <TabsContent value="rastreamento" keepMounted className="mt-4">
           <Suspense fallback={<TrackingSkeleton />}>

@@ -27,7 +27,11 @@ const stepSchema = z.object({
 });
 
 const flowSchema = z.object({
-  startLinkKey: nullable,
+  startLinkKeys: z
+    .array(z.string().min(1).max(120))
+    .max(50, "Compras demais.")
+    .default([])
+    .transform((keys) => [...new Set(keys)]),
   steps: z.array(stepSchema).max(12, "Etapas demais."),
   thankYouPageId: nullable,
 });
