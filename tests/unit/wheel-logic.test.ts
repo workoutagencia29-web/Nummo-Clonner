@@ -117,7 +117,7 @@ describe("sorteio e parada", () => {
       $("text")
         .map((_, el) => $(el).text())
         .get(),
-    ).toEqual(["10% OFF", "30% OFF", "Não foidessa vez", "<b>&50%"]);
+    ).toEqual(["10%OFF", "30%OFF", "Não foidessa vez", "<b>&50%"]);
     expect($("svg").attr("aria-label")).toBe("Roleta com 4 fatias: 10% OFF, 30% OFF, Não foi dessa vez, <b>&50%");
     expect(svg).not.toContain("<b>");
   });

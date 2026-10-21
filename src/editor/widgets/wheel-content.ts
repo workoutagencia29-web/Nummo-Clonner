@@ -38,7 +38,7 @@ export const WHEEL_PART_TYPE = "os-wheel-part";
 export const WHEEL_BUTTON_TYPE = "os-wheel-button";
 
 /** Cores padrão (as mesmas do CSS abaixo). */
-export const WHEEL_THEME = { cta: "#16a34a", rim: "#1e1b4b", ptr: "#f43f5e" } as const;
+export const WHEEL_THEME = { cta: "#16a34a", rim: "#0b0b0b", ptr: "#f59e0b", gold: "#e0ac4a" } as const;
 
 /**
  * CSS da página (vira regras editáveis do projeto, como o do quiz, e vai no
@@ -50,7 +50,7 @@ export const WHEEL_THEME = { cta: "#16a34a", rim: "#1e1b4b", ptr: "#f43f5e" } as
  * canvas do editor, onde tudo aparece (o resultado com um rótulo).
  */
 export const WHEEL_CSS = [
-  `.os-wheel{--os-wh-cta:${WHEEL_THEME.cta};--os-wh-rim:${WHEEL_THEME.rim};--os-wh-ptr:${WHEEL_THEME.ptr};position:relative;box-sizing:border-box;width:100%;max-width:520px;margin:24px auto;padding:26px 20px 28px;overflow:hidden;border-radius:24px;background:#fff;color:#1f2937;font-family:inherit;line-height:1.5;text-align:center;box-shadow:0 24px 60px -28px rgba(15,23,42,.35),0 0 0 1px rgba(15,23,42,.06)}`,
+  `.os-wheel{--os-wh-cta:${WHEEL_THEME.cta};--os-wh-rim:${WHEEL_THEME.rim};--os-wh-ptr:${WHEEL_THEME.ptr};--os-wh-gold:${WHEEL_THEME.gold};position:relative;box-sizing:border-box;width:100%;max-width:520px;margin:24px auto;padding:26px 20px 28px;overflow:hidden;border-radius:24px;background:transparent;color:#1f2937;font-family:inherit;line-height:1.5;text-align:center}`,
   ".os-wheel *,.os-wheel *::before,.os-wheel *::after{box-sizing:border-box}",
   ".os-wheel .os-wh-title{margin:0 0 6px;color:inherit;font-family:inherit;font-size:26px;font-weight:900;line-height:1.2;letter-spacing:-.01em;text-transform:none}",
   ".os-wheel .os-wh-sub{margin:0 0 18px;color:#6b7280;font-size:16px;line-height:1.5}",
@@ -58,10 +58,12 @@ export const WHEEL_CSS = [
   ".os-wheel .os-wh-disc{position:relative;width:100%;aspect-ratio:1/1;border-radius:50%;color:var(--os-wh-rim);box-shadow:0 22px 40px -18px rgba(15,23,42,.6);transform:rotate(0deg)}",
   ".os-wheel .os-wh-disc svg{display:block;width:100%;height:100%;overflow:visible;font-family:inherit}",
   ".os-wheel .os-wh-ptr{position:absolute;top:0;left:50%;z-index:2;width:0;height:0;margin-left:-17px;border-left:17px solid transparent;border-right:17px solid transparent;border-top-width:34px;border-top-style:solid;border-top-color:var(--os-wh-ptr);filter:drop-shadow(0 3px 3px rgba(0,0,0,.35))}",
-  ".os-wheel .os-wh-hub{position:absolute;top:calc(50% + 7px);left:50%;z-index:1;display:flex;align-items:center;justify-content:center;width:19%;aspect-ratio:1/1;border-radius:50%;background:#fff;font-size:26px;line-height:1;transform:translate(-50%,-50%);box-shadow:0 0 0 5px var(--os-wh-rim),0 6px 14px rgba(0,0,0,.3)}",
+  // Centro "GIRE": botão redondo dourado com aro branco e contorno da borda (gira a roleta, como o botão de baixo).
+  ".os-wheel .os-wh-hub{position:absolute;top:50%;left:50%;z-index:1;display:flex;align-items:center;justify-content:center;width:23%;aspect-ratio:1/1;padding:0;border:0;border-radius:50%;background-color:var(--os-wh-gold);color:#5b3d12;font-family:inherit;font-size:17px;font-weight:900;line-height:1;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;transform:translate(-50%,-50%);box-shadow:0 0 0 7px #fff,0 0 0 9px var(--os-wh-rim),0 7px 16px rgba(0,0,0,.4)}",
+  ".os-wheel .os-wh-hub:disabled{cursor:default}",
   ".os-wheel .os-wh-spin{display:block;width:100%;max-width:340px;margin:22px auto 0;padding:18px 20px;border:0;border-radius:16px;background-color:var(--os-wh-cta);color:#fff;font-family:inherit;font-size:20px;font-weight:900;line-height:1.2;letter-spacing:.03em;text-transform:uppercase;cursor:pointer;box-shadow:0 14px 28px -14px var(--os-wh-cta),inset 0 -4px 0 rgba(0,0,0,.18)}",
   ".os-wheel .os-wh-spin:disabled{opacity:.6;cursor:default}",
-  ".os-wheel .os-wh-spin:focus-visible,.os-wheel .os-wh-copy:focus-visible,.os-wheel .os-wh-go:focus-visible{outline-width:3px;outline-style:solid;outline-color:var(--os-wh-rim);outline-offset:3px}",
+  ".os-wheel .os-wh-spin:focus-visible,.os-wheel .os-wh-hub:focus-visible,.os-wheel .os-wh-copy:focus-visible,.os-wheel .os-wh-go:focus-visible{outline-width:3px;outline-style:solid;outline-color:var(--os-wh-rim);outline-offset:3px}",
   ".os-wheel .os-wh-nojs{display:none;margin:14px 0 0;color:#6b7280;font-size:13px}",
   ".os-wheel .os-wh-result{margin:22px 0 0;padding:20px 16px 22px;border-radius:18px;background-color:#f0fdf4;box-shadow:inset 0 0 0 2px #bbf7d0}",
   ".os-wheel .os-wh-win{margin:0;color:#166534;font-size:18px;font-weight:800;line-height:1.35}",
@@ -76,7 +78,7 @@ export const WHEEL_CSS = [
   // Sem JavaScript (e antes de o script começar): o aviso no lugar do "Girar".
   ".os-wheel:not(.os-wh-on):not([data-gjs-type]) .os-wh-nojs{display:block}",
   ".os-wheel:not(.os-wh-on):not([data-gjs-type]) .os-wh-spin{display:none}",
-  "@media (max-width:480px){.os-wheel{margin:12px auto;padding:20px 14px 22px;border-radius:20px}.os-wheel .os-wh-title{font-size:23px}.os-wheel .os-wh-prize{font-size:36px}}",
+  "@media (max-width:480px){.os-wheel{margin:12px auto;padding:20px 14px 22px;border-radius:20px}.os-wheel .os-wh-title{font-size:23px}.os-wheel .os-wh-prize{font-size:36px}.os-wheel .os-wh-hub{font-size:14px}}",
 ].join("");
 
 // ─── Definições ──────────────────────────────────────────────────────────────
@@ -167,11 +169,11 @@ export function wheelDef(spec: WheelSpec, { html = false } = {}): Def {
           },
           {
             type: WHEEL_PART_TYPE,
-            tagName: "div",
-            name: "Centro",
+            tagName: "button",
+            name: "Centro (GIRE)",
             classes: ["os-wh-hub"],
-            attributes: { "aria-hidden": "true" },
-            content: "🎁",
+            attributes: { type: "button", "aria-label": "Girar a roleta" },
+            content: "GIRE",
           },
         ],
       },

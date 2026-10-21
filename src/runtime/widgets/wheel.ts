@@ -133,6 +133,12 @@ function setup(wheel: HTMLElement) {
   const disc = q("[data-os-wh-disc]");
   const spin = q<HTMLButtonElement>("[data-os-wh-spin]");
   if (slices.length < 2 || !disc || !spin) return;
+  // O centro "GIRE" também gira a roleta (além do botão de baixo).
+  const hub = q<HTMLButtonElement>(".os-wh-hub");
+  const spinButtons = hub ? [spin, hub] : [spin];
+  const lockSpin = () => {
+    for (let i = 0; i < spinButtons.length; i++) spinButtons[i].disabled = true;
+  };
   const result = q("[data-os-wh-result]");
   const go = q<HTMLAnchorElement>("[data-os-wh-go]");
   const prizeEl = q("[data-os-wh-prize]");
@@ -173,7 +179,7 @@ function setup(wheel: HTMLElement) {
     won = s;
     wheel.classList.add("os-wh-done");
     wheel.classList.toggle("os-wh-lost", !!s.lose);
-    spin.disabled = true;
+    lockSpin();
     if (prizeEl) prizeEl.textContent = s.text;
     if (couponBox) couponBox.hidden = !s.coupon;
     if (code) code.textContent = s.coupon;
@@ -235,7 +241,7 @@ function setup(wheel: HTMLElement) {
     show(mi, mu, false);
   }
 
-  spin.addEventListener("click", (e) => {
+  const onSpin = (e: Event) => {
     e.preventDefault();
     if (spun) return;
     spun = true;
@@ -250,7 +256,7 @@ function setup(wheel: HTMLElement) {
     save(memory, JSON.stringify({ i, u: until, at: now }));
     if (!s.lose && s.link) savePrize(prizeId(s), until, s.text, s.coupon);
     emit("spin", s);
-    spin.disabled = true;
+    lockSpin();
     wheel.classList.add("os-wh-spinning");
     wheel.setAttribute("aria-busy", "true");
     live.textContent = t("whSpin", "Girando a roleta…");
@@ -274,7 +280,8 @@ function setup(wheel: HTMLElement) {
     };
     if (ms) disc.addEventListener("transitionend", finish, { once: true });
     setTimeout(finish, ms ? ms + 400 : 150);
-  });
+  };
+  for (let i = 0; i < spinButtons.length; i++) spinButtons[i].addEventListener("click", onSpin);
 
   // "Resgatou": só quem ganhou um prêmio (quem caiu em "Sem prêmio" só continua para a oferta).
   go?.addEventListener("click", () => {

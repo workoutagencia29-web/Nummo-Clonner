@@ -133,7 +133,7 @@ describe("createQuizWheelFunnel", () => {
     expect($w("[data-os-wh-go]").attr("data-os-link")).toBeUndefined();
     // A roda, o prêmio e o cupom de exemplo saem das fatias novas.
     expect($w("[data-os-wh-disc] svg").length).toBe(1);
-    expect($w("[data-os-wh-disc]").text()).toContain("50% OFF");
+    expect($w("[data-os-wh-disc]").text()).toContain("50%OFF");
     expect($w("[data-os-wh-code]").text()).toBe("Roleta30");
     expect(wheelHtml.startsWith("<!DOCTYPE html>") || wheelHtml.startsWith("<!doctype html>")).toBe(true);
 

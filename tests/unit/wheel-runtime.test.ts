@@ -296,6 +296,18 @@ describe("roleta na página", () => {
     await site.close();
   }, 40_000);
 
+  it("o centro “GIRE” também gira a roleta (os dois gatilhos travam)", async () => {
+    const site = await open(WHEEL_PATH, { random: 0.5 });
+    const { page } = site;
+    expect(await visible(page, ".os-wh-hub")).toBe(true);
+    await page.locator(".os-wh-hub").tap();
+    expect(await wheelEvents(page)).toEqual([{ kind: "spin", prize: "30% OFF", won: true, track: true }]);
+    // Clicar no centro trava o botão de baixo E o próprio centro.
+    expect(await page.locator("[data-os-wh-spin]").isDisabled()).toBe(true);
+    expect(await page.locator(".os-wh-hub").isDisabled()).toBe(true);
+    await site.close();
+  }, 30_000);
+
   it("uma vez por visitante: quem volta vê a roda parada no prêmio, com o resultado e o botão", async () => {
     const site = await open(WHEEL_PATH, { random: 0.05 });
     const { page } = site;

@@ -489,6 +489,7 @@ const WHEEL_TRAITS: TraitDef[] = [
   heading("Cores", "wh-cores"),
   colorTrait("os-wh-cta", "Cor dos botões", "--os-wh-cta", WHEEL_THEME.cta),
   colorTrait("os-wh-rim", "Cor da borda da roda", "--os-wh-rim", WHEEL_THEME.rim),
+  colorTrait("os-wh-gold", "Cor do centro (GIRE)", "--os-wh-gold", WHEEL_THEME.gold),
   colorTrait("os-wh-ptr", "Cor do ponteiro", "--os-wh-ptr", WHEEL_THEME.ptr),
 ];
 

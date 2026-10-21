@@ -118,7 +118,7 @@ describe("bloco Roleta de desconto", () => {
       { text: "50% OFF", color: "#10b981", chance: 10, link: "", coupon: "" },
     ]);
     const c = await canvas(page);
-    expect(c.texts).toEqual(["10% OFF", "20% OFF", "30% OFF", "50% OFF"]);
+    expect(c.texts).toEqual(["10%OFF", "20%OFF", "30%OFF", "50%OFF"]);
     expect(c.colors).toEqual(["#7c3aed", "#f59e0b", "#ec4899", "#10b981"]);
     expect(c.badge).toBe(
       "4 prêmios (“10% OFF”, “20% OFF”, “30% OFF”, “50% OFF”) ainda não têm o link de checkout com o desconto: escolha em Configurações → Fatias",
@@ -164,7 +164,7 @@ describe("bloco Roleta de desconto", () => {
     await sliceField(page, "set('.os-sl-text', 'R$ 50 de desconto', 1)");
     await sliceField(page, "set('.os-sl-color', '#0ea5e9', 1)");
     expect((await slices(page))[1]).toMatchObject({ text: "R$ 50 de desconto", color: "#0ea5e9" });
-    expect((await canvas(page)).texts[1]).toBe("R$ 50 dedesconto");
+    expect((await canvas(page)).texts[1]).toBe("R$ 50de desconto");
     expect((await canvas(page)).colors[1]).toBe("#0ea5e9");
 
     await sliceField(page, "set('.os-sl-chance', '0', 3)");
@@ -185,7 +185,7 @@ describe("bloco Roleta de desconto", () => {
     // (o GrapesJS pode juntar as duas mudanças seguidas da mesma fatia num passo só)
     for (let i = 0; i < 2 && (await slices(page))[1]?.text !== "20% OFF"; i++) await undo(page);
     expect((await slices(page))[1]).toMatchObject({ text: "20% OFF", color: "#f59e0b" });
-    expect((await canvas(page)).texts[1]).toBe("20% OFF");
+    expect((await canvas(page)).texts[1]).toBe("20%OFF");
   });
 
   it("prêmio: link da oferta, “Sem prêmio” e “＋ Criar link da oferta…” (liga a fatia ao link novo); o aviso do canvas acompanha", async () => {
@@ -336,7 +336,7 @@ describe("modelo “Roleta” aberto no editor", () => {
     }, html);
     await page.waitForTimeout(100);
     const c = await canvas(page);
-    expect(c.texts).toEqual(["10% OFF", "20% OFF", "30% OFF", "50% OFF"]);
+    expect(c.texts).toEqual(["10%OFF", "20%OFF", "30%OFF", "50%OFF"]);
     expect((await slices(page)).map((s) => s.chance)).toEqual([40, 30, 20, 10]);
     expect(c.badge).toMatch(/^4 prêmios/);
     const { html: out } = await editorOutput(page);

@@ -155,6 +155,19 @@ const escXml = (s: string) =>
 
 const r2 = (n: number) => Math.round(n * 100) / 100;
 
+/**
+ * Separa o "valor" do começo (número com %/moeda, ex.: "95%", "R$ 50", "50% OFF")
+ * da descrição que vem depois ("DE DESCONTO", "OFF"). Devolve null quando não
+ * começa com número (ex.: "Tente outra vez", "Frete grátis") — aí cai no `lines`.
+ */
+function splitValue(text: string): [string, string] | null {
+  const m = /^\s*(?:R\$|US\$|\$|€)?\s?\d[\d.,]*\s?%?/.exec(text);
+  if (!m) return null;
+  const head = m[0].trim();
+  const rest = text.slice(m[0].length).trim();
+  return head && rest ? [head, rest] : null;
+}
+
 /** Texto da fatia em até duas linhas (quebra no espaço mais perto do meio). */
 function lines(text: string): string[] {
   if (text.length <= 11 || !text.includes(" ")) return [text];
@@ -181,7 +194,14 @@ export function wheelSvg(slices: WheelSlice[]): string {
   };
   const point = (deg: number, r: number) => xy(deg, r).join(" ");
   const fs = n <= 4 ? 15 : n <= 6 ? 13 : n <= 8 ? 11 : 9.5;
-  const parts: string[] = ['<circle r="110" fill="currentColor"/>'];
+  // Anel: grosso na cor da borda (currentColor = --os-wh-rim, preto por padrão) com
+  // dois fios dourados — um na beirada de fora e outro junto das fatias.
+  const RIM = 114;
+  const parts: string[] = [
+    `<circle r="${RIM}" fill="currentColor"/>`,
+    `<circle r="${RIM - 1.4}" fill="none" stroke="#e9c46a" stroke-width="1.6"/>`,
+    `<circle r="${R + 1}" fill="none" stroke="#e9c46a" stroke-width="1.6"/>`,
+  ];
   slices.forEach((s, i) => {
     const a0 = i * seg;
     const a1 = (i + 1) * seg;
@@ -194,29 +214,38 @@ export function wheelSvg(slices: WheelSlice[]): string {
       parts.push(`<path d="M0 0L${point(i * seg, R)}" stroke="#fff" stroke-opacity=".55" stroke-width="1.2"/>`);
     }
   }
-  // Luzes da borda: duas por fatia.
-  for (let i = 0; i < n * 2; i++) {
-    const at = xy((i * seg) / 2, 105);
-    parts.push(`<circle cx="${at[0]}" cy="${at[1]}" r="2.4" fill="#fde68a"/>`);
-  }
   slices.forEach((s, i) => {
     const mid = (i + 0.5) * seg - 90;
-    const ls = lines(s.text);
-    // Cabe entre o centro (r 27) e a borda (r 91): letra menor para texto comprido.
-    const longest = Math.max(...ls.map((l) => l.length), 1);
-    const size = r2(Math.min(fs, 64 / (longest * 0.64)));
-    const dy = ls.length > 1 ? -size * 0.55 : 0;
     // Na metade esquerda o texto vira 180° (lido da borda para o centro, sem ficar de cabeça para baixo).
     const left = Math.cos((mid * Math.PI) / 180) < -0.01;
     const x = left ? -91 : 91;
-    const spans = ls.map((l, k) => `<tspan x="${x}" dy="${k ? r2(size * 1.1) : r2(dy)}">${escXml(l)}</tspan>`).join("");
+    const ink = inkOn(s.color);
+    const value = splitValue(s.text);
+    let topSize: number;
+    let spans: string;
+    if (value) {
+      // Número GRANDE (valor) + descrição pequena embaixo — foco em conversão.
+      const big = r2(Math.min(fs * 1.9, 64 / (value[0].length * 0.62)));
+      const small = r2(Math.min(big * 0.46, fs * 0.82, 60 / (value[1].length * 0.62)));
+      topSize = big;
+      spans =
+        `<tspan x="${x}" dy="${r2(-small * 0.72)}" font-size="${big}" font-weight="900">${escXml(value[0])}</tspan>` +
+        `<tspan x="${x}" dy="${r2(big * 0.62 + small * 0.52)}" font-size="${small}" font-weight="800">${escXml(value[1])}</tspan>`;
+    } else {
+      // Sem número no começo ("Tente outra vez"): até duas linhas, mesmo tamanho.
+      const ls = lines(s.text);
+      const longest = Math.max(...ls.map((l) => l.length), 1);
+      topSize = r2(Math.min(fs, 64 / (longest * 0.64)));
+      const dy = ls.length > 1 ? -topSize * 0.55 : 0;
+      spans = ls.map((l, k) => `<tspan x="${x}" dy="${k ? r2(topSize * 1.1) : r2(dy)}">${escXml(l)}</tspan>`).join("");
+    }
     parts.push(
-      `<text transform="rotate(${r2(left ? mid + 180 : mid)})" text-anchor="${left ? "start" : "end"}" dominant-baseline="central" font-size="${size}" font-weight="800" fill="${inkOn(s.color)}">${spans}</text>`,
+      `<text transform="rotate(${r2(left ? mid + 180 : mid)})" text-anchor="${left ? "start" : "end"}" dominant-baseline="central" font-size="${topSize}" font-weight="800" fill="${ink}">${spans}</text>`,
     );
   });
   const label = `Roleta com ${n} fatias: ${slices.map((s) => s.text).join(", ")}`;
   // Sem xmlns: o SVG vai dentro do HTML (o modelo de página não cita endereço nenhum).
-  return `<svg viewBox="-110 -110 220 220" role="img" aria-label="${escXml(label)}">${parts.join("")}</svg>`;
+  return `<svg viewBox="-117 -117 234 234" role="img" aria-label="${escXml(label)}">${parts.join("")}</svg>`;
 }
 
 /** Assinatura curta das fatias (a roleta "é a mesma" para quem volta à página). */
