@@ -639,6 +639,7 @@ enum PaymentProvider {
   FLEVOPAY // PIX (Brasil), só no checkout do Offer Studio
   BLACKCAT // PIX (Brasil), só no checkout do Offer Studio
   CLOWNPAY // PIX (Brasil), só no checkout do Offer Studio
+  PAGPIXHUB // PIX (Brasil), só no checkout do Offer Studio
 }
 
 enum PaymentCurrency {

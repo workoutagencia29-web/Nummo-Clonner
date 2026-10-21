@@ -99,7 +99,7 @@ describe("ZIP completo (A/B, celular, legal, Preservar JS, eventos.php)", () => 
     expect(view.step).toBe("Pronto para baixar");
     expect(view.fileName).toMatch(/^oferta-teste-exportacao-\d{4}-\d{2}-\d{2}-\d{4}\.zip$/);
     expect(view.bytes).toBeGreaterThan(1000);
-    expect(view.options).toEqual({ splitter: true, serverEvents: true, optimizeHtml: true, lighterImages: true });
+    expect(view.options).toEqual({ splitter: true, serverEvents: true, optimizeHtml: true, lighterImages: true, target: "php" });
     const warnings = view.warnings.join("\n");
     expect(warnings).toContain("“Quiz” usa o modo “Com scripts”: suba a oferta na raiz do domínio");
     expect(warnings).toContain("O eventos.php só funciona em hospedagem com PHP");

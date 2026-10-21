@@ -52,5 +52,5 @@ export function serverlessGateways(
   const used = new Set<ServerlessProvider>();
   for (const p of checkout?.products ?? []) used.add(p.provider);
   if (payment?.products.length) used.add("KYVO");
-  return (["FLEVOPAY", "BLACKCAT", "CLOWNPAY", "KYVO"] as const).filter((g) => used.has(g));
+  return (["FLEVOPAY", "BLACKCAT", "CLOWNPAY", "PAGPIXHUB", "KYVO"] as const).filter((g) => used.has(g));
 }

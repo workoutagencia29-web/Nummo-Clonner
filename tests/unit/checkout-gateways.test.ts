@@ -29,6 +29,13 @@ import {
 } from "@/server/services/payments/flevopay";
 import { isoDate, qrImageOf } from "@/server/services/payments/http";
 import { kyvoGateway } from "@/server/services/payments/kyvo";
+import {
+  PAGPIXHUB_API_BASE,
+  PAGPIXHUB_BASE_ENV,
+  pagpixhubApiBase,
+  pagpixhubGateway,
+  pagpixhubStatus,
+} from "@/server/services/payments/pagpixhub";
 import { catchError } from "./helpers";
 import { KYVO_KEY } from "./kyvo-fake";
 import {
@@ -40,34 +47,47 @@ import {
   CLOWNPAY_KEY_KYC,
   FAKE_PIX_CODE,
   FAKE_QR_BASE64,
+  type FakePagpixhub,
   type FakePix,
   FLEVO_KEY,
   FLEVO_KEY_DOWN,
+  PAGPIXHUB_KEY,
+  PAGPIXHUB_KEY_DOWN,
   startFakeBlackcat,
   startFakeClownpay,
   startFakeFlevopay,
+  startFakePagpixhub,
 } from "./pix-fakes";
 
 let flevo: FakePix;
 let blackcat: FakePix;
 let clown: FakePix;
+let pagpix: FakePagpixhub;
 
 beforeAll(async () => {
-  [flevo, blackcat, clown] = await Promise.all([startFakeFlevopay(), startFakeBlackcat(), startFakeClownpay()]);
+  [flevo, blackcat, clown, pagpix] = await Promise.all([
+    startFakeFlevopay(),
+    startFakeBlackcat(),
+    startFakeClownpay(),
+    startFakePagpixhub(),
+  ]);
   process.env[FLEVOPAY_BASE_ENV] = flevo.base;
   process.env[BLACKCAT_BASE_ENV] = blackcat.base;
   process.env[CLOWNPAY_BASE_ENV] = clown.base;
+  process.env[PAGPIXHUB_BASE_ENV] = pagpix.base;
   // Garantia: nada vai para os gateways de verdade.
   expect(flevopayApiBase()).toBe(flevo.base);
   expect(blackcatApiBase()).toBe(blackcat.base);
   expect(clownpayApiBase()).toBe(clown.base);
+  expect(pagpixhubApiBase()).toBe(pagpix.base);
 });
 
 afterAll(async () => {
   delete process.env[FLEVOPAY_BASE_ENV];
   delete process.env[BLACKCAT_BASE_ENV];
   delete process.env[CLOWNPAY_BASE_ENV];
-  await Promise.all([flevo.close(), blackcat.close(), clown.close()]);
+  delete process.env[PAGPIXHUB_BASE_ENV];
+  await Promise.all([flevo.close(), blackcat.close(), clown.close(), pagpix.close()]);
 });
 
 async function gatewayCode(promise: Promise<unknown>): Promise<GatewayErrorCode> {
@@ -466,6 +486,108 @@ describe("ClownPay", () => {
       expect(clownpayApiBase()).toBe("http://127.0.0.1:9997");
     } finally {
       process.env[CLOWNPAY_BASE_ENV] = saved;
+    }
+  });
+});
+
+describe("PagPixHub", () => {
+  it("cria o PIX: Bearer, Idempotency-Key = pedido, customer com os 4 dados, amount_cents e method pix", async () => {
+    const input = pixInput({ amountCents: 12_400 });
+    const charge = await pagpixhubGateway.createCharge(PAGPIXHUB_KEY, input);
+    expect(charge).toMatchObject({ status: "pending", amountCents: 12_400, currency: "BRL" });
+    // O PagPixHub devolve só o "copia e cola" (sem imagem do QR): a página gera o QR.
+    expect(charge.instructions).toMatchObject({ kind: "pix", copyPaste: FAKE_PIX_CODE, qrImage: null });
+    const req = pagpix.requests.at(-1);
+    expect(req?.headers.authorization).toBe(`Bearer ${PAGPIXHUB_KEY}`);
+    expect(req?.headers["idempotency-key"]).toBe(input.externalOrderId);
+    expect(req?.path).toBe("/transactions");
+    expect(req?.body).toMatchObject({
+      amount_cents: 12_400,
+      method: "pix",
+      external_reference: input.externalOrderId,
+      customer: { name: buyer.name, email: buyer.email, cpf: "52998224725", phone: "11987654321" },
+      utm: { source: "facebook", campaign: "lancamento" },
+    });
+  });
+
+  it("status consultado pela API (pago); Idempotency-Key repetida devolve a mesma cobrança", async () => {
+    const input = pixInput();
+    const charge = await pagpixhubGateway.createCharge(PAGPIXHUB_KEY, input);
+    expect(await pagpixhubGateway.getTransaction(PAGPIXHUB_KEY, charge.id)).toMatchObject({
+      id: charge.id,
+      status: "pending",
+      amountCents: 9_700,
+      method: "pix",
+      externalOrderId: input.externalOrderId,
+      paidAt: null,
+    });
+    pagpix.setStatus(charge.id, "PAID");
+    const paid = await pagpixhubGateway.getTransaction(PAGPIXHUB_KEY, charge.id);
+    expect(paid.status).toBe("paid");
+    expect(paid.paidAt).not.toBeNull();
+    const before = pagpix.transactions.size;
+    const again = await pagpixhubGateway.createCharge(PAGPIXHUB_KEY, input);
+    expect(again.id).toBe(charge.id);
+    expect(pagpix.transactions.size).toBe(before);
+  });
+
+  it("código gerado de forma assíncrona (202): consulta a cobrança até ficar pronto, sem recriar", async () => {
+    pagpix.generatingOnce();
+    const before = pagpix.transactions.size;
+    const charge = await pagpixhubGateway.createCharge(PAGPIXHUB_KEY, pixInput());
+    expect(charge.instructions).toMatchObject({ kind: "pix", copyPaste: FAKE_PIX_CODE });
+    // Criou UMA cobrança e depois CONSULTOU (não recriou).
+    expect(pagpix.transactions.size).toBe(before + 1);
+    expect(pagpix.requests.at(-1)).toMatchObject({ method: "GET" });
+  });
+
+  it("recusa o que não é PIX em real e quem compra sem os 4 dados (sem chamar o PagPixHub)", async () => {
+    const before = pagpix.requests.length;
+    expect(await gatewayCode(pagpixhubGateway.createCharge(PAGPIXHUB_KEY, pixInput({ currency: "MXN" })))).toBe(
+      "invalid_request",
+    );
+    expect(await gatewayCode(pagpixhubGateway.createCharge(PAGPIXHUB_KEY, pixInput({ method: "card" })))).toBe(
+      "invalid_request",
+    );
+    expect(
+      await gatewayCode(
+        pagpixhubGateway.createCharge(PAGPIXHUB_KEY, pixInput({ customer: { name: "Maria", email: "m@x.com" } })),
+      ),
+    ).toBe("invalid_request");
+    expect(pagpix.requests.length).toBe(before);
+  });
+
+  it("erros e “Testar conexão”: chave recusada, fora do ar (503), não encontrada", async () => {
+    expect(await gatewayCode(pagpixhubGateway.createCharge("bp_live_errada0000000000", pixInput()))).toBe(
+      "invalid_key",
+    );
+    expect(await gatewayCode(pagpixhubGateway.createCharge(PAGPIXHUB_KEY_DOWN, pixInput()))).toBe("unavailable");
+    expect(await gatewayCode(pagpixhubGateway.getTransaction(PAGPIXHUB_KEY, "nao-existe"))).toBe("not_found");
+    expect(await pagpixhubGateway.testConnection(PAGPIXHUB_KEY)).toBe("ok");
+    expect(pagpix.requests.at(-1)).toMatchObject({ method: "GET", path: "/me" });
+    expect(await pagpixhubGateway.testConnection("bp_live_errada0000000000")).toBe("invalid_key");
+    expect(await pagpixhubGateway.testConnection(PAGPIXHUB_KEY_DOWN)).toBe("unavailable");
+  });
+
+  it("status do PagPixHub (MAIÚSCULAS)", () => {
+    expect(pagpixhubStatus("PENDING")).toBe("pending");
+    expect(pagpixhubStatus("PAID")).toBe("paid");
+    expect(pagpixhubStatus("EXPIRED")).toBe("expired");
+    expect(pagpixhubStatus("FAILED")).toBe("failed");
+    expect(pagpixhubStatus("REFUNDED")).toBe("refunded");
+    expect(pagpixhubStatus("CHARGEBACK")).toBe("disputed");
+    expect(() => pagpixhubStatus("ESTRANHO")).toThrow(PaymentGatewayError);
+  });
+
+  it("endereço da API só troca por um endereço deste Mac", () => {
+    const saved = process.env[PAGPIXHUB_BASE_ENV];
+    try {
+      process.env[PAGPIXHUB_BASE_ENV] = "https://evil.example.com";
+      expect(pagpixhubApiBase()).toBe(PAGPIXHUB_API_BASE);
+      process.env[PAGPIXHUB_BASE_ENV] = "http://127.0.0.1:9996/api/v1/";
+      expect(pagpixhubApiBase()).toBe("http://127.0.0.1:9996/api/v1");
+    } finally {
+      process.env[PAGPIXHUB_BASE_ENV] = saved;
     }
   });
 });

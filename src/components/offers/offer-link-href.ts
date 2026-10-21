@@ -27,6 +27,7 @@ export const ACCOUNT_QUERY_VALUE: Record<PaymentProviderId, string> = {
   FLEVOPAY: "flevopay",
   BLACKCAT: "blackcat",
   CLOWNPAY: "clownpay",
+  PAGPIXHUB: "pagpixhub",
 };
 
 /** Gateway do ?conta= (null = nenhum). */

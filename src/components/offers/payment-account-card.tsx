@@ -34,6 +34,7 @@ export const ACCOUNT_CARD_ID: Record<PaymentProviderId, string> = {
   FLEVOPAY: "conta-flevopay",
   BLACKCAT: "conta-blackcat",
   CLOWNPAY: "conta-clownpay",
+  PAGPIXHUB: "conta-pagpixhub",
 };
 
 /** O que cada gateway cobra, onde a chave é usada e onde achá-la (texto curto para o painel). */
@@ -75,6 +76,15 @@ const GATEWAY_INFO: Record<
     keyHelp:
       "No painel da ClownPay, abra a parte de chaves da API (Integrações → API) e copie a chave secreta. Ela começa com cp_live_.",
     placeholder: "cp_live_…",
+  },
+  PAGPIXHUB: {
+    title: "Checkout do Offer Studio — conta do PagPixHub desta oferta",
+    usedBy:
+      "Os checkouts do Offer Studio desta oferta que usam o PagPixHub cobram nesta conta. Cada oferta pode usar uma conta diferente.",
+    methods: "PIX no Brasil, em real.",
+    keyHelp:
+      "No painel do PagPixHub, abra Dashboard → API Keys e crie uma chave. Ela começa com bp_live_ e aparece uma vez só — copie na hora.",
+    placeholder: "bp_live_…",
   },
 };
 

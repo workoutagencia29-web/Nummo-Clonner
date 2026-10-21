@@ -210,6 +210,7 @@ describe("chave da FlevoPay e da BlackCat por oferta", () => {
       ["FLEVOPAY", "FlevoPay", false],
       ["BLACKCAT", "BlackCat", false],
       ["CLOWNPAY", "ClownPay", false],
+      ["PAGPIXHUB", "PagPixHub", false],
     ]);
     await expectUserError(
       savePaymentGatewayKey(offer.id, "FLEVOPAY", KYVO_KEY),

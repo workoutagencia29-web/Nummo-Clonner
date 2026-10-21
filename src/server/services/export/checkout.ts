@@ -31,7 +31,7 @@ export async function loadCheckoutExport(offerId: string): Promise<CheckoutExpor
 export function checkoutGateways(checkout: CheckoutExport | null): CheckoutProviderId[] {
   if (!checkout) return [];
   const used = new Set(checkout.products.map((p) => p.provider));
-  return (["FLEVOPAY", "BLACKCAT", "CLOWNPAY", "KYVO"] as const).filter((p) => used.has(p));
+  return (["FLEVOPAY", "BLACKCAT", "CLOWNPAY", "PAGPIXHUB", "KYVO"] as const).filter((p) => used.has(p));
 }
 
 /**

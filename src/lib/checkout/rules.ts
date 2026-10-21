@@ -32,12 +32,18 @@ export const CHECKOUT_PROVIDERS = [
   "FLEVOPAY",
   "BLACKCAT",
   "CLOWNPAY",
+  "PAGPIXHUB",
   "KYVO",
 ] as const satisfies readonly PaymentProviderId[];
 export type CheckoutProviderId = (typeof CHECKOUT_PROVIDERS)[number];
 
 /** Gateways de PIX (só real). */
-export const PIX_PROVIDERS = ["FLEVOPAY", "BLACKCAT", "CLOWNPAY"] as const satisfies readonly CheckoutProviderId[];
+export const PIX_PROVIDERS = [
+  "FLEVOPAY",
+  "BLACKCAT",
+  "CLOWNPAY",
+  "PAGPIXHUB",
+] as const satisfies readonly CheckoutProviderId[];
 
 /** Moedas do checkout = as moedas da oferta (Offer.settings.currency). */
 export const CHECKOUT_CURRENCIES = ["BRL", "MXN", "EUR", "USD"] as const satisfies readonly StoreCurrency[];
@@ -54,6 +60,7 @@ export const PROVIDER_CURRENCIES: Record<CheckoutProviderId, readonly CheckoutCu
   FLEVOPAY: ["BRL"],
   BLACKCAT: ["BRL"],
   CLOWNPAY: ["BRL"],
+  PAGPIXHUB: ["BRL"],
   KYVO: ["MXN", "EUR", "USD"],
 };
 
@@ -62,6 +69,7 @@ export const CHECKOUT_PROVIDER_HINT: Record<CheckoutProviderId, string> = {
   FLEVOPAY: "PIX no Brasil, em real.",
   BLACKCAT: "PIX no Brasil, em real.",
   CLOWNPAY: "PIX no Brasil, em real.",
+  PAGPIXHUB: "PIX no Brasil, em real.",
   KYVO: "Peso mexicano (SPEI e cartão), euro (cartão, Bizum e MB WAY) e dólar (cartão).",
 };
 
@@ -274,6 +282,7 @@ export const PROVIDER_REQUIRED_FIELDS: Record<CheckoutProviderId, readonly Buyer
   FLEVOPAY: ["name", "email", "phone", "document"],
   BLACKCAT: ["name", "email", "phone", "document"],
   CLOWNPAY: ["name", "email", "phone", "document"],
+  PAGPIXHUB: ["name", "email", "phone", "document"],
   KYVO: ["name", "email"],
 };
 

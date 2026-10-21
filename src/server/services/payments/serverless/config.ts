@@ -60,5 +60,6 @@ export const GATEWAY_KEY_ENV: Record<ServerlessProvider, string> = {
   FLEVOPAY: "OS_FLEVOPAY_KEY",
   BLACKCAT: "OS_BLACKCAT_KEY",
   CLOWNPAY: "OS_CLOWNPAY_KEY",
+  PAGPIXHUB: "OS_PAGPIXHUB_KEY",
   KYVO: "OS_KYVO_KEY",
 };

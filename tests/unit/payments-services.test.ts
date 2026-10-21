@@ -121,6 +121,7 @@ describe("chave do gateway da oferta (aba Links e checkouts)", () => {
       { provider: "FLEVOPAY", label: "FlevoPay", ...empty },
       { provider: "BLACKCAT", label: "BlackCat", ...empty },
       { provider: "CLOWNPAY", label: "ClownPay", ...empty },
+      { provider: "PAGPIXHUB", label: "PagPixHub", ...empty },
     ]);
     await savePaymentGatewayKey(a.id, "KYVO", ` Bearer ${KYVO_KEY} `);
     const row = await prisma.paymentGateway.findUniqueOrThrow({

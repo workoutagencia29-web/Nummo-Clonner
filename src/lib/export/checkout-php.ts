@@ -59,6 +59,8 @@ export const PAGAMENTO_FLEVOPAY_API = "https://pagamento-processador.org.ua";
 export const PAGAMENTO_BLACKCAT_API = "https://api.blackcatoficial.com/api";
 /** API da ClownPay usada pelo pagamento.php (a mesma de CLOWNPAY_API_BASE). */
 export const PAGAMENTO_CLOWNPAY_API = "https://api.clownpay.com.br";
+/** API do PagPixHub usada pelo pagamento.php (a mesma de PAGPIXHUB_API_BASE, já com /api/v1). */
+export const PAGAMENTO_PAGPIXHUB_API = "https://pagpixhub.com/api/v1";
 /** Pasta dos pedidos do checkout dentro de pagamento-dados/. */
 export const PAGAMENTO_ORDERS_DIR = "pedidos";
 /** Dias que um pedido PAGO do checkout fica guardado (o ?pedido= da página de obrigado vale esse tempo). */
@@ -79,7 +81,7 @@ export const PAGAMENTO_WEBHOOK_MAX_BODY = 64 * 1024;
 export const PAGAMENTO_WEBHOOK_LIMIT = 600;
 
 /** Gateway como o pagamento.php o chama ("" = o gateway não cobra na moeda do produto). */
-export type PagamentoGateway = "flevopay" | "blackcat" | "clownpay" | "kyvo";
+export type PagamentoGateway = "flevopay" | "blackcat" | "clownpay" | "pagpixhub" | "kyvo";
 
 /** Checkout como o pagamento.php conhece (só no config.php). */
 export interface PagamentoCheckout {
@@ -178,7 +180,7 @@ export function pagamentoCheckoutOf(
 
 /** O gateway exige nome com sobrenome (os de PIX)? */
 export function pagamentoNeedsFullName(gateway: PagamentoGateway | ""): boolean {
-  return gateway === "flevopay" || gateway === "blackcat" || gateway === "clownpay";
+  return gateway === "flevopay" || gateway === "blackcat" || gateway === "clownpay" || gateway === "pagpixhub";
 }
 
 const cents = (n: number) => (Number.isSafeInteger(n) && n >= 0 ? n : 0);
@@ -242,6 +244,7 @@ export function checkoutPhpFunctions(): string {
 const OS_FLEVOPAY_API = '${PAGAMENTO_FLEVOPAY_API}';
 const OS_BLACKCAT_API = '${PAGAMENTO_BLACKCAT_API}';
 const OS_CLOWNPAY_API = '${PAGAMENTO_CLOWNPAY_API}';
+const OS_PAGPIXHUB_API = '${PAGAMENTO_PAGPIXHUB_API}';
 const OS_ORDERS_DIR = '${PAGAMENTO_ORDERS_DIR}';
 const OS_ORDER_KEEP = ${PAGAMENTO_ORDER_KEEP_DAYS * 86400};
 const OS_UNPAID_KEEP = ${PAGAMENTO_UNPAID_KEEP_DAYS * 86400};
@@ -483,7 +486,7 @@ function os_checkout_ok($c)
     return is_array($c)
         && isset($c['codigo'], $c['gateway'], $c['valor'], $c['moeda'], $c['metodos'], $c['faixas'], $c['campos'], $c['fretes'], $c['bumps'])
         && is_string($c['codigo']) && preg_match('/^[a-z0-9-]{1,32}$/', $c['codigo'])
-        && in_array($c['gateway'], array('flevopay', 'blackcat', 'clownpay', 'kyvo'), true)
+        && in_array($c['gateway'], array('flevopay', 'blackcat', 'clownpay', 'pagpixhub', 'kyvo'), true)
         && is_int($c['valor']) && $c['valor'] > 0
         && is_string($c['moeda']) && is_array($c['metodos']) && is_array($c['faixas'])
         && is_array($c['campos']) && is_array($c['fretes']) && is_array($c['bumps']);
@@ -784,6 +787,12 @@ function os_pix_api($gateway, $method, $path, $apiKey, $body, $retry, $idempoten
         if ($idempotency !== null && $idempotency !== '') {
             $headers[] = 'Idempotency-Key: ' . $idempotency;
         }
+    } elseif ($gateway === 'pagpixhub') {
+        $base = OS_PAGPIXHUB_API;
+        $headers = array('Authorization: Bearer ' . $apiKey, 'Accept: application/json');
+        if ($idempotency !== null && $idempotency !== '') {
+            $headers[] = 'Idempotency-Key: ' . $idempotency;
+        }
     } else {
         $base = OS_BLACKCAT_API;
         $headers = array('X-API-Key: ' . $apiKey, 'Accept: application/json');
@@ -899,6 +908,17 @@ function os_clownpay_status($value)
         'refunded' => 'refunded', 'chargeback' => 'disputed',
     );
     $key = strtolower((string) os_text($value));
+    return isset($map[$key]) ? $map[$key] : null;
+}
+
+/** Status do PagPixHub (MAIÚSCULAS) → status do Offer Studio (null = desconhecido). */
+function os_pagpixhub_status($value)
+{
+    $map = array(
+        'PENDING' => 'pending', 'PAID' => 'paid', 'EXPIRED' => 'expired',
+        'FAILED' => 'failed', 'REFUNDED' => 'refunded', 'CHARGEBACK' => 'disputed',
+    );
+    $key = strtoupper((string) os_text($value));
     return isset($map[$key]) ? $map[$key] : null;
 }
 
@@ -1050,6 +1070,72 @@ function os_pix_create($gateway, $apiKey, $c, $buyer, $total, $external, $metada
         }
         return array($id, $code, null, os_iso_date(os_field($json, 'expires_at')));
     }
+    if ($gateway === 'pagpixhub') {
+        // PagPixHub: Bearer + Idempotency-Key (= pedidoExterno); só o "copia e cola" (sem imagem do QR).
+        $body = array(
+            'amount_cents' => $total['total'],
+            'method' => 'pix',
+            'external_reference' => $external,
+            'description' => os_cut((string) $c['nome'], 300),
+            'customer' => array(
+                'name' => $buyer['nome'],
+                'email' => $buyer['email'],
+                'cpf' => $buyer['documento'],
+                'phone' => $buyer['telefone'],
+            ),
+        );
+        $renamed = array();
+        foreach (array('utm_source' => 'source', 'utm_medium' => 'medium', 'utm_campaign' => 'campaign', 'utm_content' => 'content', 'utm_term' => 'term') as $k => $v) {
+            $val = os_text(os_field($metadata, $k));
+            if ($val !== null && $val !== '') {
+                $renamed[$v] = $val;
+            }
+        }
+        if (count($renamed)) {
+            $body['utm'] = $renamed;
+        }
+        // Webhook cadastrado no painel do PagPixHub (a página confere pela API de qualquer jeito).
+        $res = os_pix_api('pagpixhub', 'POST', '/transactions', $apiKey, $body, false, $external);
+        if ($res[0] < 200 || $res[0] >= 300) {
+            return os_pix_error($res[0]);
+        }
+        $json = json_decode($res[1], true);
+        if (!is_array($json)) {
+            return 'indisponivel';
+        }
+        $id = os_gateway_id(os_field($json, 'id'));
+        if ($id === null) {
+            return 'indisponivel';
+        }
+        $pix = os_field($json, 'pix');
+        $code = os_pix_code(is_array($pix) ? os_field($pix, 'copy_paste') : null);
+        $expires = is_array($pix) ? os_iso_date(os_field($pix, 'expires_at')) : null;
+        // 202: o código ainda está sendo gerado — consulta a cobrança (NUNCA recria).
+        for ($i = 0; $code === null && $i < 6; $i++) {
+            usleep($i === 0 ? 500000 : 800000);
+            $r = os_pix_api('pagpixhub', 'GET', '/transactions/' . rawurlencode($id), $apiKey, null, true);
+            if ($r[0] < 200 || $r[0] >= 300) {
+                if ($r[0] === 404) {
+                    continue;
+                }
+                return os_pix_error($r[0]);
+            }
+            $t = json_decode($r[1], true);
+            $p = is_array($t) ? os_field($t, 'pix') : null;
+            $code = os_pix_code(is_array($p) ? os_field($p, 'copy_paste') : null);
+            if (is_array($p)) {
+                $expires = os_iso_date(os_field($p, 'expires_at'));
+            }
+            $ps = strtolower((string) os_text(is_array($t) ? os_field($t, 'pix_status') : null));
+            if ($ps === 'failed' || $ps === 'expired') {
+                return 'indisponivel';
+            }
+        }
+        if ($code === null) {
+            return 'indisponivel';
+        }
+        return array($id, $code, null, $expires);
+    }
     // BlackCat: produto, bumps e frete como itens (o amount é a soma deles).
     $tangible = $address !== null;
     $items = array(array('title' => os_cut((string) $c['nome'], 120), 'unitPrice' => $c['valor'], 'quantity' => 1, 'tangible' => $tangible));
@@ -1169,6 +1255,19 @@ function os_gateway_status($config, $order)
         $status = os_clownpay_status(os_field($tx, 'status'));
         $external = os_text(os_field($tx, 'external_reference'));
         $amount = os_cents_of(os_field($tx, 'amount'));
+        if (!is_array($tx) || $status === null || os_gateway_id(os_field($tx, 'id')) !== $gid) {
+            return array('erro' => 'indisponivel');
+        }
+    } elseif ($gateway === 'pagpixhub') {
+        $res = os_pix_api('pagpixhub', 'GET', '/transactions/' . rawurlencode($gid), $apiKey, null, true);
+        if ($res[0] < 200 || $res[0] >= 300) {
+            return array('erro' => $res[0] === 404 ? 'sem_cobranca' : os_pix_error($res[0]));
+        }
+        $json = json_decode($res[1], true);
+        $tx = is_array($json) ? $json : null;
+        $status = os_pagpixhub_status(os_field($tx, 'status'));
+        $external = os_text(os_field($tx, 'external_reference'));
+        $amount = os_cents_of(os_field($tx, 'amount_cents'));
         if (!is_array($tx) || $status === null || os_gateway_id(os_field($tx, 'id')) !== $gid) {
             return array('erro' => 'indisponivel');
         }
@@ -1447,7 +1546,7 @@ function os_checkout_access($config, $checkouts, $req, $order)
 function os_webhook($config, $trustProxy)
 {
     $gateway = is_string($_GET[OS_WEBHOOK_PARAM]) ? $_GET[OS_WEBHOOK_PARAM] : '';
-    if ($gateway !== 'flevopay' && $gateway !== 'blackcat' && $gateway !== 'clownpay') {
+    if ($gateway !== 'flevopay' && $gateway !== 'blackcat' && $gateway !== 'clownpay' && $gateway !== 'pagpixhub') {
         os_fail('invalido');
     }
     if (!os_rate_ok('webhook', os_rate_key(os_client_ip($trustProxy), 64), OS_WEBHOOK_LIMIT)) {
@@ -1461,10 +1560,15 @@ function os_webhook($config, $trustProxy)
         os_fail('invalido');
     }
     $json = json_decode($raw, true);
-    $field = $gateway === 'flevopay' ? 'transaction_id' : ($gateway === 'clownpay' ? 'id' : 'transactionId');
-    $gid = os_gateway_id(os_field($json, $field));
-    if ($gid === null) {
-        $gid = os_gateway_id(os_field(os_field($json, 'data'), $field));
+    if ($gateway === 'pagpixhub') {
+        // Envelope { id: <id do evento>, type, data: <transação> }: o id da cobrança está em data.id.
+        $gid = os_gateway_id(os_field(os_field($json, 'data'), 'id'));
+    } else {
+        $field = $gateway === 'flevopay' ? 'transaction_id' : ($gateway === 'clownpay' ? 'id' : 'transactionId');
+        $gid = os_gateway_id(os_field($json, $field));
+        if ($gid === null) {
+            $gid = os_gateway_id(os_field(os_field($json, 'data'), $field));
+        }
     }
     $pointer = $gid === null ? null : os_record_read('cobranca|' . $gateway . '|' . $gid);
     $pedido = os_text(os_field($pointer, 'pedido'));

@@ -53,6 +53,7 @@ import { clownpayGateway } from "../clownpay";
 import { flevopayGateway } from "../flevopay";
 import { isObj } from "../http";
 import { kyvoGateway } from "../kyvo";
+import { pagpixhubGateway } from "../pagpixhub";
 import type {
   ServerlessCheckoutProduct,
   ServerlessConfig,
@@ -86,6 +87,7 @@ const ADAPTERS: Record<ServerlessProvider, PaymentGatewayAdapter> = {
   FLEVOPAY: flevopayGateway,
   BLACKCAT: blackcatGateway,
   CLOWNPAY: clownpayGateway,
+  PAGPIXHUB: pagpixhubGateway,
   KYVO: kyvoGateway,
 };
 

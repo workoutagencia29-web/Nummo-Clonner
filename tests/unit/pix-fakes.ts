@@ -44,6 +44,8 @@ export const BLACKCAT_KEY_DOWN = "bc_live_blackcatForaDoAr0123456789ab";
 export const CLOWNPAY_KEY = "cp_live_testeFalsoDoOfferStudio0123456";
 export const CLOWNPAY_KEY_KYC = "cp_live_contaEmAnaliseKyc0123456789ab";
 export const CLOWNPAY_KEY_DOWN = "cp_live_clownpayForaDoAr0123456789ab";
+export const PAGPIXHUB_KEY = "bp_live_testeFalsoDoOfferStudio0123456";
+export const PAGPIXHUB_KEY_DOWN = "bp_live_pagpixhubForaDoAr0123456789ab";
 
 /** Código PIX de exemplo (formato EMV do "copia e cola"). */
 export const FAKE_PIX_CODE =
@@ -416,5 +418,123 @@ export function startFakeClownpay(): Promise<FakePix> {
       });
     }
     return send(res, 404, { error: "not_found", message: "Rota não encontrada" });
+  });
+}
+
+// ─── PagPixHub ─────────────────────────────────────────────────────────────────
+
+/** Como o FakePix, mais `generatingOnce()`: a próxima criação vem 202 "gerando". */
+export interface FakePagpixhub extends FakePix {
+  /** Força a PRÓXIMA criação a vir 202 (pix.copy_paste null); o código fica pronto na 1ª consulta. */
+  generatingOnce(): void;
+}
+
+export async function startFakePagpixhub(): Promise<FakePagpixhub> {
+  // Idempotency-Key → id da cobrança (repetir devolve a mesma, como o PagPixHub).
+  const idempo = new Map<string, string>();
+  // Ids de cobranças ainda "gerando" (a 1ª consulta já devolve o código pronto).
+  const generating = new Set<string>();
+  let pending = false;
+  const pixOf = (tx: FakeTx, expires: string) => ({
+    id: tx.id,
+    public_id: `pag-pix-${tx.amount}-${tx.id.replace(/\D+/g, "").padStart(10, "0").slice(-10)}`,
+    object: "transaction",
+    status: tx.status,
+    pix_status: tx.status === "PAID" ? "paid" : "ready",
+    method: "pix",
+    amount_cents: tx.amount,
+    fee_cents: Math.round(tx.amount * 0.01),
+    net_cents: tx.amount - Math.round(tx.amount * 0.01),
+    currency: "BRL",
+    external_reference: tx.reference,
+    end_to_end_id: tx.paidAt ? "E00000000202610210000000000000" : null,
+    paid_at: tx.paidAt,
+    created_at: tx.createdAt,
+    updated_at: tx.createdAt,
+    pix: { copy_paste: FAKE_PIX_CODE, qr_code: null, expires_at: expires },
+  });
+  const fake = await startFake("/api/v1", (req, res, state) => {
+    const auth = req.headers.authorization;
+    const key = typeof auth === "string" && auth.startsWith("Bearer ") ? auth.slice(7) : "";
+    if (key === PAGPIXHUB_KEY_DOWN) return send(res, 503, { error: "service_unavailable", message: "Indisponível" });
+    if (key !== PAGPIXHUB_KEY) return send(res, 401, { error: "unauthorized", message: "Chave inválida" });
+
+    if (req.method === "GET" && req.path === "/me") {
+      return send(res, 200, {
+        id: "acc_fake",
+        email: "loja@exemplo.com.br",
+        name: "Loja Teste",
+        balance_cents: 0,
+        api_card_enabled: false,
+      });
+    }
+    if (req.method === "POST" && req.path === "/transactions") {
+      const b = obj(req.body);
+      const customer = obj(b.customer);
+      const invalid = (field: string) =>
+        send(res, 422, { error: { code: "validation_error", message: field, details: {} } });
+      const idem = req.headers["idempotency-key"];
+      if (typeof idem === "string" && idem && idempo.has(idem)) {
+        const tx = state.transactions.get(idempo.get(idem) as string);
+        if (tx) {
+          const gen = generating.has(tx.id);
+          const body = pixOf(tx, new Date(Date.now() + 3600_000).toISOString());
+          if (gen) {
+            body.pix_status = "generating";
+            body.pix.copy_paste = null as unknown as string;
+            return send(res, 202, body);
+          }
+          return send(res, 200, body);
+        }
+      }
+      if (b.method !== undefined && b.method !== "pix") return invalid("method");
+      const amount = b.amount_cents;
+      if (typeof amount !== "number" || !Number.isInteger(amount) || amount < 500) return invalid("amount_cents");
+      const doc = digits(customer.cpf);
+      if (
+        !customer.name ||
+        !customer.email ||
+        !(doc.length === 11 || doc.length === 14) ||
+        digits(customer.phone).length < 10
+      ) {
+        return invalid("customer");
+      }
+      const id = `txn_${String(state.next()).padStart(6, "0")}`;
+      const now = new Date();
+      const tx: FakeTx = {
+        id,
+        reference: typeof b.external_reference === "string" ? b.external_reference : "",
+        status: "PENDING",
+        amount,
+        createdAt: now.toISOString(),
+        paidAt: null,
+        body: b,
+      };
+      state.transactions.set(id, tx);
+      if (typeof idem === "string" && idem) idempo.set(idem, id);
+      const expires = new Date(now.getTime() + 3600_000).toISOString();
+      if (pending) {
+        pending = false;
+        generating.add(id);
+        const body = pixOf(tx, expires);
+        body.pix_status = "generating";
+        body.pix.copy_paste = null as unknown as string;
+        return send(res, 202, body);
+      }
+      return send(res, 200, pixOf(tx, expires));
+    }
+    const one = /^\/transactions\/([^/]+)$/.exec(req.path);
+    if (req.method === "GET" && one) {
+      const tx = state.transactions.get(decodeURIComponent(one[1]));
+      if (!tx) return send(res, 404, { error: { code: "not_found", message: "Não encontrada" } });
+      generating.delete(tx.id); // a 1ª consulta já entrega o código pronto
+      return send(res, 200, pixOf(tx, new Date(Date.now() + 3600_000).toISOString()));
+    }
+    return send(res, 404, { error: { code: "not_found", message: "Rota não encontrada" } });
+  });
+  return Object.assign(fake, {
+    generatingOnce() {
+      pending = true;
+    },
   });
 }

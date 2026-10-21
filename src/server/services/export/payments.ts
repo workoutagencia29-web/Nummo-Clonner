@@ -114,6 +114,7 @@ export async function zipPaymentConfig(
           flevopay: await zipCheckoutKey(checkout, "FLEVOPAY"),
           blackcat: await zipCheckoutKey(checkout, "BLACKCAT"),
           clownpay: await zipCheckoutKey(checkout, "CLOWNPAY"),
+          pagpixhub: await zipCheckoutKey(checkout, "PAGPIXHUB"),
         }
       : {},
     checkouts: checkout ? zipCheckouts(checkout, pageDirs) : [],
