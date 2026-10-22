@@ -159,7 +159,7 @@ form[data-os-widget=lead-form]:is([data-os-webhook=""],:not([data-os-webhook])):
 [data-os-widget=quiz] [data-os-qz-step]{position:relative;border-radius:14px;outline:2px dashed #c4b5fd;outline-offset:6px}
 [data-os-widget=quiz] [data-os-qz-step][data-os-qz-badge]::before{content:attr(data-os-qz-badge);${LABEL}}
 [data-os-widget=wheel][data-os-wh-badge]::before{content:attr(data-os-wh-badge);${LABEL}width:auto;max-width:100%;margin:0 auto 16px;background:#fef3c7;color:#92400e;text-align:center}
-[data-os-widget=wheel] [data-os-wh-result]{outline:2px dashed #86efac;outline-offset:6px}
+[data-os-widget=wheel] [data-os-wh-result]{position:static!important;inset:auto!important;padding:0!important;background-color:transparent!important;outline:2px dashed #86efac;outline-offset:6px}
 [data-os-widget=wheel] [data-os-wh-result]::before{content:"Resultado (aparece depois do giro)";${LABEL}margin:0 auto 12px}
 [data-os-widget=wheel] [data-os-wh-lose]{margin-top:14px;padding-top:12px;border-top:1px dashed #86efac}
 [data-os-widget=wheel] [data-os-wh-lose]::before{content:"Quem cair numa fatia sem prêmio vê:";${LABEL}margin:0 auto 8px}

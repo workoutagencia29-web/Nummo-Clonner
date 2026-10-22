@@ -48,7 +48,7 @@ import {
 } from "@/lib/wheel";
 import { copyText, markPrizeOn, prizeMap, savePrize, swapCheckouts } from "./prize";
 import { t, tf } from "./texts";
-import { flag, load, markAutoScroll, reducedMotion, save, widgets } from "./util";
+import { flag, load, reducedMotion, save, widgets } from "./util";
 
 /** Duração do giro (ms). */
 export const SPIN_MS = 5200;
@@ -149,7 +149,12 @@ function setup(wheel: HTMLElement) {
   // Segunda chance: se o 1º giro não ganhar, abre o modal "mais uma chance" e deixa girar de novo.
   const againBox = q("[data-os-wh-again]");
   const respin = q<HTMLButtonElement>(".os-wh-respin");
+  const closeBtn = q<HTMLButtonElement>("[data-os-wh-close]");
   const canSecond = flag(wheel, "second-chance", false) && !!againBox && !!respin;
+  // "Girar até ganhar": ao cair numa fatia sem prêmio, gira de novo até cair num
+  // desconto (com um teto de segurança, e só se existe alguma fatia com prêmio).
+  const MAX_SPINS = 12;
+  const winnable = slices.some((s) => !s.lose);
   const reduced = reducedMotion();
   // Separada por oferta: duas ofertas no mesmo domínio não dividem o giro.
   const memory = scopedKey(`os_roleta_${sliceSignature(slices)}`, wheel.getAttribute(SCOPE_ATTR) || "");
@@ -180,7 +185,7 @@ function setup(wheel: HTMLElement) {
   let rotation = 0;
   let busy = false; // uma animação de giro em andamento
   let finished = false; // o ciclo acabou (resultado final mostrado)
-  let attempt = 0; // giros feitos neste ciclo (1 ou 2)
+  let attempt = 0; // giros feitos neste ciclo (1, 2, 3…)
   let won: WheelSlice | null = null;
 
   const emit = (kind: WheelEventDetail["kind"], s: WheelSlice) => {
@@ -235,18 +240,13 @@ function setup(wheel: HTMLElement) {
       : tf("whWon", "Você ganhou {p}!", { p: s.text }) +
         (s.coupon ? tf("whCode", " Seu cupom: {c}.", { c: s.coupon }) : "");
     if (!s.lose && !reduced) confetti();
+    // Resultado é um modal no meio da tela: foca o "Resgatar", sem rolar a página.
     const target = go || result;
     if (!target) return;
     try {
       target.focus({ preventScroll: true });
     } catch {
       target.focus();
-    }
-    // Resultado fora da tela: sobe até ele ficar no fim da tela (a roda, parada no prêmio, aparece em cima).
-    const box = (result || target).getBoundingClientRect();
-    if (box.bottom > innerHeight || box.top < 0) {
-      markAutoScroll();
-      (result || target).scrollIntoView({ behavior: reduced ? "auto" : "smooth", block: "end" });
     }
   };
 
@@ -260,14 +260,17 @@ function setup(wheel: HTMLElement) {
   }
   const mi = memo && typeof memo.i === "number" ? memo.i : -1;
   const mu = memo && typeof memo.u === "number" ? memo.u : 0;
-  if (memo && memo.a === 1 && canSecond && mi >= 0 && mi < slices.length) {
-    attempt = 1;
+  const ma = memo && typeof memo.a === "number" ? memo.a : 0;
+  if (ma >= 1 && canSecond && mi >= 0 && mi < slices.length) {
+    attempt = ma;
     rotate(stopRotation(mi, slices.length, 0, 0, 0.5), 0);
     lockSpin();
     openAgain();
   } else if (mi >= 0 && mi < slices.length && mu > Date.now()) {
     rotate(stopRotation(mi, slices.length, 0, 0, 0.5), 0);
     show(mi, mu, false);
+    // Já tinha fechado o modal de resultado: a roda fica parada no prêmio, sem o modal.
+    if (memo && (memo as { c?: unknown }).c && result) result.hidden = true;
   }
 
   const runSpin = () => {
@@ -282,10 +285,11 @@ function setup(wheel: HTMLElement) {
     const s = slices[i];
     const now = Date.now();
     const until = now + days * DAY;
-    // 1º giro sem prêmio + 2ª chance ligada: abre o modal "mais uma chance" em vez do resultado final.
-    const toSecond = attempt === 1 && !!s.lose && canSecond;
+    // Caiu numa fatia sem prêmio e ainda dá para girar de novo: abre o modal "gire de
+    // novo" em vez do resultado (gira até ganhar, respeitando o teto de segurança).
+    const toSecond = !!s.lose && canSecond && winnable && attempt < MAX_SPINS;
     if (toSecond) {
-      save(memory, JSON.stringify({ i, at: now, a: 1 }));
+      save(memory, JSON.stringify({ i, at: now, a: attempt }));
     } else {
       save(memory, JSON.stringify({ i, u: until, at: now }));
       if (!s.lose && s.link) savePrize(prizeId(s), until, s.text, s.coupon);
@@ -325,6 +329,16 @@ function setup(wheel: HTMLElement) {
   };
   for (let i = 0; i < spinButtons.length; i++) spinButtons[i].addEventListener("click", triggerSpin);
   respin?.addEventListener("click", triggerSpin);
+  // Fechar o modal de resultado: esconde e lembra (recarregar não mostra de novo).
+  closeBtn?.addEventListener("click", () => {
+    if (result) result.hidden = true;
+    try {
+      const m = JSON.parse(load(memory) || "null");
+      if (m) save(memory, JSON.stringify({ ...m, c: 1 }));
+    } catch {
+      // sem memória: só esconde o modal
+    }
+  });
 
   // "Resgatou": só quem ganhou um prêmio (quem caiu em "Sem prêmio" só continua para a oferta).
   go?.addEventListener("click", () => {

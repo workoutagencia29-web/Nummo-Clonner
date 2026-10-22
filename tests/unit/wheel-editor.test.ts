@@ -202,9 +202,21 @@ describe("bloco Roleta de desconto", () => {
     expect(await count()).toBe(0); // desligada: um campo de chance por fatia
     await setSecond("1");
     expect(await count()).toBe(4); // ligada: a chance do 2º giro por fatia (4 fatias)
-    expect(await label2()).toBe("Chance no 2º giro da fatia 1 (%)");
+    expect(await label2()).toBe("Chance ao girar de novo da fatia 1 (%)");
     await setSecond("0");
     expect(await count()).toBe(0); // desligou de novo: somem
+  });
+
+  it("Fatias “Tente novamente”: o número cria/remove fatias sem prêmio (giro extra) e liga o girar-até-ganhar", async () => {
+    await setTrait(page, WHEEL, "os-wh-loses", "2");
+    expect((await slices(page)).filter((s) => s.lose).length).toBe(2);
+    expect((await attrs(page, WHEEL))["data-os-second-chance"]).toBe("1");
+    // Continua tendo prêmios (nunca some o último).
+    expect((await slices(page)).filter((s) => !s.lose).length).toBeGreaterThanOrEqual(1);
+    // Volta a 0: as fatias “Tente novamente” somem e desliga o girar-até-ganhar.
+    await setTrait(page, WHEEL, "os-wh-loses", "0");
+    expect((await slices(page)).filter((s) => s.lose).length).toBe(0);
+    expect((await attrs(page, WHEEL))["data-os-second-chance"]).toBe("0");
   });
 
   it("prêmio: link da oferta, “Sem prêmio” e “＋ Criar link da oferta…” (liga a fatia ao link novo); o aviso do canvas acompanha", async () => {

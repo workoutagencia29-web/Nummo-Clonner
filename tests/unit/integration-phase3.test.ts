@@ -169,7 +169,9 @@ describe("script das páginas (widgets + clones)", () => {
     // toque): +~1,6 KB (hoje ~52,7 KB).
     // Segunda chance da roleta (modal "mais uma chance", 2º giro real com chance
     // própria por fatia — chance2): +~0,6 KB (hoje ~53,5 KB).
-    expect(script.length).toBeLessThan(53.6 * 1024);
+    // Girar até ganhar + resultado como modal no meio da tela (botão ×, fechar e
+    // lembrar): +~0,15 KB (hoje ~53,7 KB).
+    expect(script.length).toBeLessThan(54 * 1024);
     // Só ASCII: numa hospedagem que serve a página como latin-1, um caractere cru
     // dentro de uma expressão regular pode virar um intervalo inválido e derrubar o
     // script inteiro (o esbuild escapa textos, mas não o que está dentro de regex).

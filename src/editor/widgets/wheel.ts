@@ -201,6 +201,42 @@ const secondOnOf = (wheel: Component) => wheel.getAttributes()["data-os-second-c
 /** Chance do 2º giro de cada fatia (ausente = usa a do 1º). */
 const chances2Of = (slices: WheelSlice[]) => slices.map((s) => s.chance2 ?? s.chance);
 
+/** Cor padrão das fatias "Tente novamente" (giro extra). */
+const LOSE_COLOR = "#111318";
+
+/**
+ * Deixa a roleta com `n` fatias "Tente novamente" (giro extra), intercaladas com os
+ * prêmios, e liga/desliga o "girar de novo até ganhar" (data-os-second-chance). Mantém
+ * pelo menos 1 prêmio e o total em WHEEL_MIN_SLICES … WHEEL_MAX_SLICES.
+ */
+function setLoseCount(wheel: Component, n: number) {
+  const slices = wheelSlices(wheel);
+  const wins = slices.filter((s) => !s.lose);
+  const loses = slices.filter((s) => s.lose);
+  const room = Math.max(0, WHEEL_MAX_SLICES - Math.max(wins.length, 1));
+  const target = Math.max(0, Math.min(Number.isFinite(n) ? Math.round(n) : 0, room));
+  if (target === loses.length) {
+    wheel.addAttributes({ "data-os-second-chance": target > 0 ? "1" : "0" });
+    return;
+  }
+  const extra: WheelSlice[] = [];
+  for (let i = 0; i < target; i++)
+    extra.push(loses[i] ?? cleanSlice({ text: "Tente novamente", color: LOSE_COLOR, chance: 20, lose: true }, i));
+  // Intercala os "Tente novamente" entre os prêmios (visual equilibrado).
+  const w = [...wins];
+  const l = [...extra];
+  const combined: WheelSlice[] = [];
+  const totalCount = w.length + l.length;
+  for (let i = 0; i < totalCount; i++) {
+    const placed = combined.filter((s) => s.lose).length;
+    const ideal = ((i + 1) * l.length) / Math.max(totalCount, 1);
+    if (l.length && (placed < ideal || !w.length)) combined.push(l.shift() as WheelSlice);
+    else combined.push(w.shift() as WheelSlice);
+  }
+  if (combined.length >= WHEEL_MIN_SLICES) setWheelSlices(wheel, combined);
+  wheel.addAttributes({ "data-os-second-chance": target > 0 ? "1" : "0" });
+}
+
 /** Valor de um campo, sem mexer no que já está igual (o cursor fica onde está). */
 function setValue(input: HTMLInputElement | HTMLSelectElement | null, value: string) {
   if (input && input.value !== value) input.value = value;
@@ -235,7 +271,7 @@ function refreshSlices(box: HTMLElement, slices: WheelSlice[]) {
       secondOn ? " do 1º giro" : "",
     );
   const sum2 = box.querySelector(".os-sl-sum2");
-  if (sum2) sum2.textContent = sumText(chances2Of(slices), " do 2º giro");
+  if (sum2) sum2.textContent = sumText(chances2Of(slices), " ao girar de novo");
 }
 
 /**
@@ -341,7 +377,7 @@ function renderSlices(editor: Editor, box: HTMLElement, wheel: Component, notice
       return row;
     };
     const oddsRows = secondOn
-      ? [chanceRow("chance", "Chance no 1º giro"), chanceRow("chance2", "Chance no 2º giro")]
+      ? [chanceRow("chance", "Chance no 1º giro"), chanceRow("chance2", "Chance ao girar de novo")]
       : [chanceRow("chance", "Chance")];
 
     const prize = el("select", "os-sl-prize");
@@ -527,12 +563,24 @@ const WHEEL_TRAITS: TraitDef[] = [
       goOf(component)?.addAttributes({ "data-os-lose-label": String(value ?? "").trim() });
     },
   },
-  heading("Segunda chance", "wh-again"),
-  checkAttr(
-    "data-os-second-chance",
-    "Dar uma segunda chance: quando o 1º giro não ganha, abre “mais uma chance” e deixa girar de novo. Em Fatias você define a chance do 1º giro e a do 2º giro de cada fatia (piso de 1% nos dois — todo prêmio continua possível)",
-    false,
-  ),
+  heading("Tente novamente (giro extra)", "wh-again"),
+  {
+    type: "number",
+    name: "os-wh-loses",
+    label: "Fatias “Tente novamente” — a pessoa gira de novo até ganhar (fica sempre 1 prêmio)",
+    min: 0,
+    max: WHEEL_MAX_SLICES - 1,
+    step: 1,
+    placeholder: "0",
+    getValue: ({ component }) => {
+      const wheel = wheelOf(component);
+      return wheel ? String(wheelSlices(wheel).filter((s) => s.lose).length) : "0";
+    },
+    setValue: ({ component, value }) => {
+      const wheel = wheelOf(component);
+      if (wheel) setLoseCount(wheel, Number(String(value ?? "").replace(",", ".")));
+    },
+  },
   heading("Prêmio na página de vendas", "wh-premio"),
   numberAttr("data-os-days", "Prêmio guardado por (dias)", 1, 365),
   checkAttr("data-os-banner", "Mostrar a faixa “Você ganhou…” no topo da página de vendas", true),
@@ -634,7 +682,8 @@ export function registerWheelTypes(editor: Editor) {
         !(
           node.hasAttribute?.("data-os-wh-spin") ||
           node.hasAttribute?.("data-os-wh-copy") ||
-          node.hasAttribute?.("data-os-wh-respin")
+          node.hasAttribute?.("data-os-wh-respin") ||
+          node.hasAttribute?.("data-os-wh-close")
         )
       )
         return false;
@@ -655,6 +704,7 @@ export function registerWheelTypes(editor: Editor) {
         const a = this.getAttributes();
         if (a["data-os-wh-copy"] !== undefined) return "Botão Copiar";
         if (a["data-os-wh-respin"] !== undefined) return "Botão Girar de novo";
+        if (a["data-os-wh-close"] !== undefined) return "Botão Fechar";
         return "Botão Girar";
       },
     },
