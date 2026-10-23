@@ -58,9 +58,22 @@ export const WHEEL_CSS = [
   ".os-wheel .os-wh-disc{position:relative;width:100%;aspect-ratio:1/1;border-radius:50%;color:var(--os-wh-rim);box-shadow:0 22px 40px -18px rgba(15,23,42,.6);transform:rotate(0deg)}",
   ".os-wheel .os-wh-disc svg{display:block;width:100%;height:100%;overflow:visible;font-family:inherit}",
   ".os-wheel .os-wh-ptr{position:absolute;top:0;left:50%;z-index:2;width:0;height:0;margin-left:-17px;border-left:17px solid transparent;border-right:17px solid transparent;border-top-width:34px;border-top-style:solid;border-top-color:var(--os-wh-ptr);filter:drop-shadow(0 3px 3px rgba(0,0,0,.35))}",
-  // Centro "GIRE": botão redondo dourado com aro branco e contorno da borda (gira a roleta, como o botão de baixo).
-  ".os-wheel .os-wh-hub{position:absolute;top:50%;left:50%;z-index:1;display:flex;align-items:center;justify-content:center;width:23%;aspect-ratio:1/1;padding:0;border:0;border-radius:50%;background-color:var(--os-wh-gold);color:#5b3d12;font-family:inherit;font-size:17px;font-weight:900;line-height:1;letter-spacing:.06em;text-transform:uppercase;cursor:pointer;transform:translate(-50%,-50%);box-shadow:0 0 0 7px #fff,0 0 0 9px var(--os-wh-rim),0 7px 16px rgba(0,0,0,.4)}",
+  // Centro "GIRE": botão-moeda dourado (gira a roleta, como o botão de baixo). Dourado
+  // metálico com brilho em cima e sombra embaixo (gradiente translúcido sobre a cor do
+  // centro, funciona com qualquer cor), relevo 3D (inset), aro branco + fio dourado +
+  // contorno da borda, letra com baixo-relevo. O gradiente/relevo usa só propriedades
+  // simples (background-image, box-shadow) com a cor do centro em var() — não some no GrapesJS.
+  ".os-wheel .os-wh-hub{position:absolute;top:50%;left:50%;z-index:1;display:flex;align-items:center;justify-content:center;width:23%;aspect-ratio:1/1;padding:0;border:0;border-radius:50%;background-color:var(--os-wh-gold);background-image:radial-gradient(circle at 34% 28%,rgba(255,255,255,.6),rgba(255,255,255,0) 54%),radial-gradient(circle at 70% 80%,rgba(60,36,8,.42),rgba(60,36,8,0) 60%);color:#4a3109;font-family:inherit;font-size:18px;font-weight:900;line-height:1;letter-spacing:.1em;text-transform:uppercase;text-shadow:0 1px 1px rgba(255,255,255,.5);cursor:pointer;transform:translate(-50%,-50%);transition:filter .15s ease;box-shadow:inset 0 3px 5px rgba(255,255,255,.55),inset 0 -5px 8px rgba(60,36,8,.4),0 0 0 4px #fff,0 0 0 6px var(--os-wh-gold),0 0 0 9px var(--os-wh-rim),0 9px 20px rgba(0,0,0,.45)}",
   ".os-wheel .os-wh-hub:disabled{cursor:default}",
+  ".os-wheel .os-wh-hub:hover{filter:brightness(1.06)}",
+  // Pulso dourado saindo do centro (chama para o clique = conversão). Aro na cor do
+  // centro (border-color em var, longhand) que cresce e some. Só na página com JS
+  // (classe os-wh-on) e enquanto NÃO está girando (:not(:disabled)); no editor e sem JS
+  // fica invisível (opacity 0). z-index -1: emana por trás da moeda, por cima das fatias.
+  '.os-wheel .os-wh-hub::after{content:"";position:absolute;left:0;top:0;width:100%;height:100%;border-radius:50%;border-style:solid;border-width:3px;border-color:var(--os-wh-gold);opacity:0;z-index:-1;pointer-events:none}',
+  ".os-wheel.os-wh-on .os-wh-hub:not(:disabled)::after{animation:os-wh-pulse 2.1s ease-out infinite}",
+  "@keyframes os-wh-pulse{0%{opacity:.55;transform:scale(1)}70%{opacity:0;transform:scale(1.55)}100%{opacity:0;transform:scale(1.55)}}",
+  "@media (prefers-reduced-motion:reduce){.os-wheel .os-wh-hub::after{animation:none}}",
   ".os-wheel .os-wh-spin{display:block;width:100%;max-width:340px;margin:22px auto 0;padding:18px 20px;border:0;border-radius:16px;background-color:var(--os-wh-cta);color:#fff;font-family:inherit;font-size:20px;font-weight:900;line-height:1.2;letter-spacing:.03em;text-transform:uppercase;cursor:pointer;box-shadow:0 14px 28px -14px var(--os-wh-cta),inset 0 -4px 0 rgba(0,0,0,.18)}",
   ".os-wheel .os-wh-spin:disabled{opacity:.6;cursor:default}",
   ".os-wheel .os-wh-spin:focus-visible,.os-wheel .os-wh-hub:focus-visible,.os-wheel .os-wh-respin:focus-visible,.os-wheel .os-wh-copy:focus-visible,.os-wheel .os-wh-go:focus-visible{outline-width:3px;outline-style:solid;outline-color:var(--os-wh-rim);outline-offset:3px}",
