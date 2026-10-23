@@ -229,8 +229,16 @@ export function wheelSvg(slices: WheelSlice[]): string {
   // fatias ficam no mesmo raio (centralizadas igual, curtas ou longas). Antes o
   // texto ancorava na borda (x=±91) e crescia para dentro: número curto ficava
   // colado na borda e "novamente" entrava embaixo do botão central.
+  //
+  // Centragem NA ALTURA sem `dominant-baseline`: o Safari (iPhone) trata o
+  // dominant-baseline="central" diferente do Chrome, e com vários tspan + dy cada
+  // bloco escorregava uma quantidade diferente (ficava torto SÓ no celular; no
+  // "inspecionar" do PC continua Chrome, por isso parecia certo). Aqui usamos a
+  // baseline alfabética (padrão, idêntica em todo navegador) e posicionamos o dy em
+  // unidades do tamanho da fonte. CAP = altura aproximada das maiúsculas/dígitos.
   const TR = 66.5;
   const MAXW = 55;
+  const CAP = 0.7;
   slices.forEach((s, i) => {
     const mid = (i + 0.5) * seg - 90;
     // Na metade esquerda o texto vira 180° (lido sem ficar de cabeça para baixo).
@@ -247,22 +255,35 @@ export function wheelSvg(slices: WheelSlice[]): string {
       const big = r2(Math.min(fs * 1.9, MAXW / (value[0].length * 0.78)));
       const small = r2(Math.min(big * 0.46, fs * 0.82, MAXW / (value[1].length * 0.64)));
       topSize = big;
-      // dy1 = -0.59*small centra o conjunto (número + descrição) na altura da
-      // fatia: o número é mais alto, então sem esse ajuste o bloco fica um
-      // pouquinho acima do meio (medido no navegador).
+      // Conjunto número + descrição centrado em y=0: a baseline do número fica em
+      // dy1 e a da descrição dy2 abaixo; as duas somam a altura das maiúsculas +
+      // um respiro, repartida igual acima e abaixo do meio.
+      // +big*0.085: o número grande e pesado tem a caixa de glifo um pouco mais
+      // alta que CAP; esse ajuste (medido nos dois motores) deixa o conjunto no
+      // meio exato, igual em Chrome e Safari.
+      const gap = small * 0.18;
+      const dy1 = r2((CAP * big) / 2 - gap / 2 - (CAP * small) / 2 + big * 0.085);
+      const dy2 = r2(gap + CAP * small);
       spans =
-        `<tspan x="${x}" dy="${r2(-small * 0.59)}" font-size="${big}" font-weight="900">${escXml(value[0])}</tspan>` +
-        `<tspan x="${x}" dy="${r2(big * 0.62 + small * 0.52)}" font-size="${small}" font-weight="800">${escXml(value[1])}</tspan>`;
+        `<tspan x="${x}" dy="${dy1}" font-size="${big}" font-weight="900">${escXml(value[0])}</tspan>` +
+        `<tspan x="${x}" dy="${dy2}" font-size="${small}" font-weight="800">${escXml(value[1])}</tspan>`;
     } else {
       // Sem número no começo ("Tente novamente"): até duas linhas, mesmo tamanho.
       const ls = lines(s.text);
       const longest = Math.max(...ls.map((l) => l.length), 1);
       topSize = r2(Math.min(fs, MAXW / (longest * 0.64)));
-      const dy = ls.length > 1 ? -topSize * 0.55 : 0;
-      spans = ls.map((l, k) => `<tspan x="${x}" dy="${k ? r2(topSize * 1.1) : r2(dy)}">${escXml(l)}</tspan>`).join("");
+      if (ls.length > 1) {
+        // Duas linhas centradas em y=0 (distância entre as bases = 1,1 do tamanho).
+        spans =
+          `<tspan x="${x}" dy="${r2((CAP * topSize) / 2 - 0.55 * topSize)}">${escXml(ls[0])}</tspan>` +
+          `<tspan x="${x}" dy="${r2(topSize * 1.1)}">${escXml(ls[1])}</tspan>`;
+      } else {
+        // Uma linha: baseline meia-maiúscula abaixo do meio.
+        spans = `<tspan x="${x}" dy="${r2((CAP * topSize) / 2)}">${escXml(ls[0])}</tspan>`;
+      }
     }
     parts.push(
-      `<text transform="rotate(${r2(left ? mid + 180 : mid)})" text-anchor="middle" dominant-baseline="central" font-size="${topSize}" font-weight="800" fill="${ink}">${spans}</text>`,
+      `<text transform="rotate(${r2(left ? mid + 180 : mid)})" text-anchor="middle" font-size="${topSize}" font-weight="800" fill="${ink}">${spans}</text>`,
     );
   });
   const label = `Roleta com ${n} fatias: ${slices.map((s) => s.text).join(", ")}`;
