@@ -30,6 +30,7 @@ import { resolveCodeCategoryFull } from "@/lib/tracking/code-trackers-server";
 import { gateCode, injectTracking } from "@/lib/tracking/inject";
 import type { TrackingRuntimeConfig } from "@/lib/tracking/runtime-config";
 import type { CodeCategoryId } from "@/lib/tracking/schema";
+import { parseSlices, wheelSvg } from "@/lib/wheel";
 import { applyWheelPrizes, type WheelRender } from "@/lib/wheel-prizes";
 
 /**
@@ -203,8 +204,41 @@ function withVersion(
   return { links: versioned, wheel: { ...wheel, prizes } };
 }
 
+/** Decodifica as entidades HTML de um valor de atributo (nomeadas e numéricas). */
+function decodeEntities(s: string): string {
+  return s.replace(/&(#x[0-9a-fA-F]+|#\d+|quot|amp|lt|gt|apos);/g, (m, e: string) => {
+    if (e === "quot") return '"';
+    if (e === "amp") return "&";
+    if (e === "lt") return "<";
+    if (e === "gt") return ">";
+    if (e === "apos") return "'";
+    const code = e[1] === "x" ? Number.parseInt(e.slice(2), 16) : Number.parseInt(e.slice(1), 10);
+    return Number.isFinite(code) ? String.fromCodePoint(code) : m;
+  });
+}
+
+// Pega, de cada roleta, o data-os-slices e o <svg> dentro de [data-os-wh-disc].
+const WHEEL_DISC_RE = /(\bdata-os-slices="([^"]*)"[\s\S]*?<[^>]*\bdata-os-wh-disc\b[^>]*>)\s*<svg[\s\S]*?<\/svg>/g;
+
+/**
+ * Redesenha a roda da roleta (o <svg> dentro de [data-os-wh-disc]) na hora de
+ * renderizar, a partir do data-os-slices — fonte da verdade que o giro na página
+ * também lê. Assim, melhorias no desenho (posição dos números, etc.) valem na
+ * prévia e no ZIP SEM reabrir e salvar cada página: o render sempre usa a versão
+ * mais nova de `wheelSvg`. Só troca o desenho; cor/giro/comportamento não mudam.
+ * Qualquer problema (fatias inválidas) mantém o desenho que já estava.
+ */
+function redrawWheels(html: string): string {
+  if (!html.includes("data-os-wh-disc")) return html;
+  return html.replace(WHEEL_DISC_RE, (match, head: string, slicesAttr: string) => {
+    const slices = parseSlices(decodeEntities(slicesAttr));
+    return slices.length >= 2 ? head + wheelSvg(slices) : match;
+  });
+}
+
 export function renderPageHtml(html: string, opts: RenderOptions) {
   let out = opts.company ? fillCompanyPlaceholders(html, opts.company, opts.currency) : html;
+  out = redrawWheels(out);
   out = out.replace(PAGE_LINK_RE, (_, id: string) => opts.pageHref(id));
   const { links, wheel } = withVersion(opts.links, opts.wheel, opts.tracking?.config.variant?.name);
   out = applyOfferLinks(out, links);
